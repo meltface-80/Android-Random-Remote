@@ -50,9 +50,6 @@ class RemoteApi(
 
         /** Roon rejects a play of more albums than this in one go. */
         const val PLAY_MULTI_MAX = 400
-
-        /** Albums opened in parallel while filling a queue. */
-        const val MULTI_QUEUE_BATCH = 4
     }
 
     /** Zones with a multi-album fill in flight. */
@@ -790,25 +787,29 @@ class RemoteApi(
         try {
             app.albums.open(list[0].first, zone, kind, filter, list[0].second)
 
-            // Small concurrent batches, not one at a time and not all at once:
-            // each open is several browse round-trips on its own session, so an
-            // unbounded fan-out bursts dozens of parallel navigations onto the
-            // single Roon socket that transport shares.
+            // Strictly one at a time, and NOT because it is simpler.
+            //
+            // The queue is ordered, and the order is the user's: they picked
+            // these albums in a sequence and expect to hear them in it.
+            // Queueing them concurrently makes the order whichever thread wins,
+            // which is the same "takes the decision away from the person
+            // holding the phone" failure the radio gate exists to prevent.
+            //
+            // It is also wrong about the transport. Every open is several
+            // browse round-trips over the ONE Roon socket, on browse sessions
+            // that carry position state between calls — so parallel walks
+            // interleave on a stateful protocol rather than going faster.
+            //
+            // A slow, correct queue beats a fast, shuffled one. The bound on
+            // how long this takes is PLAY_MULTI_MAX, not a thread count.
             var failed = 0
             var firstError: String? = null
-            val rest = list.drop(1)
-            for (batch in rest.chunked(MULTI_QUEUE_BATCH)) {
-                val outcomes = batch.map { (offset, expect) ->
-                    java.util.concurrent.CompletableFuture.supplyAsync {
-                        runCatching { app.albums.open(offset, zone, "queue", filter, expect) }
-                    }
-                }.map { it.join() }
-                for (outcome in outcomes) {
-                    outcome.exceptionOrNull()?.let { e ->
+            for ((offset, expect) in list.drop(1)) {
+                runCatching { app.albums.open(offset, zone, "queue", filter, expect) }
+                    .exceptionOrNull()?.let { e ->
                         failed++
                         if (firstError == null) firstError = e.message ?: e.toString()
                     }
-                }
             }
 
             return Json.ok(

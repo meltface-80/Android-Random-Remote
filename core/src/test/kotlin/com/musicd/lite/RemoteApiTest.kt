@@ -306,9 +306,14 @@ class RemoteApiTest {
         assertEquals(0, body.getInt("failed"))
         assertEquals(3, body.getInt("total"))
         assertTrue(body.isNull("first_error"))
-        assertEquals("play_now:playmenu:0@z1", core.invoked.first())
-        assertEquals(3, core.invoked.size)
-        assertTrue(core.invoked.drop(1).all { it.startsWith("queue:") })
+        // The order is the point, not an incidental. The user picked these
+        // albums in a sequence and the queue is ordered, so the fills run one
+        // at a time; queueing them concurrently made this list arbitrary (and
+        // occasionally short, which is how CI found it).
+        assertEquals(
+            listOf("play_now:playmenu:0@z1", "queue:playmenu:1@z1", "queue:playmenu:3@z1"),
+            core.invoked
+        )
     }
 
     @Test
