@@ -49,6 +49,8 @@ class RemoteService : Service() {
             private set
     }
 
+    /** Published from the startup thread; read by the Activity's thread. */
+    @Volatile
     var app: MusicdLite? = null
         private set
 
@@ -60,9 +62,21 @@ class RemoteService : Service() {
         Log.sink = LogcatSink()
         Log.debug = BuildConfig.DEBUG
 
+        // Android gives a foreground service about five seconds to post its
+        // notification, so that goes first and everything slower goes after.
         createChannel()
         startForeground(NOTIFICATION_ID, notification("Starting…", "Looking for your Roon Core"))
+        instance = this
 
+        // Opening the database is disk I/O and binding the server is a syscall;
+        // neither belongs on the main thread. The Activity already waits for
+        // the server's address rather than assuming it exists (see
+        // MainActivity.waitForServer), so starting up asynchronously costs
+        // nothing on screen.
+        Thread({ startUp() }, "musicd-startup").start()
+    }
+
+    private fun startUp() {
         val backing = try {
             AndroidStore(this)
         } catch (e: Exception) {
@@ -73,18 +87,24 @@ class RemoteService : Service() {
         }
         store = backing
 
-        val lite = MusicdLite(
-            store = backing,
-            assets = AndroidAssets(this),
-            artDir = File(cacheDir, "art"),
-            version = BuildConfig.VERSION_NAME,
-            httpPort = 0,
-            multicastLock = WifiMulticastLock()
-        )
-        app = lite
+        val lite = try {
+            MusicdLite(
+                store = backing,
+                assets = AndroidAssets(this),
+                artDir = File(cacheDir, "art"),
+                version = BuildConfig.VERSION_NAME,
+                httpPort = 0,
+                multicastLock = WifiMulticastLock()
+            )
+        } catch (e: Exception) {
+            AndroidLog.e(TAG, "could not start the local server", e)
+            notify("Could not start", "The remote could not open its local server. Reopen the app.")
+            return
+        }
+
         lite.roon.addListener(StatusWatcher())
         lite.start()
-        instance = this
+        app = lite
         AndroidLog.i(TAG, "serving the UI on ${lite.rootUrl}")
     }
 
