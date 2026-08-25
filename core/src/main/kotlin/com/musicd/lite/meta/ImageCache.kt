@@ -21,27 +21,60 @@ import java.security.MessageDigest
  * refetch and nothing else.
  */
 class ImageCache(
-    private val http: OkHttpClient,
+    private val fetcher: Fetcher,
     private val diskDir: File?,
     private val memoryBudgetBytes: Long = 24L * 1024 * 1024
 ) {
 
+    /** Where art comes from when neither tier has it. */
+    fun interface Fetcher {
+        fun fetch(url: String): Art?
+    }
+
+    /** The real one: Roon's image service over plain HTTP. */
+    constructor(
+        http: OkHttpClient,
+        diskDir: File?,
+        memoryBudgetBytes: Long = 24L * 1024 * 1024
+    ) : this(httpFetcher(http), diskDir, memoryBudgetBytes)
+
     private companion object {
         const val TAG = "Art"
+
+        private fun httpFetcher(http: OkHttpClient) = Fetcher { url ->
+            try {
+                http.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.d(TAG, "$url -> ${response.code}")
+                        null
+                    } else {
+                        val body = response.body?.bytes()
+                        if (body == null || body.isEmpty()) null
+                        else Art(response.header("Content-Type") ?: "image/jpeg", body)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "$url failed: ${e.message}")
+                null
+            }
+        }
     }
 
     class Art(val contentType: String, val bytes: ByteArray)
 
+    /**
+     * Access-ordered, so the eldest entry is the least recently *used* rather
+     * than the least recently added — a wall of tiles being scrolled back
+     * through should not evict the art it is about to show again.
+     *
+     * Eviction is the loop in [toMemory] alone. An earlier version also
+     * overrode removeEldestEntry, which never actually ran: that hook fires
+     * during put(), by which point the loop had already brought the total under
+     * budget, so the code that appeared to do the evicting did nothing.
+     */
     private var memoryBytes = 0L
 
-    private val memory = object : LinkedHashMap<String, Art>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Art>?): Boolean {
-            if (eldest == null) return false
-            if (memoryBytes <= memoryBudgetBytes) return false
-            memoryBytes -= eldest.value.bytes.size
-            return true
-        }
-    }
+    private val memory = LinkedHashMap<String, Art>(64, 0.75f, true)
 
     /**
      * A cache filename that cannot collide and cannot escape the directory.
@@ -61,15 +94,20 @@ class ImageCache(
         val previous = memory.put(key, art)
         if (previous != null) memoryBytes -= previous.bytes.size
         memoryBytes += art.bytes.size
-        // Trim by touching the map so removeEldestEntry runs against the budget.
-        while (memoryBytes > memoryBudgetBytes && memory.isNotEmpty()) {
-            val eldest = memory.entries.iterator()
-            if (!eldest.hasNext()) break
-            val e = eldest.next()
-            eldest.remove()
-            memoryBytes -= e.value.bytes.size
+        val entries = memory.entries.iterator()
+        while (memoryBytes > memoryBudgetBytes && entries.hasNext()) {
+            val eldest = entries.next()
+            entries.remove()
+            memoryBytes -= eldest.value.bytes.size
         }
     }
+
+    /** Bytes currently held in the memory tier. For the tests. */
+    @Synchronized
+    internal fun memoryFootprint(): Long = memoryBytes
+
+    @Synchronized
+    internal fun memoryKeys(): Set<String> = LinkedHashSet(memory.keys)
 
     /**
      * @param url the Core's image URL, already carrying the size parameters.
@@ -89,7 +127,7 @@ class ImageCache(
             }
         }
 
-        val art = fetch(url) ?: return null
+        val art = fetcher.fetch(url) ?: return null
         toMemory(cacheKey, art)
         if (file != null) {
             try {
@@ -104,22 +142,6 @@ class ImageCache(
             }
         }
         return art
-    }
-
-    private fun fetch(url: String): Art? = try {
-        http.newCall(Request.Builder().url(url).build()).execute().use { response ->
-            if (!response.isSuccessful) {
-                Log.d(TAG, "$url -> ${response.code}")
-                null
-            } else {
-                val body = response.body?.bytes()
-                if (body == null || body.isEmpty()) null
-                else Art(response.header("Content-Type") ?: "image/jpeg", body)
-            }
-        }
-    } catch (e: Exception) {
-        Log.d(TAG, "$url failed: ${e.message}")
-        null
     }
 
     @Synchronized
