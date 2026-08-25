@@ -94,6 +94,9 @@ original's screens unchanged:
 - **Play history** — kept locally, and what "unheard" and "rediscover" are built
   from. This is the feature that gets better the longer the app is installed.
 - **The wall display** — the `/display` page, for a tablet in a listening room.
+- **Pitchfork** — the Latest and Best New Music listings, with scores, covers
+  and links out to pitchfork.com. No review text is served, here or upstream:
+  the writing is Pitchfork's and the app links to it.
 
 Release years come from MusicBrainz and the write-ups from Wikipedia. Both are
 free and need no key.
@@ -106,14 +109,35 @@ show their own empty state instead of an error.
 
 | Not in this build | Why |
 |---|---|
-| **Record labels** — Label of the Week, the label explorer, label logos, merges | The label index is built by reading tags off a **mounted music directory** and then querying iTunes, MusicBrainz, TheAudioDB, Discogs and FanArt.tv. A phone has no `/music` to mount, so the primary source does not exist — and the rest of that chain is the single largest piece of the original. This is the "lite" in the name. |
+| **Record labels** — Label of the Week, the label explorer, label logos, merges | The label index starts from tags read off a **mounted music directory**, then queries iTunes, MusicBrainz, TheAudioDB, Discogs and FanArt.tv. The phone is not the machine holding the files and Roon's extension API exposes no paths, so that first step has no input here yet — see [Reading your music folder](#reading-your-music-folder). This is the "lite" in the name. |
 | **Qobuz and TIDAL** browsing, favourites, external search | Both need an account login, and TIDAL needs an OAuth device flow. Deferred, not ruled out. |
 | Quality badges (sample rate / bit depth) and source badges | Read from file tags on the mounted music directory. Same missing input as labels. |
 | Playlists, smart playlists, share cards, import | Self-contained features, not yet ported. Their screens list nothing rather than failing. |
-| Pitchfork reviews | Page scraping; not carried over. |
 | In-app self-update | A Docker-era feature. An APK updates by being installed. |
 
 Nothing on that list is a protocol limitation. Labels aside, they are scope.
+
+### Reading your music folder
+
+Labels, and the quality badges with them, are the one feature that needs
+something other than Roon: the tags in your actual files. MusicD-Remote gets
+them by mounting your library read-only into its container, which works because
+it runs on a machine that can see the files.
+
+A phone usually cannot, and Roon does not help — the extension API returns
+titles and image keys, never a path. So the mount is not "impossible on
+Android" so much as **not implemented**, and there are two honest routes:
+
+- **The library is on a NAS or share.** The app could speak SMB directly and
+  read tags over the network. This is the closest match to what the Docker
+  build does and would restore labels in full.
+- **The library is on the phone or an SD card.** Android's Storage Access
+  Framework can hand the app a folder you pick, with no broad storage
+  permission and no root.
+
+Either is real work rather than a setting, and neither is written yet. If your
+music lives somewhere one of them would reach, say which and it can be built —
+the label chain above it is already specified by the original.
 
 ## Build
 
@@ -132,7 +156,7 @@ Needs JDK 17+, Android SDK platform 36 and build-tools 36.0.0. Output lands in
 
 ## Verification
 
-**127 unit tests, all passing.** They run on a plain JVM, which is the point of
+**136 unit tests, all passing.** They run on a plain JVM, which is the point of
 splitting `:core` out: the parts most worth testing are tested without an
 emulator in the loop.
 

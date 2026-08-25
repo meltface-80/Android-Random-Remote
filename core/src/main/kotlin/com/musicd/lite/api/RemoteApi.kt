@@ -1,5 +1,6 @@
 package com.musicd.lite.api
 
+import com.musicd.lite.str
 import com.musicd.lite.Log
 import com.musicd.lite.MusicdLite
 import com.musicd.lite.http.HttpServer
@@ -127,8 +128,7 @@ class RemoteApi(
             "/api/random-albums" -> randomAlbums(request)
             "/api/library/albums" -> libraryAlbums(request)
             "/api/library/facets" -> libraryFacets(request)
-            "/api/library/rescan", "/api/reindex" ->
-                requirePost(post) { app.rebuildIndex("asked for a rescan"); Json.ok() }
+            "/api/library/rescan", "/api/reindex" -> requirePost(post) { rescan() }
             "/api/library-stats" -> Json.obj(
                 JSONObject().put("albums", index.count).put("building", index.isBuilding)
             )
@@ -173,12 +173,29 @@ class RemoteApi(
             "/api/settings/labels" -> labelsSetting(post)
             "/api/display/content" -> displayContent(request)
 
+            "/api/pitchfork/reviews" -> pitchforkReviews(request)
+            "/api/pitchfork/review" -> pitchforkReview(request)
+
             "/api/shortcut/zones" -> zones()
             "/api/shortcut/play-random" -> shortcutPlay(request, unheardOnly = false)
             "/api/shortcut/play-unheard" -> shortcutPlay(request, unheardOnly = true)
 
             else -> notInLite(path)
         }
+    }
+
+    /**
+     * The front-end renders one of Roon's own outcomes as its toast and treats
+     * anything it does not recognise as "Rescan failed", so this reports the
+     * status rather than just acknowledging the request. It also blocks until
+     * the answer is real: "your library is up to date" is only worth saying
+     * once it has actually been checked.
+     */
+    private fun rescan(): Response {
+        val r = app.rescan(force = true)
+        val body = JSONObject().put("status", r.status)
+        r.count?.let { body.put("count", it) }
+        return Json.obj(body)
     }
 
     private inline fun requirePost(isPost: Boolean, body: () -> Response): Response =
@@ -333,15 +350,15 @@ class RemoteApi(
      */
     private fun volume(request: Request): Response {
         val body = Json.body(request)
-        val how = body.optString("how").ifEmpty { "absolute" }
+        val how = body.str("how").ifEmpty { "absolute" }
         val value = body.optDouble("value", Double.NaN)
         if (value.isNaN()) return Json.error(400, "value is required")
 
-        val outputId = body.optString("output_id").takeIf { it.isNotEmpty() }
+        val outputId = body.str("output_id").takeIf { it.isNotEmpty() }
         val targets = if (outputId != null) {
             listOfNotNull(roon.outputs().firstOrNull { it.outputId == outputId })
         } else {
-            val zone = roon.zone(body.optString("zone_or_output_id").takeIf { it.isNotEmpty() })
+            val zone = roon.zone(body.str("zone_or_output_id").takeIf { it.isNotEmpty() })
                 ?: return Json.error(400, "output_id or zone_or_output_id is required")
             zone.volumeOutputs
         }
@@ -362,13 +379,13 @@ class RemoteApi(
 
     private fun zoneSettings(request: Request): Response {
         val body = Json.body(request)
-        val id = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+        val id = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "zone_or_output_id is required")
         val patch = JSONObject()
         if (body.has("shuffle")) patch.put("shuffle", body.optBoolean("shuffle"))
         if (body.has("auto_radio")) patch.put("auto_radio", body.optBoolean("auto_radio"))
         if (body.has("loop")) {
-            val loop = body.optString("loop")
+            val loop = body.str("loop")
             if (loop !in ZoneSettings.LOOP_MODES) {
                 return Json.error(400, "loop must be one of ${ZoneSettings.LOOP_MODES.joinToString(", ")}")
             }
@@ -392,7 +409,7 @@ class RemoteApi(
     private fun groupOutputs(request: Request, group: Boolean): Response {
         val arr = Json.body(request).optJSONArray("output_ids")
             ?: return Json.error(400, "output_ids array is required")
-        val ids = (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotEmpty) }
+        val ids = (0 until arr.length()).mapNotNull { arr.str(it).takeIf(String::isNotEmpty) }
         if (ids.size < (if (group) 2 else 1)) {
             return Json.error(400, if (group) "grouping needs at least two outputs" else "no outputs given")
         }
@@ -402,9 +419,9 @@ class RemoteApi(
 
     private fun transferZone(request: Request): Response {
         val body = Json.body(request)
-        val from = body.optString("from").takeIf { it.isNotEmpty() }
+        val from = body.str("from").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "from is required")
-        val to = body.optString("to").takeIf { it.isNotEmpty() }
+        val to = body.str("to").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "to is required")
         roon.transferZone(from, to)
         return Json.ok()
@@ -412,7 +429,7 @@ class RemoteApi(
 
     private fun playFromHere(request: Request): Response {
         val body = Json.body(request)
-        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+        val zone = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "zone_or_output_id is required")
         val item = body.optLong("queue_item_id", -1)
         if (item < 0) return Json.error(400, "queue_item_id is required")
@@ -422,9 +439,9 @@ class RemoteApi(
 
     private fun outputControl(request: Request, standby: Boolean): Response {
         val body = Json.body(request)
-        val outputId = body.optString("output_id").takeIf { it.isNotEmpty() }
+        val outputId = body.str("output_id").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "output_id is required")
-        val controlKey = body.optString("control_key").takeIf { it.isNotEmpty() }
+        val controlKey = body.str("control_key").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "control_key is required")
         if (standby) roon.standby(outputId, controlKey) else roon.convenienceSwitch(outputId, controlKey)
         return Json.ok()
@@ -640,18 +657,18 @@ class RemoteApi(
         val body = Json.body(request)
         val offset = body.optInt("offset", -1)
         if (offset < 0) return Json.error(400, "offset is required")
-        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+        val zone = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "zone_or_output_id is required")
-        val kind = body.optString("kind").takeIf { it.isNotEmpty() } ?: defaultKind
+        val kind = body.str("kind").takeIf { it.isNotEmpty() } ?: defaultKind
         val r = app.albums.open(
             offset, zone, kind,
             AlbumFilter.parse(
-                body.optString("filter_type"), body.optString("filter_value"),
-                body.optString("filter_parent")
+                body.str("filter_type"), body.str("filter_value"),
+                body.str("filter_parent")
             ),
             Albums.Expect(
-                body.optString("title").takeIf { it.isNotEmpty() },
-                body.optString("subtitle").takeIf { it.isNotEmpty() }
+                body.str("title").takeIf { it.isNotEmpty() },
+                body.str("subtitle").takeIf { it.isNotEmpty() }
             )
         )
         return Json.ok(
@@ -663,21 +680,21 @@ class RemoteApi(
         val body = Json.body(request)
         val offset = body.optInt("offset", -1)
         if (offset < 0) return Json.error(400, "offset is required")
-        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+        val zone = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "zone_or_output_id is required")
         val trackIndex = body.optInt("track_index", -1)
         if (trackIndex < 0) return Json.error(400, "track_index is required")
-        val kind = body.optString("kind").takeIf { it.isNotEmpty() } ?: "play_now"
+        val kind = body.str("kind").takeIf { it.isNotEmpty() } ?: "play_now"
         val (invoked, track) = app.albums.invokeTrack(
-            offset, trackIndex, body.optString("track_title").takeIf { it.isNotEmpty() },
+            offset, trackIndex, body.str("track_title").takeIf { it.isNotEmpty() },
             zone, kind,
             AlbumFilter.parse(
-                body.optString("filter_type"), body.optString("filter_value"),
-                body.optString("filter_parent")
+                body.str("filter_type"), body.str("filter_value"),
+                body.str("filter_parent")
             ),
             Albums.Expect(
-                body.optString("title").takeIf { it.isNotEmpty() },
-                body.optString("subtitle").takeIf { it.isNotEmpty() }
+                body.str("title").takeIf { it.isNotEmpty() },
+                body.str("subtitle").takeIf { it.isNotEmpty() }
             )
         )
         return Json.ok(JSONObject().put("invoked", invoked).put("track", track))
@@ -693,14 +710,14 @@ class RemoteApi(
      */
     private fun playMulti(request: Request): Response {
         val body = Json.body(request)
-        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+        val zone = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "zone_or_output_id is required")
         val arr = body.optJSONArray("albums") ?: return Json.error(400, "albums array is required")
         if (arr.length() == 0) return Json.error(400, "no albums given")
         if (arr.length() > PLAY_MULTI_MAX) {
             return Json.error(400, "at most $PLAY_MULTI_MAX albums at a time")
         }
-        val firstKind = body.optString("kind").takeIf { it.isNotEmpty() } ?: "play_now"
+        val firstKind = body.str("kind").takeIf { it.isNotEmpty() } ?: "play_now"
 
         var queued = 0
         val failed = ArrayList<String>()
@@ -713,13 +730,13 @@ class RemoteApi(
                 app.albums.open(
                     offset, zone, kind, null,
                     Albums.Expect(
-                        a.optString("title").takeIf { it.isNotEmpty() },
-                        a.optString("subtitle").takeIf { it.isNotEmpty() }
+                        a.str("title").takeIf { it.isNotEmpty() },
+                        a.str("subtitle").takeIf { it.isNotEmpty() }
                     )
                 )
                 queued++
             } catch (e: Exception) {
-                failed += a.optString("title").ifEmpty { "offset $offset" }
+                failed += a.str("title").ifEmpty { "offset $offset" }
             }
         }
         if (queued == 0) {
@@ -732,7 +749,7 @@ class RemoteApi(
 
     private fun playUnheard(request: Request): Response {
         val body = Json.body(request)
-        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+        val zone = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "zone_or_output_id is required")
         val months = body.optInt("months", 6).coerceIn(1, 120)
         val pool = view.unplayed(months).ifEmpty { index.albums }
@@ -941,7 +958,7 @@ class RemoteApi(
     private fun radio(request: Request): Response {
         if (request.method == "POST") {
             val body = Json.body(request)
-            val zone = body.optString("zone").takeIf { it.isNotEmpty() }
+            val zone = body.str("zone").takeIf { it.isNotEmpty() }
                 ?: return Json.error(400, "zone is required")
             val enabled = body.optBoolean("enabled", false)
             app.radio.setEnabled(zone, enabled)
@@ -981,9 +998,9 @@ class RemoteApi(
 
     private fun smartPickBlock(request: Request): Response {
         val body = Json.body(request)
-        val title = body.optString("title").takeIf { it.isNotEmpty() }
+        val title = body.str("title").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "title is required")
-        val key = AlbumRecord(0, title, body.optString("subtitle"), null).key
+        val key = AlbumRecord(0, title, body.str("subtitle"), null).key
         store.blockPick(key)
         return Json.ok()
     }
@@ -1006,7 +1023,7 @@ class RemoteApi(
         val seen = HashSet<String>()
         for (i in 0 until arr.length()) {
             val r = arr.optJSONObject(i) ?: continue
-            val id = r.optString("id").takeIf { it in Settings.HOME_ROW_IDS } ?: continue
+            val id = r.str("id").takeIf { it in Settings.HOME_ROW_IDS } ?: continue
             if (!seen.add(id)) continue
             clean += id to r.optBoolean("on", true)
         }
@@ -1110,6 +1127,54 @@ class RemoteApi(
         )
     }
 
+    // ------------------------------------------------------------ pitchfork
+
+    /**
+     * Pitchfork's listings. No review text is served — the client links out to
+     * pitchfork.com to read it, which is the arrangement the original settled
+     * on and the reason this is portable at all.
+     */
+    private fun pitchforkReviews(request: Request): Response {
+        val type = if (request.str("type") == "best") "best" else "latest"
+        val items = app.pitchfork.reviews(type)
+        if (items.isEmpty()) {
+            return Json.error(502, "Couldn't reach Pitchfork just now — try again shortly.")
+        }
+        return Json.obj(
+            JSONObject().put("type", type).put("items", Json.arrayOf(items.map { it.toJson() }))
+        )
+    }
+
+    /**
+     * What the library knows about one listing, so the card can offer to play
+     * it. `review` is always null and the field is kept only so an older client
+     * reading the old shape sees no text rather than undefined.
+     */
+    private fun pitchforkReview(request: Request): Response {
+        val raw = request.str("url") ?: return Json.error(400, "Invalid url")
+        val url = runCatching { java.net.URI(raw) }.getOrNull()
+            ?: return Json.error(400, "Invalid url")
+        if (url.host != "pitchfork.com" || url.path?.startsWith("/reviews/albums/") != true) {
+            return Json.error(400, "Not a Pitchfork album-review URL")
+        }
+        val hit = matchLibraryAlbum(request.str("album"), request.str("artist"))
+        return Json.obj(
+            JSONObject()
+                .put("review", JSONObject.NULL)
+                .put("match", hit?.let { Json.album(it) } ?: JSONObject.NULL)
+        )
+    }
+
+    /**
+     * Pitchfork's album/artist against the library. The artist is only used to
+     * disambiguate when it is known — a wrong match here offers to play the
+     * wrong record.
+     */
+    private fun matchLibraryAlbum(album: String?, artist: String?): AlbumRecord? {
+        if (album.isNullOrBlank()) return null
+        return index.relocate(album, artist) ?: index.relocate(album, null)
+    }
+
     // ---------------------------------------------------------------- image
 
     private fun image(request: Request, rawKey: String): Response {
@@ -1171,10 +1236,6 @@ class RemoteApi(
         // Reading file tags needs a mounted music directory, which a phone
         // does not have.
         path == "/api/music-mount" -> Json.obj(JSONObject().put("mounted", false).put("path", ""))
-
-        // Pitchfork review scraping is not carried over.
-        path.startsWith("/api/pitchfork") ->
-            Json.obj(JSONObject().put("reviews", JSONArray()).put("review", JSONObject.NULL))
 
         // Playlists, sharing and saved lists are not in this build yet. Empty
         // collections keep their screens at "nothing here" rather than an error.

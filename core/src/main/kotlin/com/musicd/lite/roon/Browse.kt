@@ -1,5 +1,6 @@
 package com.musicd.lite.roon
 
+import com.musicd.lite.str
 import com.musicd.lite.Log
 import com.musicd.lite.library.Normalize
 import org.json.JSONObject
@@ -16,11 +17,11 @@ data class BrowseItem(
 ) {
     companion object {
         fun parse(o: JSONObject): BrowseItem = BrowseItem(
-            title = o.optString("title"),
-            subtitle = o.optString("subtitle"),
-            imageKey = o.optString("image_key").takeIf { it.isNotEmpty() },
-            itemKey = o.optString("item_key").takeIf { it.isNotEmpty() },
-            hint = o.optString("hint").takeIf { it.isNotEmpty() }
+            title = o.str("title"),
+            subtitle = o.str("subtitle"),
+            imageKey = o.str("image_key").takeIf { it.isNotEmpty() },
+            itemKey = o.str("item_key").takeIf { it.isNotEmpty() },
+            hint = o.str("hint").takeIf { it.isNotEmpty() }
         )
     }
 }
@@ -167,12 +168,12 @@ class BrowseTree(private val api: BrowseApi) {
      * has said why in its own words, which beats anything we could infer.
      */
     fun requireList(body: JSONObject, what: String) {
-        if (body.optString("action") == "list") return
-        if (body.optString("action") == "message") {
-            val msg = body.optString("message").ifEmpty { "Roon declined" }
+        if (body.str("action") == "list") return
+        if (body.str("action") == "message") {
+            val msg = body.str("message").ifEmpty { "Roon declined" }
             throw BrowseException("Roon says: $msg")
         }
-        throw BrowseException("Roon gave no list for $what (action: ${body.optString("action")})")
+        throw BrowseException("Roon gave no list for $what (action: ${body.str("action")})")
     }
 
     // ----------------------------------------------------------- level walks

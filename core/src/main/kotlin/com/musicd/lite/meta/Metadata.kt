@@ -1,5 +1,6 @@
 package com.musicd.lite.meta
 
+import com.musicd.lite.str
 import com.musicd.lite.Log
 import com.musicd.lite.library.Normalize
 import okhttp3.OkHttpClient
@@ -80,7 +81,7 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
             val r = releases.optJSONObject(i) ?: continue
             // Below ~70 the match is a different record that shares a word.
             if (r.optInt("score", 0) < 70) continue
-            val year = yearOf(r.optString("date")) ?: continue
+            val year = yearOf(r.str("date")) ?: continue
             if (year < best) best = year
         }
         return best.takeIf { it != Int.MAX_VALUE }
@@ -99,7 +100,7 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
             urlEncode(query) + "&srlimit=$limit&format=json"
         val json = wikiGate.run { getJson(url) } ?: return emptyList()
         val hits = json.optJSONObject("query")?.optJSONArray("search") ?: return emptyList()
-        return (0 until hits.length()).mapNotNull { hits.optJSONObject(it)?.optString("title") }
+        return (0 until hits.length()).mapNotNull { hits.optJSONObject(it)?.str("title") }
             .filter { it.isNotEmpty() }
     }
 
@@ -107,8 +108,8 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
         val url = "https://en.wikipedia.org/api/rest_v1/page/summary/" +
             urlEncode(pageTitle.replace(' ', '_'))
         val json = wikiGate.run { getJson(url) } ?: return null
-        if (json.optString("type") == "disambiguation") return null
-        return json.optString("extract").takeIf { it.length > 40 }
+        if (json.str("type") == "disambiguation") return null
+        return json.str("extract").takeIf { it.length > 40 }
     }
 
     fun wikipediaAlbum(title: String, artist: String): Bio? {

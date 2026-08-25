@@ -58,4 +58,7 @@ dependencies {
     // and SQLite.
     implementation(project(":core"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // FileProvider only. Handing an image to the clipboard or a share sheet
+    // means handing over a content:// URI, and that needs a provider.
+    implementation("androidx.core:core:1.13.1")
 }

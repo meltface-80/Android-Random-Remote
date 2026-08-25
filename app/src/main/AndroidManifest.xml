@@ -36,6 +36,18 @@
             </intent-filter>
         </activity>
 
+        <!-- The share card leaves the app as a content:// URI: an image cannot
+             be put on the clipboard or into a share sheet as raw bytes. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.shares"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <service
             android:name=".RemoteService"
             android:exported="false"

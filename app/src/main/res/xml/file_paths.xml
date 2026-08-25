@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Exactly one directory is shareable: the share-card scratch folder inside the
+  app's own cache, which holds the single card being shared right now and is
+  emptied before each write. Nothing else in the app is reachable through the
+  provider.
+-->
+<paths>
+    <cache-path name="shares" path="shared/" />
+</paths>

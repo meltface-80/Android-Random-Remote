@@ -1,5 +1,6 @@
 package com.musicd.lite.roon
 
+import com.musicd.lite.str
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -33,7 +34,7 @@ data class Volume(
         fun parse(o: JSONObject?): Volume? {
             if (o == null) return null
             return Volume(
-                type = o.optString("type", "number"),
+                type = o.str("type", "number"),
                 min = o.optDouble("min", 0.0).orZero(),
                 max = o.optDouble("max", 100.0).orZero(),
                 value = o.optDouble("value", 0.0).orZero(),
@@ -79,11 +80,11 @@ data class SourceControl(
             val out = ArrayList<SourceControl>(arr.length())
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
-                val key = o.optString("control_key").takeIf { it.isNotEmpty() } ?: continue
-                val status = o.optString("status")
+                val key = o.str("control_key").takeIf { it.isNotEmpty() } ?: continue
+                val status = o.str("status")
                 out += SourceControl(
                     controlKey = key,
-                    displayName = o.optString("display_name").takeIf { it.isNotEmpty() }
+                    displayName = o.str("display_name").takeIf { it.isNotEmpty() }
                         ?: fallbackName,
                     status = if (status in KNOWN) status else "indeterminate",
                     supportsStandby = o.optBoolean("supports_standby", false)
@@ -120,13 +121,13 @@ data class Output(
 
     companion object {
         fun parse(o: JSONObject): Output {
-            val name = o.optString("display_name")
+            val name = o.str("display_name")
             val group = o.optJSONArray("can_group_with_output_ids")?.let { arr ->
-                (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotEmpty) }
+                (0 until arr.length()).mapNotNull { arr.str(it).takeIf(String::isNotEmpty) }
             }
             return Output(
-                outputId = o.optString("output_id"),
-                zoneId = o.optString("zone_id").takeIf { it.isNotEmpty() },
+                outputId = o.str("output_id"),
+                zoneId = o.str("zone_id").takeIf { it.isNotEmpty() },
                 displayName = name,
                 volume = Volume.parse(o.optJSONObject("volume")),
                 canGroupWith = group,
@@ -156,7 +157,7 @@ data class ZoneSettings(
         val LOOP_MODES = listOf("disabled", "loop", "loop_one")
 
         fun parse(o: JSONObject?): ZoneSettings {
-            val loop = o?.optString("loop")
+            val loop = o?.str("loop")
             return ZoneSettings(
                 shuffle = o?.optBoolean("shuffle", false) ?: false,
                 loop = if (loop == "loop" || loop == "loop_one") loop else "disabled",
@@ -182,12 +183,12 @@ data class NowPlaying(
             val one = o.optJSONObject("one_line")
             val src = three ?: two ?: one
             return NowPlaying(
-                line1 = src?.optString("line1").orEmpty(),
-                line2 = src?.optString("line2").orEmpty(),
-                line3 = src?.optString("line3").orEmpty(),
+                line1 = src?.str("line1").orEmpty(),
+                line2 = src?.str("line2").orEmpty(),
+                line3 = src?.str("line3").orEmpty(),
                 lengthSeconds = o.optInt("length", -1).takeIf { it >= 0 },
                 seekPosition = o.optInt("seek_position", -1).takeIf { it >= 0 },
-                imageKey = o.optString("image_key").takeIf { it.isNotEmpty() }
+                imageKey = o.str("image_key").takeIf { it.isNotEmpty() }
             )
         }
     }
@@ -223,9 +224,9 @@ data class Zone(
                 for (i in 0 until arr.length()) outs += Output.parse(arr.getJSONObject(i))
             }
             return Zone(
-                zoneId = o.optString("zone_id"),
-                displayName = o.optString("display_name"),
-                state = o.optString("state", "stopped"),
+                zoneId = o.str("zone_id"),
+                displayName = o.str("display_name"),
+                state = o.str("state", "stopped"),
                 isPlayAllowed = o.optBoolean("is_play_allowed", false),
                 isPauseAllowed = o.optBoolean("is_pause_allowed", false),
                 isNextAllowed = o.optBoolean("is_next_allowed", false),
@@ -277,7 +278,7 @@ class ZoneStore {
         body.optJSONArray("zones_seek_changed")?.let { arr ->
             for (i in 0 until arr.length()) {
                 val e = arr.getJSONObject(i)
-                val zoneId = e.optString("zone_id")
+                val zoneId = e.str("zone_id")
                 val existing = zones[zoneId] ?: continue
                 val np = existing.nowPlaying ?: continue
                 val pos = e.optInt("seek_position", -1).takeIf { it >= 0 } ?: continue
@@ -353,11 +354,11 @@ data class QueueItem(
             val three = o.optJSONObject("three_line")
             return QueueItem(
                 queueItemId = o.optLong("queue_item_id"),
-                title = one?.optString("line1").orEmpty().ifEmpty {
-                    three?.optString("line1").orEmpty()
+                title = one?.str("line1").orEmpty().ifEmpty {
+                    three?.str("line1").orEmpty()
                 },
-                subtitle = three?.optString("line2").orEmpty(),
-                imageKey = o.optString("image_key").takeIf { it.isNotEmpty() },
+                subtitle = three?.str("line2").orEmpty(),
+                imageKey = o.str("image_key").takeIf { it.isNotEmpty() },
                 lengthSeconds = o.optInt("length", -1).takeIf { it >= 0 }
             )
         }

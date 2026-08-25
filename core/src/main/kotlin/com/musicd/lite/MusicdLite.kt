@@ -11,6 +11,7 @@ import com.musicd.lite.library.LibraryView
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.meta.ImageCache
 import com.musicd.lite.meta.Metadata
+import com.musicd.lite.meta.Pitchfork
 import com.musicd.lite.meta.metadataHttpClient
 import com.musicd.lite.roon.RoonApi
 import com.musicd.lite.roon.RoonCore
@@ -45,6 +46,13 @@ class MusicdLite(
      * pass a scripted Core so the whole API can be driven over real HTTP with
      * no Roon on the network.
      */
+    /**
+     * How long the album count must hold still before a rescan believes Roon
+     * has finished importing. Zero skips the wait, which is what the tests want
+     * and what a caller who has already established the library is quiet can
+     * ask for.
+     */
+    private val importSettleMs: Long = IMPORT_SETTLE_MS,
     roonFactory: (Store, RoonCore.ExtensionInfo, RoonCore.MulticastLock) -> RoonApi =
         { store, extension, lock -> RoonCore(store, extension, lock) }
 ) {
@@ -61,6 +69,9 @@ class MusicdLite(
 
         /** History older than this is dropped. */
         const val PLAYS_RETENTION_DAYS = 400L
+
+        /** How long the album count must hold still to count as "not importing". */
+        const val IMPORT_SETTLE_MS = 5_000L
     }
 
     val extension = RoonCore.ExtensionInfo(
@@ -81,6 +92,7 @@ class MusicdLite(
     val albums = Albums(roon.tree, index, store)
     val metadata = Metadata(http, "MusicDRemoteLite/$version ( ${extension.website} )")
     val art = ImageCache(http, artDir)
+    val pitchfork = Pitchfork(http, "MusicDRemoteLite/$version ( ${extension.website} )")
     val radio = Radio(this)
 
     private val jobs: ScheduledExecutorService =
@@ -175,6 +187,90 @@ class MusicdLite(
      * changed identity (a count-neutral reorder)? Only then is a full walk
      * worth it.
      */
+    private fun libraryChangedSince(): Boolean = roon.tree.withSession { key ->
+        roon.tree.browse("albums", key, popAll = true)
+        val head = roon.tree.load("albums", key, 0, 1)
+        val declared = if (index.declared > 0) index.declared else index.count
+        val first = head.items.firstOrNull()
+        val snapshotFirst = index.albums.firstOrNull()
+        head.total != declared ||
+            (first != null && snapshotFirst != null &&
+                Normalize.text(first.title) != snapshotFirst.nTitle)
+    }
+
+    /**
+     * Is Roon still adding albums?
+     *
+     * There is no "importing" flag in the extension API, so the only signal is
+     * the album count refusing to hold still. Rebuilding mid-import walks a
+     * list that is moving underneath the walk, which is how a snapshot ends up
+     * with holes — so a count that is still changing means wait.
+     */
+    private fun libraryIsImporting(): Boolean {
+        fun albumCount(): Int = roon.tree.withSession { key ->
+            roon.tree.browse("albums", key, popAll = true)
+            roon.tree.load("albums", key, 0, 1).total
+        }
+
+        val first = albumCount()
+        if (importSettleMs <= 0) return false
+        try {
+            Thread.sleep(importSettleMs)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return false
+        }
+        return albumCount() != first
+    }
+
+    /**
+     * The Rescan button, answered synchronously.
+     *
+     * The caller is waiting to be told whether their library changed, so the
+     * check and the rebuild both happen before the response — the front-end
+     * renders one of these statuses as its toast and treats anything it does
+     * not recognise as "Rescan failed".
+     *
+     * @param force a human pressed the button, so skip the "did anything
+     *              change?" probe and rebuild regardless.
+     */
+    fun rescan(force: Boolean): RescanResult {
+        if (!roon.isPaired) return RescanResult("unpaired")
+        if (!rebuilding.compareAndSet(false, true)) return RescanResult("busy")
+        try {
+            val changed = try {
+                force || libraryChangedSince()
+            } catch (e: Exception) {
+                Log.w(TAG, "rescan probe failed: ${e.message}")
+                return RescanResult("error")
+            }
+            if (!changed) return RescanResult("fresh")
+
+            if (runCatching { libraryIsImporting() }.getOrDefault(false)) {
+                Log.i(TAG, "library changed but Roon is still importing — refresh paused")
+                return RescanResult("importing")
+            }
+
+            val before = index.isBuilt
+            val built = try {
+                index.build(roon.tree)
+            } catch (e: Exception) {
+                Log.w(TAG, "rescan rebuild failed: ${e.message}", e)
+                false
+            }
+            // A rebuild that threw leaves the OLD snapshot in place, so saying
+            // "rebuilt" would report a refresh that did not happen.
+            if (!built) return RescanResult("error")
+            roon.tree.clearOffsetCache()
+            recordFirstSeen(firstEverScan = !before)
+            return RescanResult("rebuilt", index.count)
+        } finally {
+            rebuilding.set(false)
+        }
+    }
+
+    data class RescanResult(val status: String, val count: Int? = null)
+
     private fun libraryMaintenance() {
         if (!roon.isPaired) return
         try {
@@ -182,17 +278,7 @@ class MusicdLite(
                 rebuildIndex("index is empty")
                 return
             }
-            val moved = roon.tree.withSession { key ->
-                roon.tree.browse("albums", key, popAll = true)
-                val head = roon.tree.load("albums", key, 0, 1)
-                val declared = if (index.declared > 0) index.declared else index.count
-                val first = head.items.firstOrNull()
-                val snapshotFirst = index.albums.firstOrNull()
-                head.total != declared ||
-                    (first != null && snapshotFirst != null &&
-                        Normalize.text(first.title) != snapshotFirst.nTitle)
-            }
-            if (moved) rebuildIndex("Roon's album list changed")
+            if (libraryChangedSince()) rebuildIndex("Roon's album list changed")
         } catch (e: Exception) {
             Log.d(TAG, "library probe failed: ${e.message}")
         }
