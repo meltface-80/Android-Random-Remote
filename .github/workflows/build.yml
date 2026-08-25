@@ -119,7 +119,10 @@ jobs:
           # The README's download link is rewritten here rather than by hand,
           # because a link that has to be remembered is a link that eventually
           # points at a version that no longer exists.
-          sed -i -E "s#dist/musicd-remote-lite-[0-9][^)\"]*\.apk#dist/$APK#g" README.md
+          # Every mention, not just the path: the link TEXT names the version
+          # too, and a label that disagrees with what it downloads is worse
+          # than no label.
+          sed -i -E "s#musicd-remote-lite-[0-9][0-9A-Za-z._-]*\.apk#$APK#g" README.md
           git add "dist/$APK" README.md
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
