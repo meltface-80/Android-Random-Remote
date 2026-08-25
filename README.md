@@ -132,7 +132,7 @@ Needs JDK 17+, Android SDK platform 36 and build-tools 36.0.0. Output lands in
 
 ## Verification
 
-**102 unit tests, all passing.** They run on a plain JVM, which is the point of
+**127 unit tests, all passing.** They run on a plain JVM, which is the point of
 splitting `:core` out: the parts most worth testing are tested without an
 emulator in the loop.
 
@@ -162,6 +162,18 @@ emulator in the loop.
   assert that the right record still plays; that an album which has left the
   library refuses rather than playing whatever now sits at its offset; and that
   nothing is invoked on Roon in the failure cases.
+
+- **Random Album Radio deciding not to act.** Roon reports a stopped zone at
+  several moments that are not the end of a queue — a track loading, the gap
+  between albums, the user pressing stop — and the tests drive each of those
+  past the settle window. One pins the regression that prompted them: a zone
+  already having an album queued must not be picked again by the next tick of
+  the zone feed, which arrives several times a second.
+
+- **Album art caching**, counted by how often the Core is actually asked: the
+  memory tier absorbing a re-read, the disk tier surviving a restart, a
+  truncated file being ignored rather than served as a blank image, and the
+  memory budget still holding after two hundred rounds of eviction.
 
 - **The API, end to end over a real socket.** 29 tests drive the shipping HTTP
   server and router — the JSON the unmodified front-end reads, `409` on a moved
