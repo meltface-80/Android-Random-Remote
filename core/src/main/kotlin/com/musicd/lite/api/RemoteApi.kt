@@ -305,12 +305,15 @@ class RemoteApi(
     }
 
     /**
-     * A credit split into individually linkable names.
+     * A credit split into individually linkable names, for now-playing.
      *
      * `linkable` says whether the library can actually open a screen for that
      * name. It matters on the now-playing line because that is the TRACK
      * artist: on a compilation most track artists have no album of their own,
      * and linking them all would be a row of dead ends.
+     *
+     * The album view wants [artistNames] instead — the two endpoints do NOT
+     * carry the same shape. See there for why.
      */
     private fun artistLinks(credit: String): JSONArray {
         val names = Normalize.splitArtists(credit)
@@ -328,6 +331,18 @@ class RemoteApi(
             }
         }
     }
+
+    /**
+     * The same split as [artistLinks], as plain names.
+     *
+     * The album view marks every credit linkable itself — the credit came off
+     * a library album, so that album is on the artist's screen at minimum —
+     * and so it wraps each entry: `names.map(name => ({ name, linkable: true }))`.
+     * Handing it objects makes `name` an object, and the button renders as
+     * "[object Object]".
+     */
+    private fun artistNames(credit: String): JSONArray =
+        JSONArray().also { arr -> Normalize.splitArtists(credit).forEach { arr.put(it.name) } }
 
     private fun queue(request: Request): Response {
         val zoneId = request.str("zone") ?: return Json.error(400, "zone is required")
@@ -615,7 +630,7 @@ class RemoteApi(
             Json.arrayOf(r.actions.map { JSONObject().put("kind", it.kind).put("title", it.title) })
         )
         .put("offset", r.offset)
-        .put("artists", artistLinks(r.subtitle))
+        .put("artists", artistNames(r.subtitle))
         .put("library_moved", r.libraryMoved)
         .put("partial", r.partial)
         .put("declared_tracks", r.declaredTracks ?: JSONObject.NULL)
