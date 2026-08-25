@@ -52,9 +52,14 @@ API testable on a JVM with no emulator — see [Verification](#verification).
 
 ## Install
 
-Build it (below) or take the APK from the
-[latest CI run](../../actions/workflows/build.yml) — every push produces one, and
-a `v*` tag attaches it to a release. Android 8.0 (API 26) or newer.
+**Download: [musicd-remote-lite-0.1.0.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.1.0.apk)**
+
+Sideload it on Android 8.0 (API 26) or newer. The file in
+[`dist/`](dist/) is published by CI from the source in this repository, so it is
+never a hand-built binary of unknown provenance — the commit that added it names
+the commit it was built from. Every push also produces the same APK as a
+[CI artifact](../../actions/workflows/build.yml), and a `v*` tag attaches it to
+a release.
 
 The APK is signed with the standard Android debug key, so it installs alongside
 anything else but will not update in place over a differently-signed build.
@@ -166,11 +171,9 @@ emulator in the loop.
 environment. The protocol layer is checked against Roon's own code and the API
 end to end against a scripted one, but the first real pairing is untested.
 
-**The APK itself has not been compiled.** The environment this was written in
-cannot reach `dl.google.com`, so the Android SDK and Gradle plugin could not be
-downloaded. `:core` — which is nearly all of the code — compiles and its tests
-pass; the `:app` module is the thin shell around it and is built by CI on the
-first push.
+**The APK compiles and packages** — CI assembles it on every push, and the file
+in `dist/` is that output. What CI cannot do is *run* it: nothing here has
+launched the app on a device.
 
 ## Limits
 

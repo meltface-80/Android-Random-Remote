@@ -1,8 +1,8 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("com.android.application") version "8.13.2"
-    id("org.jetbrains.kotlin.android") version "2.2.21"
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
 }
 
 android {

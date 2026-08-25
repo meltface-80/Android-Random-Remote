@@ -1,5 +1,5 @@
 plugins {
-    id("org.jetbrains.kotlin.jvm") version "2.2.21"
+    id("org.jetbrains.kotlin.jvm")
 }
 
 kotlin {
@@ -29,5 +29,13 @@ dependencies {
 }
 
 tasks.test {
+    // The wire-format samples MooTest and SoodTest write for
+    // tools/verify-wire.js are an OUTPUT of this task, and declaring them is
+    // what makes a cache hit restore them. Without this line the task can be
+    // satisfied FROM-CACHE, the .bin files never appear, and the cross-check
+    // against node-roon-api fails insisting the tests were never run — which
+    // is exactly what happened on CI.
+    outputs.dir(layout.buildDirectory.dir("moo-samples"))
+
     testLogging { events("passed", "failed", "skipped") }
 }
