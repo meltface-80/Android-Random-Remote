@@ -87,6 +87,15 @@ class MainActivity : Activity() {
                 displayZoomControls = false
             }
             webViewClient = LocalClient()
+            // The page implements its own long-press — that is how multi-select
+            // on the album wall is armed — and the WebView's native long-press
+            // fights it: it starts text selection or a context menu and cancels
+            // the touch sequence the page was timing, so a hold registered only
+            // every few tries. Declining the native gesture leaves the page's
+            // own handler to win it.
+            isLongClickable = false
+            setOnLongClickListener { true }
+            isHapticFeedbackEnabled = false
             // Clipboard, Web Share and blob downloads, which a WebView does not
             // have — see ShareBridge. Reachable only from our own loopback
             // page: LocalClient sends every other URL to the browser.

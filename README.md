@@ -52,7 +52,7 @@ API testable on a JVM with no emulator — see [Verification](#verification).
 
 ## Install
 
-**Download: [musicd-remote-lite-0.1.1.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.1.1.apk)**
+**Download: [musicd-remote-lite-0.1.2.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.1.2.apk)**
 
 Sideload it on Android 8.0 (API 26) or newer. The file in
 [`dist/`](dist/) is published by CI from the source in this repository, so it is

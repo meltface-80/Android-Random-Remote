@@ -1,6 +1,7 @@
 package com.musicd.lite.api
 
 import com.musicd.lite.str
+import com.musicd.lite.strOrNull
 import com.musicd.lite.Log
 import com.musicd.lite.MusicdLite
 import com.musicd.lite.http.HttpServer
@@ -49,7 +50,15 @@ class RemoteApi(
 
         /** Roon rejects a play of more albums than this in one go. */
         const val PLAY_MULTI_MAX = 400
+
+        /** Albums opened in parallel while filling a queue. */
+        const val MULTI_QUEUE_BATCH = 4
     }
+
+    /** Zones with a multi-album fill in flight. */
+    private val fillingZones = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    )
 
     private val roon get() = app.roon
     private val index get() = app.index
@@ -171,6 +180,10 @@ class RemoteApi(
             "/api/settings/display" -> if (post) saveDisplay(request) else displaySettings()
             "/api/settings/smart-picks" -> if (post) saveSmartPicks(request) else smartPickSettings()
             "/api/settings/labels" -> labelsSetting(post)
+            "/api/settings/discogs-token" ->
+                secret(request, post, Settings.KEY_DISCOGS_TOKEN, "token")
+            "/api/settings/fanart-key" ->
+                secret(request, post, Settings.KEY_FANART_KEY, "key")
             "/api/display/content" -> displayContent(request)
 
             "/api/pitchfork/reviews" -> pitchforkReviews(request)
@@ -703,48 +716,96 @@ class RemoteApi(
     /**
      * Queue several albums back to back.
      *
-     * The first goes on with the caller's kind (usually "play_now"); every one
-     * after is queued, because "play now" for each would leave only the last
-     * one playing. Failures are counted rather than aborting the run: nineteen
-     * albums queued and one refused is a better outcome than nothing.
+     * The field is `items` — {offset, title, subtitle} each — so the
+     * stale-offset defence covers a multi-selection too; bare `offsets` is
+     * accepted for older callers. Reading `albums` here, which nothing sends,
+     * is what made every multi-select queue fail with "albums array is
+     * required".
+     *
+     * The first album takes the caller's kind (usually play_now) and the rest
+     * are queued, because "play now" for each would leave only the last one
+     * playing. A partial result is a SUCCESS: the first album is already
+     * playing and everything that queued is in the queue, so the counts travel
+     * back rather than an error that throws all of it away.
      */
     private fun playMulti(request: Request): Response {
         val body = Json.body(request)
-        val zone = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
-            ?: return Json.error(400, "zone_or_output_id is required")
-        val arr = body.optJSONArray("albums") ?: return Json.error(400, "albums array is required")
-        if (arr.length() == 0) return Json.error(400, "no albums given")
-        if (arr.length() > PLAY_MULTI_MAX) {
-            return Json.error(400, "at most $PLAY_MULTI_MAX albums at a time")
-        }
-        val firstKind = body.str("kind").takeIf { it.isNotEmpty() } ?: "play_now"
+        val zone = body.strOrNull("zone_or_output_id")
+            ?: return Json.error(400, "zone_or_output_id required")
+        val kind = body.strOrNull("kind") ?: return Json.error(400, "kind required")
 
-        var queued = 0
-        val failed = ArrayList<String>()
-        for (i in 0 until arr.length()) {
-            val a = arr.optJSONObject(i) ?: continue
-            val offset = a.optInt("offset", -1)
-            if (offset < 0) continue
-            val kind = if (i == 0) firstKind else "queue"
-            try {
-                app.albums.open(
-                    offset, zone, kind, null,
-                    Albums.Expect(
-                        a.str("title").takeIf { it.isNotEmpty() },
-                        a.str("subtitle").takeIf { it.isNotEmpty() }
-                    )
+        val items = body.optJSONArray("items")
+        val list = ArrayList<Pair<Int, Albums.Expect>>()
+        if (items != null) {
+            for (i in 0 until items.length()) {
+                val it = items.optJSONObject(i) ?: continue
+                val offset = it.optInt("offset", -1)
+                if (offset < 0) continue
+                list += offset to Albums.Expect(
+                    it.strOrNull("title"),
+                    it.strOrNull("subtitle")
                 )
-                queued++
-            } catch (e: Exception) {
-                failed += a.str("title").ifEmpty { "offset $offset" }
+            }
+        } else {
+            body.optJSONArray("offsets")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val offset = arr.optInt(i, -1)
+                    if (offset >= 0) list += offset to Albums.Expect(null, null)
+                }
             }
         }
-        if (queued == 0) {
-            return Json.error(502, "Roon refused every album: ${failed.take(3).joinToString(", ")}")
+        if (list.isEmpty()) return Json.error(400, "offsets required")
+        if (list.size > PLAY_MULTI_MAX) {
+            return Json.error(400, "at most $PLAY_MULTI_MAX albums at a time")
         }
-        return Json.ok(
-            JSONObject().put("queued", queued).put("failed", Json.strings(failed))
+
+        // One fill per zone. Two overlapping runs interleave their albums, and
+        // the second would restart a queue the first is still building.
+        if (!fillingZones.add(zone)) {
+            return Json.error(
+                409, "Still filling this zone's queue — let that finish before starting another"
+            )
+        }
+
+        val filter = AlbumFilter.parse(
+            body.strOrNull("filter_type"), body.strOrNull("filter_value"),
+            body.strOrNull("filter_parent")
         )
+
+        try {
+            app.albums.open(list[0].first, zone, kind, filter, list[0].second)
+
+            // Small concurrent batches, not one at a time and not all at once:
+            // each open is several browse round-trips on its own session, so an
+            // unbounded fan-out bursts dozens of parallel navigations onto the
+            // single Roon socket that transport shares.
+            var failed = 0
+            var firstError: String? = null
+            val rest = list.drop(1)
+            for (batch in rest.chunked(MULTI_QUEUE_BATCH)) {
+                val outcomes = batch.map { (offset, expect) ->
+                    java.util.concurrent.CompletableFuture.supplyAsync {
+                        runCatching { app.albums.open(offset, zone, "queue", filter, expect) }
+                    }
+                }.map { it.join() }
+                for (outcome in outcomes) {
+                    outcome.exceptionOrNull()?.let { e ->
+                        failed++
+                        if (firstError == null) firstError = e.message ?: e.toString()
+                    }
+                }
+            }
+
+            return Json.ok(
+                JSONObject()
+                    .put("queued", list.size - failed)
+                    .put("failed", failed)
+                    .put("total", list.size)
+                    .put("first_error", firstError ?: JSONObject.NULL)
+            )
+        } finally {
+            fillingZones.remove(zone)
+        }
     }
 
     private fun playUnheard(request: Request): Response {
@@ -1077,6 +1138,38 @@ class RemoteApi(
     }
 
     /**
+     * A saved credential, in the shape the settings screen reads: `{set,
+     * masked}` on the way out and `{ok, saved}` on the way back.
+     *
+     * Answering with the wrong shape is what made Save report "Failed to save
+     * token" — the page checks `j.ok`, and a response without it is a failure
+     * however successful the save was.
+     *
+     * These are stored but not yet used: the label chain they feed is not in
+     * this build (see /api/settings/labels). Storing them anyway is deliberate
+     * — a token is the user's to keep, and losing it because the feature is not
+     * written yet would mean typing it again later.
+     */
+    private fun secret(request: Request, isPost: Boolean, key: String, field: String): Response {
+        if (!isPost) {
+            return Json.obj(
+                JSONObject()
+                    .put("set", settings.secret(key) != null)
+                    .put("masked", settings.maskSecret(key))
+                    .put("unused", Settings.LABELS_UNAVAILABLE)
+            )
+        }
+        val value = Json.body(request).str(field).trim()
+        // The page reads `ok` and shows `error` beside it, so a bare 400 would
+        // surface as its generic "Failed to save" rather than the reason.
+        if (value.isEmpty()) {
+            return Json.obj(JSONObject().put("ok", false).put("error", "$field is empty"))
+        }
+        settings.saveSecret(key, value)
+        return Json.obj(JSONObject().put("ok", true).put("saved", true))
+    }
+
+    /**
      * The labels switch, answered honestly.
      *
      * The front-end already treats `enabled: false` as "hide the Labels screen
@@ -1213,8 +1306,6 @@ class RemoteApi(
 
         path == "/api/filters/labels" -> Json.obj(JSONObject().put("labels", JSONArray()))
         path == "/api/home/label-of-the-week" -> Json.obj(JSONObject().put("label", JSONObject.NULL))
-        path == "/api/settings/discogs-token" -> Json.obj(JSONObject().put("token", ""))
-        path == "/api/settings/fanart-key" -> Json.obj(JSONObject().put("key", ""))
         path == "/api/settings/label-folder-depth" -> Json.obj(JSONObject().put("depth", 0))
 
         // Streaming services. Both need an account login the app has no place to

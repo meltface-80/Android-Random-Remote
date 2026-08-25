@@ -251,20 +251,88 @@ class RemoteApiTest {
     }
 
     @Test
-    fun queueingSeveralAlbumsPlaysTheFirstAndQueuesTheRest() {
+    fun multiSelectQueuesTheFieldTheClientActuallySends() {
+        // The client posts `items`, not `albums`. Reading the wrong field made
+        // every multi-select fail with "albums array is required".
         val (code, text) = post(
             "/api/play-multi",
-            """{"zone_or_output_id":"z1","albums":[
+            """{"zone_or_output_id":"z1","kind":"play_now","items":[
                  {"offset":0,"title":"Blue Lines","subtitle":"Massive Attack"},
                  {"offset":1,"title":"Dummy","subtitle":"Portishead"},
                  {"offset":3,"title":"Third","subtitle":"Portishead"}]}"""
         )
         assertEquals(text, 200, code)
-        assertEquals(3, JSONObject(text).getInt("queued"))
-        assertEquals(
-            listOf("play_now:playmenu:0@z1", "queue:playmenu:1@z1", "queue:playmenu:3@z1"),
-            core.invoked
+        val body = JSONObject(text)
+        assertEquals(3, body.getInt("queued"))
+        assertEquals(0, body.getInt("failed"))
+        assertEquals(3, body.getInt("total"))
+        assertTrue(body.isNull("first_error"))
+        assertEquals("play_now:playmenu:0@z1", core.invoked.first())
+        assertEquals(3, core.invoked.size)
+        assertTrue(core.invoked.drop(1).all { it.startsWith("queue:") })
+    }
+
+    @Test
+    fun multiSelectStillAcceptsBareOffsets() {
+        val (code, text) = post(
+            "/api/play-multi",
+            """{"zone_or_output_id":"z1","kind":"queue","offsets":[0,1]}"""
         )
+        assertEquals(text, 200, code)
+        assertEquals(2, JSONObject(text).getInt("queued"))
+    }
+
+    @Test
+    fun multiSelectReportsPartialSuccessRatherThanFailing() {
+        // The first album is already playing and everything that queued is in
+        // the queue; answering with an error would throw all of that away.
+        val (code, text) = post(
+            "/api/play-multi",
+            """{"zone_or_output_id":"z1","kind":"play_now","items":[
+                 {"offset":0,"title":"Blue Lines","subtitle":"Massive Attack"},
+                 {"offset":1,"title":"An Album That Left","subtitle":"Nobody"}]}"""
+        )
+        assertEquals(text, 200, code)
+        val body = JSONObject(text)
+        assertEquals(1, body.getInt("queued"))
+        assertEquals(1, body.getInt("failed"))
+        assertEquals(2, body.getInt("total"))
+        assertTrue(body.getString("first_error").isNotEmpty())
+    }
+
+    @Test
+    fun multiSelectNeedsAZoneAndAKind() {
+        assertEquals(400, post("/api/play-multi", """{"kind":"queue","offsets":[0]}""").first)
+        assertEquals(400, post("/api/play-multi", """{"zone_or_output_id":"z1","offsets":[0]}""").first)
+        assertEquals(
+            400,
+            post("/api/play-multi", """{"zone_or_output_id":"z1","kind":"queue","items":[]}""").first
+        )
+    }
+
+    @Test
+    fun aCredentialSavesAndComesBackMasked() {
+        // The page checks j.ok; a response without it reads as "Failed to save
+        // token" however well the save went.
+        val saved = JSONObject(
+            post("/api/settings/discogs-token", """{"token":"abcdef123456"}""").second
+        )
+        assertTrue(saved.getBoolean("ok"))
+        assertTrue(saved.getBoolean("saved"))
+
+        val read = json("/api/settings/discogs-token")
+        assertTrue(read.getBoolean("set"))
+        // Masked, never echoed back in full.
+        assertEquals("••••••••3456", read.getString("masked"))
+        assertFalse(read.getString("masked").contains("abcdef"))
+    }
+
+    @Test
+    fun anEmptyCredentialIsRefusedWithAReason() {
+        val body = JSONObject(post("/api/settings/discogs-token", """{"token":"  "}""").second)
+        assertFalse(body.getBoolean("ok"))
+        assertTrue(body.getString("error").isNotEmpty())
+        assertFalse(json("/api/settings/discogs-token").getBoolean("set"))
     }
 
     @Test

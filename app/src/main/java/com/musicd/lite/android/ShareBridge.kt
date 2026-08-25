@@ -5,7 +5,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.os.Environment
 import android.util.Base64
 import android.util.Log
 import android.webkit.JavascriptInterface
@@ -18,17 +17,28 @@ import java.io.File
  *
  * The card is drawn into a canvas by the bundled front-end, which then offers
  * Copy, Share and Download using `navigator.clipboard.write`, `navigator.share`
- * and an `<a download>`. A WebView provides none of the three: the async
- * Clipboard API refuses image writes, the Web Share API is simply absent, and
- * `download` is inert unless the app implements a DownloadListener. All three
- * buttons were therefore dead — the Copy and Share ones did not even render,
- * because the page feature-detects before drawing them.
+ * and an `<a download>`. A WebView has none of the three, so all three buttons
+ * were dead — and Copy and Share did not even render, because the page
+ * feature-detects before drawing them.
+ *
+ * Only Share is provided, and that is a decision rather than an omission:
+ *
+ *  - **Share** works, and on Android it is the button that already leads
+ *    everywhere else — save to Files, send to another app, put it in a message.
+ *  - **Copy** cannot be made to work honestly. An image reaches the Android
+ *    clipboard as a content:// URI, and the app doing the pasting holds no
+ *    grant against our FileProvider, so the copy reports success and pastes
+ *    nothing.
+ *  - **Download** is blocked by scoped storage from Android 10, and the
+ *    supported route — a MediaStore insert — is the same two taps as Share.
+ *
+ * The two that cannot work are removed rather than left to fail: the page
+ * feature-detects Copy, so not shimming it takes the button away, and the
+ * download anchor is dropped from the DOM.
  *
  * The fix belongs here rather than in the page. The bundled assets are kept
  * byte-identical to MusicD-Remote's so a newer upstream UI stays a file copy,
  * and "this platform is missing a web API" is the shell's problem to solve.
- * [JS_SHIM] implements the three APIs against this bridge, so the page's own
- * feature detection passes and its existing buttons work unmodified.
  */
 class ShareBridge(private val activity: Activity) {
 
@@ -40,10 +50,10 @@ class ShareBridge(private val activity: Activity) {
         private const val SHARE_DIR = "shared"
 
         /**
-         * Implements Clipboard, Web Share and blob downloads on top of the
-         * bridge. Injected after every page load.
+         * Implements Web Share on top of the bridge and removes the two
+         * controls that cannot work. Injected after every page load.
          *
-         * Everything goes through a base64 round-trip because a `blob:` URL is
+         * The share goes through a base64 round-trip because a `blob:` URL is
          * meaningless outside the renderer — the app cannot open one, so the
          * bytes have to be read in JavaScript and handed over.
          */
@@ -67,32 +77,27 @@ class ShareBridge(private val activity: Activity) {
             });
           }
 
-          // The page constructs one of these and hands it to clipboard.write.
-          if (typeof window.ClipboardItem === "undefined") {
-            window.ClipboardItem = function (items) { this.__items = items || {}; };
-          }
-
+          // Deliberately NOT shimmed: window.ClipboardItem and
+          // navigator.clipboard.write. Handing an image to the Android
+          // clipboard means handing over a content:// URI, and the app pasting
+          // it has no grant to read our FileProvider — so the copy appeared to
+          // succeed and pasted nothing. The page feature-detects both before
+          // it draws the Copy button, so leaving them absent removes the
+          // button rather than leaving one that lies.
+          //
+          // Text copying is fine and does not go through a URI.
           var clip = navigator.clipboard || {};
-          clip.write = function (items) {
-            var item = (items && items[0]) || {};
-            var map = item.__items || {};
-            var blob = map["image/png"] || map["image/jpeg"];
-            if (!blob) return Promise.reject(new Error("Nothing to copy"));
-            return Promise.resolve(blob).then(toBase64).then(function (b64) {
-              if (!bridge.copyImage(b64)) throw new Error("The clipboard refused the image");
-            });
-          };
           if (typeof clip.writeText !== "function") {
             clip.writeText = function (text) {
               return new Promise(function (resolve, reject) {
                 bridge.copyText(String(text)) ? resolve() : reject(new Error("Copy failed"));
               });
             };
-          }
-          try {
-            navigator.clipboard = clip;
-          } catch (e) {
-            Object.defineProperty(navigator, "clipboard", { value: clip, configurable: true });
+            try {
+              navigator.clipboard = clip;
+            } catch (e) {
+              Object.defineProperty(navigator, "clipboard", { value: clip, configurable: true });
+            }
           }
 
           function shareFiles(data) {
@@ -109,21 +114,27 @@ class ShareBridge(private val activity: Activity) {
             };
           }
 
-          // `<a download href="blob:...">` never fires the WebView's download
-          // listener with anything the app can open, so it is handled here.
-          document.addEventListener("click", function (e) {
-            var a = e.target && e.target.closest && e.target.closest("a[download]");
-            if (!a || !a.href) return;
-            if (a.href.indexOf("blob:") !== 0 && a.href.indexOf("data:") !== 0) return;
-            e.preventDefault();
-            fetch(a.href)
-              .then(function (r) { return r.blob(); })
-              .then(toBase64)
-              .then(function (b64) {
-                bridge.saveImage(b64, a.getAttribute("download") || "card.png", "image/png");
-              })
-              .catch(function (err) { console.warn("save failed", err); });
-          }, true);
+          // The Download button is removed rather than wired up. Writing to
+          // the public Downloads directory is blocked by scoped storage from
+          // Android 10, and the honest alternative — a MediaStore insert — is
+          // the same two taps as Share, which already works. A button that
+          // needs a fallback to another button is one button too many.
+          function dropDownloadLinks(root) {
+            var links = (root || document).querySelectorAll("a[download]");
+            for (var i = 0; i < links.length; i++) links[i].remove();
+          }
+          dropDownloadLinks(document);
+          new MutationObserver(function (records) {
+            for (var i = 0; i < records.length; i++) {
+              var added = records[i].addedNodes;
+              for (var j = 0; j < added.length; j++) {
+                var n = added[j];
+                if (n.nodeType !== 1) continue;
+                if (n.matches && n.matches("a[download]")) n.remove();
+                else dropDownloadLinks(n);
+              }
+            }
+          }).observe(document.documentElement, { childList: true, subtree: true });
         })();
         """.trimIndent()
 
@@ -138,32 +149,6 @@ class ShareBridge(private val activity: Activity) {
     } catch (e: Exception) {
         Log.w(TAG, "the page sent something that is not base64", e)
         null
-    }
-
-    /**
-     * Writes the image somewhere another app can read it and puts that URI on
-     * the clipboard. An image cannot go on the clipboard as bytes — it has to
-     * be a content:// URI backed by a FileProvider.
-     */
-    @JavascriptInterface
-    fun copyImage(base64: String): Boolean {
-        val bytes = decode(base64) ?: return false
-        return try {
-            val uri = FileProvider.getUriForFile(
-                activity, "${activity.packageName}.shares", write(bytes, "card.png")
-            )
-            val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val clip = ClipData.newUri(activity.contentResolver, "Share card", uri)
-            clipboard.setPrimaryClip(clip)
-            // Without this the pasting app cannot read the file we just handed it.
-            activity.grantUriPermission(
-                activity.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "copy failed", e)
-            false
-        }
     }
 
     @JavascriptInterface
@@ -196,29 +181,6 @@ class ShareBridge(private val activity: Activity) {
         }
     }
 
-    /** The Download button: put the card where a gallery app will find it. */
-    @JavascriptInterface
-    fun saveImage(base64: String, fileName: String, mime: String) {
-        val bytes = decode(base64) ?: return
-        try {
-            val downloads =
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val target = uniqueIn(downloads, safeName(fileName))
-            target.parentFile?.mkdirs()
-            target.writeBytes(bytes)
-            activity.runOnUiThread { toast("Saved to Downloads/${target.name}") }
-        } catch (e: Exception) {
-            // Scoped storage, or no permission. Fall back to the share sheet,
-            // which lets the user put it wherever they like.
-            Log.d(TAG, "direct save failed (${e.message}) — offering the share sheet")
-            shareImage(base64, fileName, mime)
-        }
-    }
-
-    private fun toast(message: String) {
-        android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_SHORT).show()
-    }
-
     /** A share cache holding exactly the file being shared right now. */
     private fun write(bytes: ByteArray, fileName: String): File {
         val dir = File(activity.cacheDir, SHARE_DIR)
@@ -233,18 +195,5 @@ class ShareBridge(private val activity: Activity) {
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
             .take(96)
         return name.ifEmpty { "card.png" }
-    }
-
-    private fun uniqueIn(dir: File, name: String): File {
-        var candidate = File(dir, name)
-        if (!candidate.exists()) return candidate
-        val stem = name.substringBeforeLast('.', name)
-        val ext = name.substringAfterLast('.', "")
-        var n = 2
-        while (candidate.exists() && n < 1000) {
-            candidate = File(dir, stem + "-" + n + if (ext.isEmpty()) "" else ".$ext")
-            n++
-        }
-        return candidate
     }
 }

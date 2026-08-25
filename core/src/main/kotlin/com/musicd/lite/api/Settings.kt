@@ -26,6 +26,8 @@ class Settings(private val store: Store) {
         const val KEY_DISPLAY = "display"
         const val KEY_SMART_PICKS = "smart_picks"
         const val KEY_RADIO_ZONES = "radio_zones"
+        const val KEY_DISCOGS_TOKEN = "discogs_token"
+        const val KEY_FANART_KEY = "fanart_key"
         const val KEY_LAST_ZONE = "last_zone"
 
         /**
@@ -116,6 +118,23 @@ class Settings(private val store: Store) {
         return (0 until arr.length()).mapNotNull { arr.str(it).takeIf(String::isNotEmpty) }
             .toSet()
     }
+
+    // ------------------------------------------------------- service tokens
+
+    /**
+     * The Discogs token and FanArt key, kept because they belong to the user
+     * and not to a feature: they are typed once and must survive whatever the
+     * app does or does not do with them yet.
+     */
+    fun secret(key: String): String? = doc(key).str("value").takeIf { it.isNotEmpty() }
+
+    fun saveSecret(key: String, value: String) = save(key, JSONObject().put("value", value))
+
+    fun clearSecret(key: String) = save(key, JSONObject())
+
+    /** Never echo a secret back to the page — only enough to recognise it. */
+    fun maskSecret(key: String): String =
+        secret(key)?.let { "••••••••" + it.takeLast(4) } ?: ""
 
     fun saveRadioZones(zones: Set<String>) {
         save(KEY_RADIO_ZONES, JSONObject().put("zones", JSONArray().also { a -> zones.forEach(a::put) }))
