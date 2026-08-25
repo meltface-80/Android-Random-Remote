@@ -228,6 +228,45 @@ class RemoteApiTest {
         assertEquals(listOf("play_now", "play_next", "queue", "radio"), kinds)
     }
 
+    /**
+     * The album view and the now-playing screen read `artists` DIFFERENTLY,
+     * and the shipped page is the authority on which is which.
+     *
+     * The album view wraps each entry itself —
+     * `names.map(name => ({ name, linkable: true }))` — because a credit on a
+     * library album always has an artist screen to open. Handing it objects
+     * makes `name` an object and the credit line renders "[object Object]".
+     * The now-playing line is the TRACK artist, which on a compilation often
+     * has no screen, so there the server decides and sends `linkable`.
+     */
+    @Test
+    fun theAlbumViewGetsPlainNamesAndNowPlayingGetsLinkability() {
+        val album = json("/api/album?offset=1&title=Dummy&subtitle=Portishead")
+            .getJSONArray("artists")
+        assertEquals("Portishead", album.getString(0))
+        assertTrue(
+            "the album view wraps these itself, so an object renders as [object Object]",
+            album.get(0) is String
+        )
+
+        val playing = json("/api/zone-state?zone=z1")
+            .getJSONObject("zone").getJSONObject("now_playing").getJSONArray("artists")
+        assertTrue("now-playing decides linkability server-side", playing.get(0) is JSONObject)
+        assertTrue(playing.getJSONObject(0).has("linkable"))
+    }
+
+    @Test
+    fun aSplitCreditReachesTheAlbumViewAsSeparateNames() {
+        core.addAlbum("A Collaboration", "Portishead / Massive Attack")
+        app.index.build(core.tree)
+        val names = json("/api/album?offset=5&title=A%20Collaboration&subtitle=Portishead%20%2F%20Massive%20Attack")
+            .getJSONArray("artists")
+        assertEquals(
+            listOf("Portishead", "Massive Attack"),
+            (0 until names.length()).map { names.getString(it) }
+        )
+    }
+
     @Test
     fun playingAnAlbumReachesRoon() {
         val (code, text) = post(
@@ -267,9 +306,14 @@ class RemoteApiTest {
         assertEquals(0, body.getInt("failed"))
         assertEquals(3, body.getInt("total"))
         assertTrue(body.isNull("first_error"))
-        assertEquals("play_now:playmenu:0@z1", core.invoked.first())
-        assertEquals(3, core.invoked.size)
-        assertTrue(core.invoked.drop(1).all { it.startsWith("queue:") })
+        // The order is the point, not an incidental. The user picked these
+        // albums in a sequence and the queue is ordered, so the fills run one
+        // at a time; queueing them concurrently made this list arbitrary (and
+        // occasionally short, which is how CI found it).
+        assertEquals(
+            listOf("play_now:playmenu:0@z1", "queue:playmenu:1@z1", "queue:playmenu:3@z1"),
+            core.invoked
+        )
     }
 
     @Test
