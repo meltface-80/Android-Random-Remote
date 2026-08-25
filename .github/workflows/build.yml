@@ -89,6 +89,45 @@ jobs:
           name: ${{ steps.name.outputs.apk }}
           path: ${{ steps.name.outputs.apk }}
 
+      # Keep a directly downloadable APK in the repo, so the README can link
+      # straight at it and sideloading is one tap rather than a trip through
+      # the Actions UI.
+      #
+      # Committed once per versionName, not once per push: the APK is a build
+      # output and git keeps every copy forever, so a 1.8 MB commit on every
+      # push would bloat the history for nothing. Bumping versionName in
+      # app/build.gradle.kts is what publishes a new one.
+      #
+      # This pushes with GITHUB_TOKEN, and GitHub deliberately does not fire
+      # workflows for pushes made with it — so this cannot start a build loop.
+      - name: Publish the APK into dist/
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        env:
+          APK: ${{ steps.name.outputs.apk }}
+        run: |
+          set -euo pipefail
+          if [ -f "dist/$APK" ]; then
+            echo "dist/$APK is already committed — nothing to publish."
+            exit 0
+          fi
+          mkdir -p dist
+          # One APK in the tree at a time. The old one is superseded rather
+          # than kept: the README links to a single file, and git still has
+          # every previous version in its history.
+          git rm -q --ignore-unmatch 'dist/musicd-remote-lite-*.apk'
+          cp "$APK" "dist/$APK"
+          # The README's download link is rewritten here rather than by hand,
+          # because a link that has to be remembered is a link that eventually
+          # points at a version that no longer exists.
+          sed -i -E "s#dist/musicd-remote-lite-[0-9][^)\"]*\.apk#dist/$APK#g" README.md
+          git add "dist/$APK" README.md
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Publish $APK" -m "Built from ${GITHUB_SHA}."
+          # The branch may have moved while this job ran.
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+
       - name: Attach the APK to a tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
