@@ -1,2 +1,193 @@
-# Android Random Remote
-Experimental - Native Android APK of MusicD Remote for Roon, an extension for Roon
+# MusicD Remote Lite (Android)
+
+A native Android APK of [MusicD Remote for Roon](https://github.com/meltface-80/MusicD-Remote),
+with the same interface and no server behind it. It registers itself as a Roon
+extension and talks to your Core directly — no Docker, no Node host, no
+companion service on another machine.
+
+The interface is not a lookalike: it is MusicD-Remote's own `public/` directory,
+copied unmodified into the APK. What changed is everything underneath. The
+13,000-line Node server it used to talk to is now Kotlin running in the same
+process, speaking Roon's protocols natively — the approach
+[Display-extension-apk](https://github.com/meltface-80/Display-extension-apk)
+established, applied to a much larger app.
+
+**"Lite" means one thing above all: no record labels.** That feature is most of
+the original's weight and it cannot work on a phone at all — details in
+[What's not here](#whats-not-here).
+
+## How it fits together
+
+```
+┌──────────────────────────────────────────────────┐
+│ MainActivity — a WebView                         │
+│   assets/web/  =  MusicD-Remote's public/, as-is │
+└───────────────────────┬──────────────────────────┘
+                        │  http://127.0.0.1:<port>/api/...
+┌───────────────────────▼──────────────────────────┐
+│ :core  (plain Kotlin/JVM — unit-tested)          │
+│   HttpServer  →  RemoteApi                       │
+│   AlbumIndex · Search · LibraryView · Albums     │
+│   RoonCore:  SOOD → MOO → registry/transport/    │
+│              browse/image                        │
+└───────────────────────┬──────────────────────────┘
+                        │  ws://<core>:<port>/api
+                  ┌─────▼─────┐
+                  │ Roon Core │
+                  └───────────┘
+```
+
+Two decisions carry the whole design:
+
+**The front-end is served over real HTTP, from a loopback socket.** Intercepting
+requests inside the WebView would have avoided the socket, but
+`shouldInterceptRequest` is never handed the *body* of a POST — and the UI POSTs
+for every play, queue, volume change and setting. Serving it properly means the
+page runs byte-identical to the browser version, and a newer upstream UI is a
+file copy rather than a merge.
+
+**Everything that is not Android lives in `:core`,** a plain Kotlin/JVM module.
+That is what makes the protocol layer, the stale-offset defence and the whole
+API testable on a JVM with no emulator — see [Verification](#verification).
+
+## Install
+
+Build it (below) or take the APK from the
+[latest CI run](../../actions/workflows/build.yml) — every push produces one, and
+a `v*` tag attaches it to a release. Android 8.0 (API 26) or newer.
+
+The APK is signed with the standard Android debug key, so it installs alongside
+anything else but will not update in place over a differently-signed build.
+
+Then, once:
+
+1. Open the app on the same Wi-Fi as your Roon Core.
+2. In Roon: **Settings → Extensions → Enable "MusicD Remote Lite (Android)"**.
+
+The pairing token is stored per Core, so approval only happens the first time.
+Until it does, the app's notification tells you exactly what it is waiting for.
+
+## What's here
+
+Everything below works against your library through Roon's browse API, with the
+original's screens unchanged:
+
+- **Discovery** — a wall of random albums, filtered by genre, tag or decade;
+  Album of the Day; a "not played in N months" row; recently played.
+- **The whole library** — a paged, sortable grid (title, artist, year, added,
+  play count, last played, or a stable shuffle) with focus facets.
+- **Instant search** over the whole library, matched locally on every keystroke:
+  prefix-aware, out-of-order (`dark moon` → *Dark Side of the Moon*) and
+  typo-tolerant.
+- **Album pages** — track list, release year, album and artist write-ups,
+  linkable artist credits, play / queue / play-next / start-radio.
+- **Playback** — zones and grouping, transport, per-output volume and mute,
+  shuffle / repeat / Roon Radio, the queue, play-from-here, zone transfer,
+  standby and convenience-switch on source-controlled devices.
+- **Multi-select** — queue many albums in one go.
+- **Random Album Radio** — when a zone's queue runs dry, another album goes on.
+- **Play history** — kept locally, and what "unheard" and "rediscover" are built
+  from. This is the feature that gets better the longer the app is installed.
+- **The wall display** — the `/display` page, for a tablet in a listening room.
+
+Release years come from MusicBrainz and the write-ups from Wikipedia. Both are
+free and need no key.
+
+## What's not here
+
+The interface still has one entry for each of these; the app answers "this
+feature is off" in the shape the front-end already understands, so those screens
+show their own empty state instead of an error.
+
+| Not in this build | Why |
+|---|---|
+| **Record labels** — Label of the Week, the label explorer, label logos, merges | The label index is built by reading tags off a **mounted music directory** and then querying iTunes, MusicBrainz, TheAudioDB, Discogs and FanArt.tv. A phone has no `/music` to mount, so the primary source does not exist — and the rest of that chain is the single largest piece of the original. This is the "lite" in the name. |
+| **Qobuz and TIDAL** browsing, favourites, external search | Both need an account login, and TIDAL needs an OAuth device flow. Deferred, not ruled out. |
+| Quality badges (sample rate / bit depth) and source badges | Read from file tags on the mounted music directory. Same missing input as labels. |
+| Playlists, smart playlists, share cards, import | Self-contained features, not yet ported. Their screens list nothing rather than failing. |
+| Pitchfork reviews | Page scraping; not carried over. |
+| In-app self-update | A Docker-era feature. An APK updates by being installed. |
+
+Nothing on that list is a protocol limitation. Labels aside, they are scope.
+
+## Build
+
+```bash
+ANDROID_HOME=/path/to/sdk ./gradlew :app:assembleRelease
+```
+
+Needs JDK 17+, Android SDK platform 36 and build-tools 36.0.0. Output lands in
+`app/build/outputs/apk/release/`.
+
+`:core` needs no Android SDK at all:
+
+```bash
+./gradlew :core:test
+```
+
+## Verification
+
+**102 unit tests, all passing.** They run on a plain JVM, which is the point of
+splitting `:core` out: the parts most worth testing are tested without an
+emulator in the loop.
+
+- **Wire format, checked against Roon's own code.** `tools/verify-wire.js` feeds
+  the frames the Kotlin encoder produces to `node-roon-api`'s own `moo.js`, and
+  decodes the SOOD query with `sood.js`'s layout — so the framing is verified
+  against RoonLabs' implementation rather than against one reading of the
+  protocol. CI runs it on every push.
+
+  ```bash
+  git clone --depth 1 https://github.com/RoonLabs/node-roon-api /tmp/node-roon-api
+  ./gradlew :core:test && node tools/verify-wire.js /tmp/node-roon-api
+  ```
+
+- **Zone state.** `subscribe_zones` payloads: the initial set, added / removed /
+  changed deltas, and the separate seek-position delta that must not clobber
+  anything else.
+
+- **The browse walkers.** Paging, navigating to a genre's or tag's album list,
+  the Play menu drill, and the session pooling Roon's server-side state depends
+  on — driven against a scripted Core that answers `browse` and `load` with real
+  shapes.
+
+- **The stale-offset defence.** A tile carries the offset its album had when the
+  index was built, and a library edit shifts those positions. The tests insert
+  an album at the front of the library without rebuilding the snapshot and
+  assert that the right record still plays; that an album which has left the
+  library refuses rather than playing whatever now sits at its offset; and that
+  nothing is invoked on Roon in the failure cases.
+
+- **The API, end to end over a real socket.** 29 tests drive the shipping HTTP
+  server and router — the JSON the unmodified front-end reads, `409` on a moved
+  album, `503` when unpaired, and the "feature is off" shapes.
+
+**Not yet verified against a live Roon Core.** There is no Core in the build
+environment. The protocol layer is checked against Roon's own code and the API
+end to end against a scripted one, but the first real pairing is untested.
+
+**The APK itself has not been compiled.** The environment this was written in
+cannot reach `dl.google.com`, so the Android SDK and Gradle plugin could not be
+downloaded. `:core` — which is nearly all of the code — compiles and its tests
+pass; the `:app` module is the thin shell around it and is built by CI on the
+first push.
+
+## Limits
+
+- **LAN only.** Roon extensions have no remote or ARC path; away from home needs
+  a VPN.
+- The phone cannot become a Roon *output* — that needs RAAT, licensed only
+  through the Roon Ready partner programme. This is a control surface.
+- The app runs a foreground service, and shows a notification, because it *is*
+  the extension: its pairing, library snapshot and history live in the app
+  process, so it has to survive the screen going off.
+- Requires a running Roon Server and a Roon subscription.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).
+
+The front-end in `app/src/main/assets/web/` is MusicD Remote's, copyright (c)
+2026 Lewis Menzies (Music Duck / MusicD), MIT — see the `NOTICE` beside it.
+
+Not affiliated with or endorsed by Roon Labs. "Roon" is their trademark.

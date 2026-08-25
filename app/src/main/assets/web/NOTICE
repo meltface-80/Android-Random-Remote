@@ -1,0 +1,14 @@
+The files in this directory are the front-end of MusicD Remote (for Roon),
+copied unmodified from https://github.com/meltface-80/MusicD-Remote (public/).
+
+  Copyright (c) 2026 Lewis Menzies (Music Duck / MusicD)
+  Released under the MIT License.
+
+They are bundled here so the app presents the same interface. Every /api/...
+request they make is answered by the Kotlin implementation in :core rather than
+by the Node server they were written against. Endpoints this build does not
+implement answer in the UI's own "feature is off" shape, so no screen is left
+in an error state.
+
+Keeping these files byte-identical to upstream is deliberate: it is what makes
+pulling in a newer MusicD-Remote UI a copy rather than a merge.

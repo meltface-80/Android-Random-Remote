@@ -1,0 +1,3960 @@
+/* ------------------------------------------------------------------ */
+/*  Random Albums — Roon-inspired styling                              */
+/*  Copyright (c) 2026 Lewis Menzies (Music Duck / MusicD)             */
+/*  Released under the MIT License. See the LICENSE file for details.  */
+/*  Mobile-first: stacked layout by default, side-by-side on wide.     */
+/* ------------------------------------------------------------------ */
+/* `:root` is the dark+classic palette. The second selector lets a nested
+   element opt into it explicitly — the theme picker's swatches do exactly
+   that, so each one previews its own palette rather than the applied one.
+   The other three palettes already use attribute selectors, which match
+   any element; this one needed the extra selector to behave the same. */
+:root,
+[data-theme="dark"][data-palette="classic"] {
+  --font-sans: "Helvetica Neue", Helvetica, Arial, system-ui, -apple-system,
+               "Segoe UI", Roboto, sans-serif;
+
+  --bg:           #0e1012;
+  --bg-elev:      #16191c;
+  --bg-elev-2:    #1d2125;
+  --border:       #262a2f;
+  --text:         #e9eaec;
+  --text-dim:     #8a8f96;
+  --text-faint:   #5d6269;
+  --accent:       #4cb7e6;
+  /* The accent used as TEXT. Identical to --accent in this palette, so nothing
+     here changes — it exists because a fill colour and a text colour have
+     different contrast requirements, and the copper palette below genuinely
+     needs two values. Declaring it in every palette keeps the CSS uniform. */
+  --accent-text:  #4cb7e6;
+  --accent-soft:  rgba(76,183,230,.15);
+  /* Text printed ON an accent fill. Was hard-coded at nine sites in three
+     different literals (#0b1418, #04121a and a bare #fff), three of which had
+     no light-theme override at all and shipped white-on-cyan at 2.28:1. */
+  --on-accent:    #0b1418;
+  /* --bg with alpha, for the blurred top bar. backdrop-filter needs the
+     translucency, so it cannot use var(--bg) — which is why this used to be a
+     hard-coded rgba that no new palette could reach. */
+  --bg-translucent: rgba(14,16,18,.85);
+  --danger:       #e06464;
+  --panel-hairline: rgba(255,255,255,.07);  /* row separators on tinted panels */
+  --shadow-card:  0 2px 6px rgba(0,0,0,.45), 0 10px 24px rgba(0,0,0,.35);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,.6);
+
+  /*  Control sizing. Until v1.7.50 every height, padding and min-width in this
+      file was a hand-written one-off, which is how one shared .action-btn class
+      came to render at four different heights depending on which container it
+      landed in. These are the three sizes the app actually uses.
+        --ctl-h      the standard control height (buttons, selects, rows)
+        --ctl-h-sm   compact controls inside dense panes
+        --tap-min    the minimum any TAPPABLE thing may be; 44px is the figure
+                     the Library control row already met and the rest did not  */
+  --ctl-h: 40px;
+  --ctl-h-sm: 36px;
+  --tap-min: 44px;
+  --ctl-pad-x: 16px;
+  --ctl-radius: 999px;
+}
+
+[data-theme="light"] {
+  --bg:           #f6f5f2;
+  --bg-elev:      #ffffff;
+  --bg-elev-2:    #fbfaf7;
+  --border:       #e3e0d9;
+  --text:         #1a1c1f;
+  --text-dim:     #5e636a;
+  --text-faint:   #8c919a;
+  --accent:       #1f8fc1;
+  --accent-text:  #1f8fc1;
+  --accent-soft:  rgba(31,143,193,.12);
+  --on-accent:    #ffffff;
+  --bg-translucent: rgba(246,245,242,.85);
+  --panel-hairline: rgba(26,39,64,.12);     /* row separators on tinted panels */
+  --danger:       #c0392b;
+  --shadow-card:  0 1px 2px rgba(0,0,0,.06), 0 6px 16px rgba(0,0,0,.08);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,.18);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Palettes                                                           */
+/*                                                                     */
+/*  data-theme  = dark | light    — the FAMILY. Drives the thirteen    */
+/*                                  component rules further down this  */
+/*                                  file ([data-theme="light"] .foo).  */
+/*  data-palette = classic | copper — the COLOURS. Tokens only.        */
+/*                                                                     */
+/*  Both palette blocks are qualified by family, because --on-accent   */
+/*  is family-dependent: a dark palette prints near-black on its fill, */
+/*  a light one prints near-white. A palette-only selector would give  */
+/*  the brass theme the copper theme's dark on-accent.                 */
+/*  Specificity (0,2,0) beats the family blocks above (0,1,0).         */
+/* ------------------------------------------------------------------ */
+
+/* Copper dark — the MusicD site's palette. Eight of these are that site's
+   values verbatim; the rest are derived to fit tokens it has no concept of. */
+[data-theme="dark"][data-palette="copper"] {
+  --bg:           #1b1d1f;
+  --bg-elev:      #232628;
+  --bg-elev-2:    #2a2d30;
+  --border:       #35393d;
+  --text:         #e8e6e3;
+  --text-dim:     #a8a49e;
+  /* The site has only two text tiers; this third one is derived from --text-dim
+     and darkened until it clears 4.5:1 on the DEEPEST surface (4.61 on
+     --bg-elev-2). The current dark theme's equivalent fails at 2.64. */
+  --text-faint:   #9a948c;
+  /* Copper for fills, a lighter copper for text. This is not a preference:
+     #c47f4a as text on --bg-elev-2 measures 4.27:1, a real failure, while
+     #d99a66 gives 5.78. The site itself splits them the same way. */
+  --accent:       #c47f4a;
+  --accent-text:  #d99a66;
+  --accent-soft:  rgba(196,127,74,.15);
+  /* Warm near-black rather than the cool #0b1418, so a copper fill doesn't
+     read blue-shadowed. 5.74:1. */
+  --on-accent:    #17120d;
+  --bg-translucent: rgba(27,29,31,.85);
+  /* Hue 3 degrees against copper's 26, and light enough to clear 4.5:1 on
+     every surface including the deepest (4.81). */
+  --danger:       #e8776f;
+  /* Warm white rather than pure white — a neutral hairline reads faintly blue
+     against charcoal. */
+  --panel-hairline: rgba(235,228,220,.08);
+  /* --bg here is 2.4x lighter than the classic dark background, so identical
+     shadows read weaker. Alphas lifted to compensate. */
+  --shadow-card:  0 2px 6px rgba(0,0,0,.50), 0 10px 24px rgba(0,0,0,.40);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,.62);
+}
+
+/* Brass light — designed, because the site has no light mode. The restraint
+   is in the CHROMA, not the hue: the neutrals sit a few points of yellow above
+   grey, which reads as paper rather than as a yellow wash, and all the colour
+   weight lives in the accent. Elevation runs the same direction as the classic
+   light theme (elev lighter than bg), so existing depth cues still work. */
+[data-theme="light"][data-palette="copper"] {
+  --bg:           #f7f4ed;
+  --bg-elev:      #fffdf8;
+  --bg-elev-2:    #fbf8f1;
+  --border:       #e4ded1;
+  --text:         #1e1b16;
+  --text-dim:     #5c554a;
+  --text-faint:   #756c5e;
+  /* The site's own --copper-dim. One value serves both roles here: 5.32:1 as
+     text and 5.75:1 under --on-accent, so this palette needs no split. */
+  --accent:       #8a5a35;
+  --accent-text:  #8a5a35;
+  --accent-soft:  rgba(138,90,53,.12);
+  --on-accent:    #fffdf8;
+  --bg-translucent: rgba(247,244,237,.85);
+  --danger:       #b3271d;
+  /* Warm brown rather than the classic light theme's cool blue-grey, which
+     would grey the parchment. */
+  --panel-hairline: rgba(58,44,26,.13);
+  --shadow-card:  0 1px 2px rgba(58,44,26,.07), 0 6px 16px rgba(58,44,26,.10);
+  --shadow-modal: 0 24px 64px rgba(58,44,26,.20);
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  height: 100%;
+  overflow: hidden;                  /* the .app shell owns layout; only <main> scrolls */
+  overscroll-behavior: none;         /* kill iOS rubber-band that detaches the fixed bars */
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  touch-action: manipulation;        /* disable double-tap-zoom, keep scroll */
+  -webkit-text-size-adjust: 100%;
+  -webkit-user-select: none;         /* disable tap-to-select on iOS/Android */
+  user-select: none;
+}
+/* Re-enable selection only where text entry is expected */
+input, textarea, [contenteditable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+button { font-family: inherit; }
+
+/* Fixed full-screen shell: header pinned top, <main> scrolls, transport pinned
+   bottom (as a fixed sibling). Because the page body never scrolls, the bars
+   can't drift when the iOS keyboard opens — the keyboard just overlays the
+   bottom of the screen (and the transport bar). */
+.app {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; /* inset longhands: old Safari (<14.1) */
+  z-index: 0;
+  display: flex; flex-direction: column;
+}
+
+/* No safe-area strip here, deliberately.
+ *
+ * v1.7.61 added a `body::after` band painted with --bg to cover the home
+ * indicator. It was wrong twice over. First, it was unnecessary: `html` carries
+ * `background: var(--bg)`, which propagates to the canvas, so an uncovered safe
+ * area is already the page ground and was never going to be black from the
+ * page's side. Second, it was actively harmful: at z-index 69 it sat ABOVE
+ * .modal (50) and .share-overlay (60), and the transport bar is hidden on the
+ * Now Playing screen — so it painted a fresh --bg bar straight over the panel's
+ * lighter --bg-elev. That is why Now Playing got worse rather than better.
+ *
+ * Every bottom-anchored surface pads its own background into the inset already
+ * (.mini-transport, .settings-sheet, .lib-sheet, .menu-drawer, the merge bars,
+ * both volume popovers), and .modal-panel now fills its fixed parent instead of
+ * measuring itself in dvh. Nothing is left for a strip to cover. */
+
+
+/* ------------------------------------------------------------------ */
+/*  Top bar                                                            */
+/* ------------------------------------------------------------------ */
+.topbar {
+  position: relative; z-index: 20;
+  flex: 0 0 auto;
+  display: flex; flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  padding-top: calc(12px + env(safe-area-inset-top));
+  background: var(--bg-translucent);
+  backdrop-filter: saturate(160%) blur(14px);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-row {
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 10px;
+}
+/* Refresh sits at the far right of the top bar. */
+#topbar-refresh { margin-left: auto; }
+
+
+.album-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(50vw);
+}
+[data-theme="light"] .album-count { color: #000000; }
+.album-count.hidden { display: none; }
+
+.scan-progress-bar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--border);
+}
+.scan-progress-bar.hidden { display: none; }
+.scan-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width .4s ease;
+  width: 0%;
+}
+
+.topbar-controls {
+  display: flex; align-items: center; gap: 8px;
+  margin-left: auto;
+}
+
+.icon-btn, .primary-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px; border-radius: 999px; cursor: pointer;
+  transition: background .15s ease, color .15s ease, border-color .15s ease, transform .08s ease;
+  user-select: none;
+}
+.icon-btn {
+  width: var(--ctl-h); height: var(--ctl-h);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.icon-btn:hover { color: var(--text); background: var(--bg-elev-2); }
+.icon-btn:active { transform: scale(.96); }
+
+.primary-btn {
+  height: 38px; padding: 0;
+  width: 38px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600; font-size: 14px;
+  border: 1px solid transparent;
+}
+.primary-btn span { display: none; }
+.primary-btn:hover { filter: brightness(1.08); }
+.primary-btn:active { transform: scale(.97); }
+.primary-btn[disabled] { opacity: .5; cursor: progress; }
+
+@media (min-width: 720px) {
+  .topbar { padding: 14px 22px; }
+  .topbar-row { gap: 16px; }
+  .primary-btn { width: auto; padding: 0 16px; }
+  .primary-btn span { display: inline; }
+}
+
+/* Phone top bar: the persistent album count is gone (it now lives in
+   Settings), so the icon buttons get room to grow. Sized in tiers so all
+   controls (up to 8, once Tidal is connected) still fit one row without
+   overflow. Row width = viewport − 28px topbar padding; 8 buttons + 7 gaps
+   must fit:
+     ≤479 (≥390px phones): 40px + 6 → 320+42 = 362 ≤ 362 at 390px
+     ≤389 (360–389px):     37px + 5 → 296+35 = 331 ≤ 332 at 360px
+     ≤359 (down to 320px): 33px + 4 → 264+28 = 292 ≤ 292 at 320px */
+@media (max-width: 479px) {
+  .topbar-controls { gap: 6px; }
+  .topbar .icon-btn, .topbar .primary-btn { width: 40px; height: 40px; }
+  .topbar .icon-btn svg, .topbar .primary-btn svg { width: 20px; height: 20px; }
+}
+@media (max-width: 389px) {
+  .topbar-controls { gap: 5px; }
+  .topbar .icon-btn, .topbar .primary-btn { width: 37px; height: 37px; }
+  .topbar .icon-btn svg, .topbar .primary-btn svg { width: 19px; height: 19px; }
+}
+@media (max-width: 359px) {
+  .topbar-controls { gap: 4px; }
+  .topbar .icon-btn, .topbar .primary-btn { width: 33px; height: 33px; }
+  .topbar .icon-btn svg, .topbar .primary-btn svg { width: 18px; height: 18px; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Search bar — collapsed by default, opened by the magnifier beside it.
+    The .open class is what reveals it; the glass hides itself while it is
+    open so the two never occupy the bar at once.  */
+/* ------------------------------------------------------------------ */
+.search-row {
+  display: none;                 /* collapsed by default */
+  align-items: center; gap: 10px;
+  width: 100%;
+}
+.search-row.open {
+  display: flex;
+  animation: searchReveal .18s ease;
+}
+@keyframes searchReveal {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+.search-box {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 8px 8px 14px;
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.search-ico { color: var(--text-faint); flex: 0 0 auto; }
+.search-box:focus-within .search-ico { color: var(--accent-text); }
+#search-input {
+  flex: 1 1 auto; min-width: 0;
+  appearance: none; background: transparent; color: var(--text);
+  border: 0; outline: none;
+  font-size: 16px;            /* 16px keeps iOS Safari from zooming on focus */
+  line-height: 1.2; padding: 2px 0;
+}
+#search-input::placeholder { color: var(--text-faint); }
+/* Hide the native clear/decoration; we render our own button */
+#search-input::-webkit-search-decoration,
+#search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.search-clear {
+  flex: 0 0 auto;
+  width: 30px; height: 30px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-elev-2); color: var(--text-dim);
+  border: 1px solid var(--border); cursor: pointer;
+  transition: color .15s ease, background .15s ease, transform .08s ease;
+}
+.search-clear:hover  { color: var(--text); }
+.search-clear:active { transform: scale(.94); }
+.search-status {
+  flex: 0 0 auto;
+  font-size: 12px; color: var(--text-faint);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+@media (max-width: 520px) {
+  /* On the narrowest screens the count sits under the field to save width */
+  .search-status:empty { display: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Search result sections (Artists / Labels / Albums headers + chips) */
+/* ------------------------------------------------------------------ */
+.search-section-header {
+  grid-column: 1 / -1;
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 14px 0 6px;
+}
+.search-section-header:first-child { padding-top: 4px; }
+.search-chip-row {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding-bottom: 6px;
+}
+/* Global-search external rows (Qobuz / Tidal / Pitchfork sections). Full-width
+   rows inside the results grid, matching the streaming browsers' row style.
+   The wrapper is display:contents so the grid lays out its children directly —
+   it exists only so a slow library render can re-attach all external sections
+   as one node. (Pre-11.1 Safari treats it as a block: rows stack full-width
+   inside one grid cell — acceptable degradation.) */
+.ext-search-wrap { display: contents; }
+.ext-search-row {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px; border-radius: 10px;
+  background: var(--bg-elev-2); border: none;
+  cursor: pointer; text-align: left;
+  color: var(--text); font-family: inherit; font-size: 14px;
+}
+.ext-search-row:active { background: var(--bg-elev); }
+.ext-search-art {
+  flex-shrink: 0; width: 48px; height: 48px; border-radius: 6px;
+  object-fit: cover; background: var(--bg-elev);
+}
+.ext-search-meta  { flex: 1; min-width: 0; }
+.ext-search-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ext-search-sub   { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ext-search-score {
+  flex-shrink: 0; min-width: 30px; padding: 2px 7px; border-radius: 999px;
+  background: rgba(0,0,0,.72); color: #fff;
+  font-size: 12px; font-weight: 700; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.ext-search-score.is-bnm { background: #d4a017; color: #1a1000; }
+
+.search-chip {
+  display: inline-flex; align-items: center;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 14px; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.search-chip:hover, .search-chip:active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+/* ------------------------------------------------------------------ */
+/*  Update toast (sits under the header; shown when an update exists)   */
+/* ------------------------------------------------------------------ */
+.update-toast {
+  display: none;
+  flex: 0 0 auto;
+  flex-direction: column;
+  padding: 10px 14px;
+  padding-left: max(14px, env(safe-area-inset-left));
+  padding-right: max(14px, env(safe-area-inset-right));
+  background: var(--accent-soft);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  animation: searchReveal .2s ease;
+  gap: 8px;
+}
+.update-toast.open { display: flex; }
+.update-toast.is-error { background: color-mix(in srgb, #e5484d 16%, transparent); }
+.update-toast-top { display: flex; align-items: center; gap: 10px; }
+.update-ico { color: var(--accent-text); flex: 0 0 auto; }
+.update-toast.is-error .update-ico { color: #e5484d; }
+.update-text { flex: 1 1 auto; min-width: 0; line-height: 1.35; }
+.update-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.update-actions .primary-btn { width: auto; padding: 0 14px; height: 36px; }
+.update-actions .primary-btn span { display: inline; }
+.update-later {
+  width: auto; padding: 0 12px; height: 36px; border-radius: 10px;
+  font-size: 13px; color: var(--text-dim);
+}
+.update-later:hover { color: var(--text); }
+.update-actions.busy { opacity: .7; pointer-events: none; }
+.update-notes {
+  font-size: 12px; color: var(--text-dim); line-height: 1.5;
+  white-space: pre-wrap; max-height: 120px; overflow-y: auto;
+  border-top: 1px solid var(--border); padding-top: 8px;
+}
+.settings-release-notes {
+  font-size: 12px; color: var(--text-dim); line-height: 1.5;
+  white-space: pre-wrap; padding: 10px 0 4px; max-height: 200px; overflow-y: auto;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Status banner                                                      */
+/* ------------------------------------------------------------------ */
+.status-banner {
+  margin: 14px 14px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  font-size: 14px; line-height: 1.45;
+}
+.status-banner.error {
+  border-color: var(--danger);
+  color: var(--text);
+}
+@media (min-width: 720px) {
+  .status-banner { margin: 18px 22px 0; }
+}
+.hidden { display: none !important; }
+
+/* ------------------------------------------------------------------ */
+/*  Album grid                                                         */
+/* ------------------------------------------------------------------ */
+main {
+  flex: 1 1 auto; min-height: 0;     /* min-height:0 lets the flex child actually scroll */
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: none;         /* no bounce, no pull-to-refresh on any device */
+  padding: 14px;
+}
+@media (min-width: 768px) { main { padding: 18px; } }
+@media (min-width: 1200px) { main { padding: 22px; } }
+
+.album-grid {
+  display: grid;
+  /* Phone portrait default: 3×3. minmax(0,1fr) prevents long titles
+     from stretching one column wider than others. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 10px;
+}
+
+/* ── Tablet portrait: 5×4 ───────────────────────────────────────── */
+@media (min-width: 768px) and (orientation: portrait) {
+  .album-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px 14px; }
+}
+
+/* ── Tablet landscape: 7×3 ──────────────────────────────────────── */
+@media (min-width: 768px) and (max-width: 1199px) and (orientation: landscape) {
+  .album-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 16px 12px; }
+}
+
+/* ── Desktop: 9×5 ───────────────────────────────────────────────── */
+@media (min-width: 1200px) {
+  .album-grid { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 18px 12px; }
+}
+
+/* Title/subtitle scale — phone (≤767px) rules live AFTER the base
+   .album-meta/.album-title/.album-artist rules further down, because equal
+   specificity means source order decides and the base rules would win. */
+/* Tablet portrait (5 cols) and tablet landscape (7 cols) also need small text */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .album-title {
+    font-size: 12px; line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .album-artist { font-size: 11px; }
+}
+/* Desktop (9 cols) compact text */
+@media (min-width: 1200px) {
+  .album-title {
+    font-size: 11px; line-height: 1.2;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .album-artist { font-size: 10px; }
+}
+
+.album {
+  display: flex; flex-direction: column;
+  cursor: pointer; background: transparent; border: 0; padding: 0; margin: 0;
+  text-align: left; color: inherit;
+  min-width: 0;   /* prevent overflow from forcing the grid track wider */
+  transition: transform .18s ease;
+}
+.album:hover .album-art-wrap { box-shadow: var(--shadow-card); transform: translateY(-2px); }
+.album:active { transform: scale(.985); }
+
+.album-art-wrap {
+  position: relative; width: 100%; aspect-ratio: 1 / 1;
+  background: var(--bg-elev-2);
+  border-radius: 6px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.album-art-wrap img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  pointer-events: none;       /* block right-click / drag on desktop */
+  -webkit-touch-callout: none; /* suppress iOS long-press save menu */
+  -webkit-user-select: none;
+  user-select: none;
+}
+.album-art-wrap.no-image::after {
+  content: "♪";
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; /* inset longhands: old Safari */
+  display: flex; align-items: center; justify-content: center;
+  font-size: 48px; color: var(--text-faint);
+}
+
+/* Record-label tiles reuse the album grid cell, with a tag glyph in place
+   of cover art (labels have no artwork). */
+.album-art-wrap.is-label {
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--bg-elev-2), var(--bg-elev));
+}
+.album-art-wrap.is-label svg { width: 38%; height: 38%; color: var(--text-faint); }
+
+/* Label logo tile — logo image centred with padding, not cropped */
+.album-art-wrap.is-label-logo {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-elev-2);
+}
+.album-art-wrap.is-label-logo img { width: 80%; height: 80%; object-fit: contain; display: block; }
+
+/* Label name text tile — shown when no logo is available.
+   Each word of the label name sits on its own line, centred.
+   font-size uses container query width (cqw) so it scales with the tile
+   and 16-letter words always fit with thin margins regardless of screen size. */
+.album-art-wrap.is-label-text {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; padding: 8px; box-sizing: border-box;
+  background: linear-gradient(135deg, var(--bg-elev-2), var(--bg-elev));
+  container-type: inline-size;
+}
+.album-art-wrap.is-label-text span {
+  display: block; text-align: center;
+  font-size: 9cqw;
+  font-weight: 700; line-height: 1.2;
+  color: var(--text); max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Back bar shown above the grid while viewing one label's albums */
+.labels-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.labels-bar.hidden { display: none; }
+.labels-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  color: var(--text-dim); border-radius: 999px; padding: 6px 14px 6px 10px;
+  font-size: 13px; cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.labels-back:hover { color: var(--text); background: var(--bg-elev-2); }
+.labels-back:active { transform: scale(.97); }
+.labels-title {
+  font-size: 15px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; flex: 1;
+}
+.logo-url-sheet {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 6px 0 14px;
+}
+.logo-url-sheet.hidden { display: none; }
+.logo-candidates {
+  display: flex; gap: 8px; overflow-x: auto;
+  padding: 2px 0 2px; min-height: 104px;
+  align-items: center; scrollbar-width: none;
+}
+.logo-candidates::-webkit-scrollbar { display: none; }
+.logo-candidates-hint { font-size: 12px; color: var(--text); opacity: 0.5; }
+.logo-candidate-btn {
+  flex-shrink: 0; width: 104px; height: 104px; padding: 2px;
+  border-radius: 8px; overflow: hidden;
+  border: 2px solid var(--border); cursor: pointer;
+  background: var(--bg-elev-2);
+}
+.logo-candidate-btn img { width: 100%; height: 100%; object-fit: contain; border-radius: 4px; }
+.logo-candidate-btn:active { border-color: var(--accent); }
+.logo-manual-row { display: flex; align-items: center; gap: 8px; }
+.logo-url-input {
+  flex: 1; min-width: 0;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px;
+  color: var(--text); font-size: 14px; font-family: inherit;
+}
+.logo-url-input:focus { outline: none; border-color: var(--accent); }
+.album-meta { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.album-title {
+  font-size: 14px; font-weight: 500; color: var(--text); line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.album-artist {
+  font-size: 13px; color: var(--text-dim); line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Phone (3 cols, ≤767px): tighter gutters and a trimmed tile text block so
+   more rows fit; title clamps to 2 lines on all phones, including <360px.
+   NOTE: keep the TEXT_BLOCK / gap constants in computeAlbumCount() (app.js)
+   in sync with the values below. This block sits after the base
+   .album-meta/.album-title/.album-artist rules on purpose — equal
+   specificity means source order decides. */
+@media (max-width: 767px) {
+  .album-grid { gap: 12px 8px; }
+  .album-meta { margin-top: 5px; gap: 1px; }
+  .album-title {
+    font-size: 12px; line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .album-artist { font-size: 10.5px; }
+}
+
+/* Phone portrait: fill the visible wall with exactly N rows (target 4) without
+   scrolling. app.js (measurePhoneWall) sets --phone-art to the largest square
+   art size that lets the target rows fit the measured content box, and adds
+   .phone-fit. When the wall is width-limited the art is the natural third-of-
+   width (no shrink); when height-limited the art shrinks a little so the rows
+   still fit instead of overflowing. Class is added only for the album wall on
+   phones (removed in the labels browser and on tablet/desktop). */
+.album-grid.phone-fit {
+  grid-template-columns: repeat(3, var(--phone-art, 1fr));
+  justify-content: center;
+  column-gap: 8px;
+  row-gap: 10px;
+}
+
+/* Skeleton */
+.album.skeleton .album-art-wrap {
+  background: linear-gradient(110deg,
+    var(--bg-elev-2) 30%,
+    var(--border) 50%,
+    var(--bg-elev-2) 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+.album.skeleton .album-title,
+.album.skeleton .album-artist {
+  background: var(--bg-elev-2); color: transparent;
+  border-radius: 3px; margin-top: 2px;
+}
+.album.skeleton .album-title  { height: 14px; width: 75%; }
+.album.skeleton .album-artist { height: 12px; width: 55%; margin-top: 6px; }
+@keyframes shimmer {
+  0%   { background-position:  200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Modal — mobile first (stacked), side-by-side ≥ 720px              */
+/* ------------------------------------------------------------------ */
+.modal {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 50; /* inset longhands: old Safari */
+  display: flex; padding: 0; align-items: stretch;
+}
+.modal-backdrop {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.modal-panel {
+  position: relative;
+  width: 100%;
+  /* height:100% of .modal, which is `position: fixed; inset: 0` — the full
+     screen INCLUDING the safe areas.
+     It was 100dvh. In an iOS standalone PWA the dynamic viewport excludes the
+     safe-area insets while a fixed inset:0 parent covers them, so the panel came
+     up short and the .modal-backdrop scrim (rgba(0,0,0,.55) + blur) showed
+     through underneath as a dark band across the home indicator — darker and
+     taller than the inset itself, which is why the Now Playing screen looked
+     worse than everywhere else. Percentages of a fixed parent have no such
+     ambiguity. */
+  height: 100%; max-height: 100%;
+  background: var(--bg-elev); color: var(--text);
+  border-radius: 0; border: 0;
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  animation: modal-in .18s ease-out;
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (min-width: 720px) {
+  .modal { padding: 24px; align-items: center; justify-content: center; }
+  .modal-panel {
+    width: min(960px, 100%); height: auto; max-height: calc(100vh - 48px);
+    border-radius: 12px; border: 1px solid var(--border);
+  }
+}
+
+/* The page is viewport-fit=cover, so the panel's own top edge is the physical
+   top of the display — under the status bar / dynamic island on a phone. Every
+   pinned corner button therefore needs the inset the topbar already applies;
+   env() is 0 where there is no inset, so nothing changes on desktop. */
+.modal-close { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; z-index: 2; }
+
+.modal-body {
+  /* Positioned (NO z-index) so it paints above the #modal-ambient glow layer
+     (positioned, z-index:0, earlier in the DOM) WITHOUT creating a stacking
+     context — the np popovers inside (z-index:6) must keep beating the pinned
+     close/share buttons (z-index:2) in the panel's context. */
+  position: relative;
+  display: flex; flex-direction: column;
+  gap: 22px;
+  padding: calc(64px + env(safe-area-inset-top)) 18px 40px;
+  /* Leave room at the bottom so the mini transport (≈78px tall + safe area)
+     stays visible / not overlapping the last bit of content. */
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.modal-art {
+  position: relative;         /* positioning context for the source badge */
+  width: 100%; max-width: 280px; margin: 0 auto;
+  aspect-ratio: 1 / 1;
+  background: var(--bg-elev-2);
+  /* Square and flat, as Roon has it — the drop shadow belonged to the
+     card-era look. np-mode's Now playing tab overrides both of these on the
+     img itself (see .modal.np-mode.tab-album .modal-art), so this only
+     affects the album view. */
+  border-radius: 3px; overflow: hidden;
+  flex-shrink: 0;
+}
+.modal-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.modal-info { display: flex; flex-direction: column; min-width: 0; }
+.modal-info h2 {
+  margin: 14px 0 6px;
+  /* Larger and heavier than the old 22px/500 — Roon leads its album screen
+     with the title, and at 22px it read as a caption above the button row. */
+  font-size: 27px; font-weight: 700; line-height: 1.15;
+  letter-spacing: -.02em; word-break: break-word;
+}
+.modal-subtitle {
+  margin: 0 0 20px;
+  color: var(--text-dim); font-size: 15px;
+}
+
+@media (min-width: 720px) {
+  .modal-body {
+    flex-direction: row; align-items: flex-start;
+    gap: 28px;
+    padding: 28px;
+  }
+  .modal-art {
+    flex: 0 0 320px; max-width: 320px; margin: 0;
+  }
+  .modal-info { flex: 1 1 auto; min-width: 0; }
+  .modal-info h2 { font-size: 26px; }
+}
+
+.modal-loading { color: var(--text-faint); font-size: 13px; padding: 8px 0; }
+.modal-error   { color: var(--danger);     font-size: 13px; padding: 8px 0; }
+
+.modal-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-bottom: 22px;
+}
+.action-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  flex: 1 1 0; min-width: 0;
+  border-radius: var(--ctl-radius);
+  /*  ONE height for every .action-btn in the app. It used to render at 37px on
+      the playlist screens, 40px in the album modal, 38px on a track row and
+      38px in the label merge sheet — the same class, four heights, because
+      each container re-declared its own padding.  */
+  min-height: var(--ctl-h);
+  padding: 0 8px;
+  font-size: 13px; font-weight: 500;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: filter .15s ease, transform .08s ease;
+}
+.action-btn:hover { filter: brightness(1.12); }
+.action-btn:active { transform: scale(.97); }
+.action-btn.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: transparent;
+}
+.action-btn[disabled] { opacity: .55; cursor: not-allowed; }
+
+/* Album-view action row, Roon-styled. SCOPED to .modal-actions on purpose:
+   .action-btn is shared with the logo sheet, the label merge bar, the album
+   multi-select bar, the Library Focus sheet, the Settings rescan button and
+   the per-track buttons — restyling the base class would move all of them.
+   The layout is deliberately unchanged (same four buttons, same equal-width
+   row); only the finish moves: Roon's secondary actions are outlined on the
+   page background rather than filled chips, and its primary carries more
+   weight than the rest. */
+.modal-actions .action-btn {
+  background: transparent;
+  border-color: var(--border);
+  font-weight: 600;
+  padding: 11px 8px;
+}
+.modal-actions .action-btn:hover { background: var(--bg-elev-2); filter: none; }
+.modal-actions .action-btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  font-weight: 700;
+}
+.modal-actions .action-btn.primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+/* Section heading on the flat album view. Same language as the Home sections
+   and the modal tab strip: uppercase, tracked out, over a hairline — so
+   "TRACKS" and "ABOUT THIS ALBUM" read as section breaks now that no panel
+   encloses them. */
+.section-label {
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--text-faint); font-weight: 600;
+}
+.track-list-wrap { min-height: 0; }
+.track-list {
+  list-style: none; margin: 0; padding: 0;
+  counter-reset: trk;
+  border-top: 1px solid var(--border);
+}
+.track-list li {
+  counter-increment: trk;
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px; color: var(--text);
+}
+.track-list li::before {
+  content: counter(trk);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px; min-width: 22px;
+  line-height: 20px;   /* optically aligns the number with the 14px title line */
+}
+/* Two-line rows, queue-tab style: title over the FULL artist credit. The
+   old layout put the artist in a right-aligned 35%-wide ellipsis column,
+   which cut multi-artist credits off (the whole reason for this redesign). */
+.track-list .t-text {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column;
+}
+.track-list .t-title {
+  min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.track-list .t-sub {
+  color: var(--text-dim); font-size: 12px;
+  margin-top: 1px;
+  overflow-wrap: anywhere;   /* long multi-artist credits wrap, never clip */
+}
+.track-list .t-sub:empty { display: none; }
+
+/* ------------------------------------------------------------------ */
+/*  Toast                                                              */
+/* ------------------------------------------------------------------ */
+.toast {
+  /* Now that the app runs standalone (v1.7.60), 28px from the bottom is 28px
+     into the home-indicator area. The inset lifts it clear. */
+  position: fixed; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom));
+  transform: translateX(-50%) translateY(8px);
+  background: var(--bg-elev); color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-modal);
+  padding: 12px 18px;
+  /* 22px is a full pill at the one-line height (44px) and a rounded card once
+     the text wraps. It was 999px, which is only a pill while the content fits
+     on one line — the library-changed messages explain themselves in three
+     sentences and need to wrap. */
+  border-radius: 22px;
+  /* `left: 50%` makes the containing block only half the viewport, and a
+     shrink-to-fit box cannot exceed it — so on a 390px phone a long message
+     was laid out in a 195px column 270px tall, running up the middle of the
+     screen. max-content frees it from that limit; the max-width then does the
+     clamping, keeping it clear of both edges on a phone and readable rather
+     than one enormous line on a desktop. Measured at 390 and 1280. */
+  width: max-content;
+  max-width: min(560px, calc(100vw - 28px));
+  text-align: left; line-height: 1.45;
+  font-size: 14px; opacity: 0;
+  transition: opacity .18s ease, transform .18s ease;
+  z-index: 100;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error { border-color: var(--danger); }
+
+/* ------------------------------------------------------------------ */
+/*  Bio sections (album notes + artist profile)                        */
+/* ------------------------------------------------------------------ */
+/* 14px = the gap below the Tracks panel now that both are padded panels
+   (#album-bio-section is the class's only consumer). */
+.bio-section { margin-top: 14px; }
+.bio-meta {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  letter-spacing: .01em;
+}
+.bio-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  position: relative;
+  transition: max-height .3s ease;
+  word-wrap: break-word;
+}
+.bio-text[data-clipped="true"] {
+  max-height: 7.2em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(black 55%, transparent 100%);
+          mask-image: linear-gradient(black 55%, transparent 100%);
+}
+.bio-text[data-clipped="false"] {
+  max-height: none;
+  -webkit-mask-image: none;
+          mask-image: none;
+}
+.bio-toggle {
+  margin-top: 6px;
+  background: transparent;
+  border: 0;
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.bio-toggle:hover { filter: brightness(1.15); }
+
+.bio-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.bio-source {
+  color: var(--text-dim);
+  font-size: 13px;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color .15s ease, border-color .15s ease;
+}
+.bio-source:hover {
+  color: var(--accent-text);
+  border-bottom-color: var(--accent-text);
+}
+.pitchfork-score {
+  font-size: 0.78em;
+  font-weight: 600;
+  color: var(--accent-text);
+  letter-spacing: 0.01em;
+}
+.bnm-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.68em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: #d4a017;
+  color: #000;
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Modal share button (top-right, beside the close)                   */
+/* ------------------------------------------------------------------ */
+.modal-share {
+  position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 60px; z-index: 2;
+}
+/* ------------------------------------------------------------------ */
+/*  Mini transport (sticky now-playing bar)                            */
+/* ------------------------------------------------------------------ */
+.mini-transport {
+  position: fixed;
+  left: 0; right: 0;
+  bottom: 0;
+  z-index: 70;   /* above modal (50) so it's visible even when an album sheet is open */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  /* Solid, no backdrop blur: this bar floats over the scrolling <main>, and
+     iOS Safari re-samples + re-blurs the pixels beneath a backdrop-filter on
+     EVERY scroll frame — a major source of scroll jank whenever something is
+     playing. A solid elevated background reads near-identically. */
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 24px rgba(0,0,0,.22);
+}
+
+/* Thin Roon-style progress line along the top edge of the bar */
+.mt-progress {
+  position: absolute;
+  top: -1px; left: 0; right: 0;
+  height: 2px;
+  pointer-events: none;
+}
+.mt-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  /* No transition. JS paints this from the clock four times a second, and a
+     400ms width transition restarted every 250ms can never finish: the fill
+     chased a target it never reached and sat ~400ms behind the position just
+     computed, while continuously animating a non-composited property. The
+     transition was doing the smoothing back when the position advanced once a
+     second; now it only fights the painter. */
+}
+
+.mt-info {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.mt-text { min-width: 0; }
+.mt-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mt-artist {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.mt-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.mt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px; height: 38px;
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, transform .08s ease;
+}
+.mt-btn:hover { background: var(--bg-elev-2); }
+.mt-btn:active { transform: scale(.94); }
+.mt-btn:disabled { color: var(--text-faint); cursor: not-allowed; }
+.mt-btn:disabled:hover { background: transparent; }
+.mt-btn svg { width: 22px; height: 22px; }
+
+/* Roon's bar play button is a plain glyph, not a filled circle */
+.mt-playpause {
+  background: transparent;
+  color: var(--text);
+  width: 40px; height: 40px;
+  flex: 0 0 auto;
+}
+.mt-playpause:hover { background: var(--bg-elev-2); }
+.mt-playpause svg { width: 24px; height: 24px; }
+
+.mt-zone-popover {
+  position: absolute;
+  right: 60px;
+  bottom: calc(100% + 4px);
+  padding: 10px 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  min-width: 200px;
+  z-index: 71;
+}
+
+/* (The old pill-style volume popover that lived here was dead code — the
+   .mt-vol-popover rules further down always overrode it. Removed when the
+   popover became the shared Roon-style .vol-sheet.) */
+
+/* Push the main grid above the mini transport */
+main {
+  padding-bottom: 88px;
+}
+
+/* On mobile, hide track info if the bar is cramped */
+@media (max-width: 480px) {
+  .mt-info { gap: 9px; }
+  .mt-controls { gap: 0; }
+  .mt-btn { width: 36px; height: 36px; }
+  .mt-btn svg { width: 20px; height: 20px; }
+  .mt-playpause { width: 38px; height: 38px; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Share card overlay                                                 */
+/* ------------------------------------------------------------------ */
+.share-overlay {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 60; /* inset longhands: old Safari */
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  font-family: "Manrope", var(--font-sans);
+}
+.share-backdrop {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  background: rgba(0,0,0,.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.share-panel {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-modal);
+  padding: 24px 18px 18px;
+  animation: modal-in .18s ease-out;
+}
+.share-close { position: absolute; top: 12px; right: 12px; }
+.share-frame {
+  margin-top: 26px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  display: flex; align-items: center; justify-content: center;
+}
+.share-frame img {
+  width: 100%; height: auto; display: block;
+  max-height: 64vh; object-fit: contain;
+}
+.share-placeholder {
+  color: var(--text-faint);
+  font-size: 14px;
+  text-align: center;
+  padding: 24px;
+}
+.share-spinner {
+  width: 26px; height: 26px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent-text);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  margin: 0 auto 10px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.share-actions {
+  display: flex; gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.share-actions button,
+.share-actions a {
+  flex: 1; min-width: 120px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text);
+  text-decoration: none;
+  transition: filter .15s ease, transform .08s ease;
+}
+.share-actions .primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+.share-actions button:hover,
+.share-actions a:hover { filter: brightness(1.1); }
+.share-actions button:active,
+.share-actions a:active { transform: scale(.97); }
+.share-actions svg { width: 18px; height: 18px; }
+
+.share-hint { color: var(--text-faint); font-size: 13px; margin: 10px 4px 0; }
+.share-err  { color: var(--danger);     font-size: 13px; margin: 10px 4px 0; min-height: 1em; }
+
+/* ------------------------------------------------------------------ */
+/*  Modal tabs (Now playing / Queue)                                   */
+/* ------------------------------------------------------------------ */
+.modal-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 40px;
+  margin: 4px 0 22px;
+}
+.modal-tab {
+  background: transparent; border: 0;
+  padding: 12px 0 14px;
+  font-size: 13px; font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  cursor: pointer;
+  position: relative;
+  transition: color .15s ease;
+}
+.modal-tab:hover { color: var(--text-dim); }
+.modal-tab.is-active { color: var(--text); }
+.modal-tab.is-active::after {
+  content: ""; position: absolute;
+  left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.modal-tab-pane.hidden { display: none; }
+
+/* Queue list */
+.queue-summary {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.queue-list {
+  list-style: none; margin: 0; padding: 0;
+}
+.queue-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.queue-list li.is-now {
+  background: var(--accent-soft);
+  border-radius: 6px;
+  border-bottom-color: transparent;
+}
+.queue-list li.q-divider {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 0 8px;
+  border-bottom: none;
+}
+.queue-list .q-divider-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.queue-list .q-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.queue-list li.is-tappable {
+  cursor: pointer;
+  transition: background .12s ease;
+  border-radius: 6px;
+}
+.queue-list li.is-tappable:hover  { background: var(--bg-elev-2); }
+.queue-list li.is-tappable:active { background: var(--accent-soft); transform: scale(.99); }
+.queue-list .q-art {
+  width: 44px; height: 44px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: var(--bg-elev-2);
+  flex: 0 0 auto;
+}
+.queue-list .q-text { flex: 1; min-width: 0; }
+.queue-list .q-title {
+  font-size: 14px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.queue-list .q-sub {
+  font-size: 12px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.queue-list .q-len {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+.queue-empty {
+  color: var(--text-faint);
+  font-size: 14px;
+  text-align: center;
+  padding: 30px 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Now-playing screen (Roon-style) — the "Now playing" tab when the   */
+/*  modal is opened from the transport bar (np-mode).                  */
+/* ------------------------------------------------------------------ */
+
+/* Hide the album-centric header + album extras on the Now playing tab;
+   the live now-playing block below replaces them. */
+.modal.np-mode #modal-title,
+.modal.np-mode .modal-subtitle,
+.modal.np-mode .modal-actions,
+.modal.np-mode .track-list-wrap,
+.modal.np-mode #album-bio-section { display: none; }
+
+/* Single-column, centred layout even on wide screens (Roon's portrait view). */
+.modal.np-mode .modal-body {
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  /* The tabs row sits up beside the corner buttons (Roon-style) instead of
+     below a tall reserved header band — which is exactly why this one must
+     carry the status-bar inset. With viewport-fit=cover and a 14px padding,
+     the Now playing screen started at the physical top of the display and the
+     tabs/title sat under the dynamic island: the "stretched too high above the
+     top of the screen" report. Only visible in the installed PWA, because in a
+     browser tab the address bar occupies that space anyway. */
+  padding-top: calc(14px + env(safe-area-inset-top));
+}
+.modal.np-mode .modal-info {
+  width: 100%;
+  max-width: 460px;
+}
+.modal.np-mode .modal-tabs { margin-top: 0; }
+
+/* Corner buttons in np-mode: no × — the top-left Home button leaves the
+   screen (to Home), and Share moves into the ×'s top-right spot. */
+.modal-home { display: none; }
+.modal.np-mode .modal-close { display: none; }
+.modal.np-mode .modal-share { right: 12px; }
+.modal.np-mode .modal-home {
+  display: inline-flex;
+  position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; z-index: 2;
+}
+
+/* The Now playing tab must NEVER scroll (Roon parity): the body clips, the
+   fixed-height content (tabs, title block, seek, transport, device row)
+   takes its natural height, and the ARTWORK is the flexible piece — it
+   shrinks to whatever height is left. The mini transport is hidden on this
+   tab, so the big reserved bottom padding goes too. (The Queue tab keeps
+   the default scrolling body + transport padding.) */
+.modal.np-mode.tab-album .modal-body {
+  overflow: hidden;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  /* Fill the panel's full height (the body normally sizes to content) —
+     without this the flexible artwork below collapses to zero. */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.modal.np-mode.tab-album .modal-art {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%; max-width: none; margin: 0;
+  display: flex; align-items: center; justify-content: center;
+  /* the frame styling moves onto the img — the wrapper is now just a
+     flexible centring box */
+  background: transparent; box-shadow: none;
+  aspect-ratio: auto; border-radius: 0; overflow: visible;
+}
+.modal.np-mode.tab-album .modal-art img {
+  /* Height-driven: fills the leftover vertical space, capped at the usual
+     size; width follows the (square) cover's intrinsic ratio, so this needs
+     no aspect-ratio support. object-fit contain guards odd-shaped art. */
+  height: 100%;
+  max-height: min(400px, 92vw, calc(100vw - 36px));  /* never taller than the padded width — keeps shadow/radius on the art */
+  width: auto; max-width: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+}
+/* Very short viewports (small desktop windows — phone landscape is already
+   blocked by the rotate overlay): let the body scroll again rather than
+   clip the transport controls unreachably. */
+@media (max-height: 480px) {
+  .modal.np-mode.tab-album .modal-body { overflow-y: auto; }
+}
+
+/* ≥720px the modal normally becomes a centred auto-height dialog — but the
+   np-mode art is height-driven (flex/grid leftover space), and an auto-height
+   panel gives it nothing to size against: the art collapses to 0 and the whole
+   view shrinks to a small floating box (the v1.6.13 landscape regression).
+   Now playing is a SCREEN, not a dialog: make the panel fullscreen at every
+   size, which also matches Roon. */
+@media (min-width: 720px) {
+  .modal.np-mode { padding: 0; }
+  .modal.np-mode .modal-panel {
+    width: 100%;
+    height: 100%; max-height: 100%;   /* see the base rule — not dvh */
+    border-radius: 0;
+    border: 0;
+  }
+}
+
+/* Landscape tablets and desktops: tabs stay centred on top, then art on the
+   left and the track/seek/transport block on the right — instead of the
+   phone's single column. Grid (not a flex row) because the tabs share the
+   same container as art+info and must span both columns. */
+@media (min-width: 720px) and (orientation: landscape) {
+  .modal.np-mode.tab-album .modal-body {
+    display: grid;
+    grid-template-columns: minmax(0, 44%) minmax(280px, 460px);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "tabs tabs"
+      "art  info";
+    justify-content: center;
+    align-items: center;
+    column-gap: 56px;
+  }
+  .modal.np-mode.tab-album .modal-tabs { grid-area: tabs; justify-self: center; }
+  .modal.np-mode.tab-album .modal-art {
+    grid-area: art;
+    height: 100%;
+    min-height: 0;
+    justify-self: end;
+  }
+  .modal.np-mode.tab-album .modal-art img {
+    /* Auto-size under BOTH max constraints (the grid row is definite, so the
+       height cap works): the element box shrink-wraps the cover at its
+       intrinsic ratio, so the frame shadow hugs the art with no letterboxing,
+       and big screens get big art (the portrait 400px cap is dropped). */
+    height: auto;
+    max-height: calc(100% - 16px);
+  }
+  .modal.np-mode.tab-album .modal-info {
+    grid-area: info;
+    justify-self: start;
+    min-width: 0;
+  }
+}
+
+/* Queue tab: drop the big art so the list gets the full screen, like Roon. */
+.modal.np-mode.tab-queue .modal-art { display: none; }
+
+.np-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0;
+  padding-top: 6px;
+}
+.np-screen.hidden { display: none; }
+
+.np-track {
+  font-size: 27px; font-weight: 700; line-height: 1.15;
+  letter-spacing: -.01em; color: var(--text);
+  word-break: break-word;
+}
+/* A trailing "(…)" detail in the track title renders on its own line,
+   smaller and dimmer, so the main title stays clean (e.g. "Blues 365"
+   over "(Live)"). Populated by setNpTrack() in app.js. */
+.np-track-sub {
+  font-size: 17px; font-weight: 600; line-height: 1.25;
+  color: var(--text-dim); margin-top: 3px;
+}
+/* The artist line is now a row of per-artist links rather than one text node.
+   It stays a plain block so the buttons flow inline and wrap naturally under
+   the parent's text-align:center — a flex row here would need its own gap and
+   would fight the separator spans. max-width caps it as a shrink-to-fit flex
+   item under .np-screen's align-items:center, and break-word matches .np-track
+   so a long credit can't push the column wider than the artwork. */
+.np-artist {
+  font-size: 18px; color: var(--text); margin-top: 8px;
+  max-width: 100%; word-break: break-word;
+}
+/* Styled to THIS screen's convention, not the album modal's accent colour:
+   #np-album directly below is already a link and reads as plain text with an
+   underline on hover, and the Roon-parity look here is deliberately quiet.
+
+   padding/margin 0 is load-bearing. The artist block sits in the no-scroll
+   screen's fixed-height group (see the .modal.np-mode.tab-album .modal-body
+   contract above), so any vertical padding added here comes straight out of
+   the artwork — and, on a short viewport, out of the transport controls. */
+.np-artist-link {
+  font: inherit; color: inherit;
+  background: none; border: 0; padding: 0; margin: 0;
+  cursor: pointer; text-decoration: none;
+  transition: color .15s;
+}
+.np-artist-link:hover,
+.np-artist-link:focus-visible { text-decoration: underline; }
+/* A name the library has no screen for — same size and weight as the links so
+   the line reads as one credit, just without the affordance. */
+.np-artist-plain { color: inherit; }
+.np-artist-sep   { color: var(--text-dim); }
+.np-artist:empty { display: none; }
+.np-album {
+  font-size: 14px; color: var(--text-dim); margin-top: 3px;
+  background: none; border: none; padding: 0; cursor: pointer;
+  text-align: left; font-family: inherit;
+  text-decoration: none; transition: color .15s;
+}
+.np-album:hover, .np-album:focus-visible { color: var(--text); text-decoration: underline; }
+.np-album:empty { display: none; }
+
+.np-progress { width: 100%; margin-top: 18px; }
+.np-seek {
+  -webkit-appearance: none; appearance: none;
+  display: block;
+  width: 100%; height: 14px;
+  background: transparent;
+  cursor: pointer;
+  /* Elapsed fill is painted into this property from JS */
+  --seek-fill: var(--border);
+}
+.np-seek:disabled { cursor: default; opacity: .7; }
+.np-seek::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background: var(--seek-fill);
+}
+.np-seek::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text); border: 0; cursor: pointer;
+  margin-top: -5px;   /* (14px thumb − 4px track) / 2 */
+}
+.np-seek::-moz-range-track {
+  height: 4px; border-radius: 999px;
+  background: var(--seek-fill);
+}
+.np-seek::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text); border: 0; cursor: pointer;
+}
+.np-seek:disabled::-webkit-slider-thumb { background: var(--text-faint); }
+.np-seek:disabled::-moz-range-thumb { background: var(--text-faint); }
+.np-times { display: flex; justify-content: space-between; margin-top: 8px; }
+.np-time {
+  font-size: 12px; color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.np-transport {
+  display: flex; align-items: center; justify-content: center;
+  /* Five buttons now (shuffle · prev · play · next · repeat), as on Roon's own
+     remote. The gap collapses on narrow phones so the row still fits without
+     the circles being squashed — .np-btn is flex: 0 0 auto for that reason, and
+     test/dom/np-modes.test.js asserts the row never overflows at 360px. */
+  gap: clamp(6px, 3.4vw, 28px); margin-top: 12px;
+}
+.np-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+  width: 56px; height: 56px;
+  background: transparent; color: var(--text);
+  border: 0; border-radius: 50%; cursor: pointer;
+  transition: background .15s ease, color .15s ease, transform .08s ease;
+}
+.np-btn:hover { background: var(--bg-elev-2); }
+.np-btn:active { transform: scale(.94); }
+.np-btn:disabled { color: var(--text-faint); cursor: not-allowed; }
+.np-btn:disabled:hover { background: transparent; }
+.np-btn svg { width: 30px; height: 30px; }
+.np-playpause {
+  background: var(--text); color: var(--bg);
+  width: 68px; height: 68px;
+}
+.np-playpause:hover { background: var(--text); filter: brightness(.95); }
+.np-playpause svg { width: 30px; height: 30px; }
+
+/* Playback modes (shuffle / repeat): smaller and dimmer than the transport
+   proper until they're on, so the row still reads play-pause-first. */
+.np-mode-btn {
+  position: relative;   /* anchors the repeat-one badge */
+  width: 46px; height: 46px;
+  color: var(--text-dim);
+}
+.np-mode-btn svg { width: 22px; height: 22px; }
+.np-mode-btn.is-on { color: var(--accent-text); background: var(--accent-soft); }
+.np-mode-btn.is-on:hover { background: var(--accent-soft); }
+/* The "1" sits INSIDE the repeat arrows, where the icon is hollow — a corner
+   badge small enough not to crowd a 40px button was too small to read. */
+.np-mode-badge {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; line-height: 1; font-weight: 700;
+  color: currentColor; pointer-events: none;
+}
+.np-mode-badge.hidden { display: none; }
+/* Roon Radio sits in the secondary row; same on-state as the mode buttons. */
+.np-mini-btn.is-on { color: var(--accent-text); background: var(--accent-soft); }
+.np-mini-btn.is-on:hover { background: var(--accent-soft); color: var(--accent-text); }
+
+@media (max-width: 420px) {
+  .np-mode-btn { width: 40px; height: 40px; }
+  .np-mode-btn svg { width: 20px; height: 20px; }
+}
+
+.np-secondary {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; margin-top: 14px; gap: 14px;
+}
+.np-vol { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: flex-end; }
+.np-mini-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 56px; height: 56px;
+  background: transparent; color: var(--text-dim);
+  border: 0; border-radius: 50%; cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.np-mini-btn:hover { background: var(--bg-elev-2); color: var(--text); }
+.np-mini-btn:disabled { color: var(--text-faint); cursor: not-allowed; }
+.np-mini-btn svg { width: 32px; height: 32px; }
+
+/* ------------------------------------------------------------------ */
+/*  Mini transport — Roon-style sizing                                 */
+/* ------------------------------------------------------------------ */
+.mini-transport {
+  padding: 10px 14px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+}
+.mt-info { gap: 13px; }
+.mt-info { cursor: pointer; }  /* tappable to open the now-playing screen */
+.mt-title  { font-size: 16px; font-weight: 700; }
+.mt-artist { font-size: 13px; }
+
+.mt-btn { width: 52px; height: 52px; }
+.mt-btn svg { width: 30px; height: 30px; }
+.mt-playpause { width: 54px; height: 54px; }
+.mt-playpause svg { width: 32px; height: 32px; }
+
+main { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+
+@media (max-width: 480px) {
+  .mt-info { gap: 11px; }
+  .mt-controls { gap: 2px; }
+  .mt-btn { width: 44px; height: 44px; }
+  .mt-btn svg { width: 26px; height: 26px; }
+  .mt-playpause { width: 46px; height: 46px; }
+  .mt-playpause svg { width: 28px; height: 28px; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Volume bar — full-width sheet with - / slider / +                  */
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Roon-style volume sheet — one component shared by the mini-bar popover
+   and the now-playing screen popover: [speaker icon + big value]
+   [full-width slider with min/max scale beneath] [round − +]. */
+.vol-sheet {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* Bottom padding leaves room for the absolutely-positioned 0/100 scale;
+     it was 12px against 18px top, which tipped the whole row upward. */
+  padding: 16px 16px 30px;
+  border-radius: 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-modal);
+  animation: vol-in .14s ease-out;
+}
+@keyframes vol-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.vol-controls {           /* np variant wraps its controls so the "fixed" note can swap in */
+  display: flex; align-items: center; gap: 14px;
+  flex: 1; min-width: 0;
+}
+.vol-readout { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.vol-readout .vol-icon { display: inline-flex; color: var(--text); }
+.vol-readout .vol-icon svg { width: 26px; height: 26px; }
+.vol-readout .vol-value {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+}
+.vol-slider-wrap {
+  flex: 1; min-width: 0;
+  /* The 0/100 scale is POSITIONED, not stacked. In flow it made this wrapper
+     about 20px taller than the slider itself, and `align-items: center` on the
+     row then centred the readout and the +/- buttons against slider-plus-scale
+     — so every one of them sat visibly low against the track it belongs to.
+     Out of flow, the wrapper is exactly the slider's height and the whole row
+     lines up on the track. */
+  position: relative;
+  display: flex; align-items: center;
+}
+.vol-scale {
+  position: absolute; left: 0; right: 0; top: 100%;
+  margin-top: 3px;
+  display: flex; justify-content: space-between;
+  font-size: 14px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+}
+.vol-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 22px;
+  font-weight: 500;
+}
+.vol-step:hover  { background: var(--border); }
+.vol-step:active { transform: scale(.95); }
+
+/* Big touch-friendly slider (the native 4px hairline was unusable on
+   phones). Track fill uses --vol-fill, kept in sync from JS, because
+   WebKit has no ::range-progress. */
+input.vol-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 30px;               /* generous hit target */
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input.vol-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right,
+    var(--accent) 0%, var(--accent) var(--vol-fill, 50%),
+    var(--border) var(--vol-fill, 50%), var(--border) 100%);
+}
+input.vol-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 26px; height: 26px;
+  margin-top: -10px;          /* centre the 26px thumb on the 6px track */
+  border-radius: 50%;
+  background: #fff;
+  border: 0;
+  box-shadow: 0 1px 5px rgba(0,0,0,.45);
+}
+input.vol-range::-moz-range-track {
+  height: 6px; border-radius: 3px;
+  background: var(--border);
+}
+input.vol-range::-moz-range-progress {
+  height: 6px; border-radius: 3px;
+  background: var(--accent);
+}
+input.vol-range::-moz-range-thumb {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  border: 0;
+  box-shadow: 0 1px 5px rgba(0,0,0,.45);
+}
+
+.mt-vol-popover {
+  /* Sit just above the mini transport, span the full width. */
+  position: fixed;
+  left: 0; right: 0;
+  bottom: calc(78px + env(safe-area-inset-bottom));
+  margin: 0 10px;
+  z-index: 71;   /* one above .mini-transport (70) */
+  min-width: 0;
+}
+/* .np-popover's base rule appears LATER in this file, so at equal specificity
+   its 10px padding / panel-2 background / 12px radius would beat .vol-sheet's
+   on the now-playing sheet — repeat the sheet's shell at higher specificity. */
+.np-popover.vol-sheet {
+  padding: 16px 16px 30px;
+  border-radius: 16px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-modal);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Filter pill bar (sits below the sticky topbar)                     */
+/* ------------------------------------------------------------------ */
+.filter-bar {
+  position: sticky;
+  top: calc(56px + env(safe-area-inset-top));  /* under the topbar */
+  z-index: 15;
+  margin: 0 -14px 16px;            /* bleed into main's horizontal padding */
+  padding: 8px 14px 10px;
+  /* Solid, no backdrop blur: content scrolls beneath this sticky bar, and
+     backdrop-filter forces iOS Safari to re-blur it every scroll frame.
+     var(--bg) is also theme-aware (the old hardcoded dark rgba wasn't). */
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-pills::-webkit-scrollbar { display: none; }
+
+.filter-pill:hover  { color: var(--text); background: var(--bg-elev-2); }
+.filter-pill:active { transform: scale(.97); }
+.filter-pill.is-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+.filter-pill.is-active:hover { background: var(--accent); color: var(--on-accent); }
+
+/* Loading state for the grid while a filter is gathering matches */
+.album-grid.is-loading {
+  opacity: .55;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+.filter-bar.is-loading .filter-pill.is-active::after {
+  content: "";
+  display: inline-block;
+  width: 12px; height: 12px;
+  margin-left: 8px;
+  border: 2px solid rgba(255,255,255,.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: pill-spin .8s linear infinite;
+  vertical-align: -2px;
+}
+@keyframes pill-spin { to { transform: rotate(360deg); } }
+
+/* "No matches" empty state */
+.empty-message {
+  grid-column: 1 / -1;
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Filter funnel: active state on the icon button                     */
+/* ------------------------------------------------------------------ */
+.icon-btn.is-active {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Active-filter chip strip (sits below the topbar when filter is on) */
+/* ------------------------------------------------------------------ */
+.active-filter-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 16px;
+  padding: 0;
+}
+.active-filter-bar.hidden { display: none; }
+.active-filter-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color: var(--text-faint);
+}
+
+.active-filter-clear {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.18);
+  border: 0;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0 2px 0;
+}
+.active-filter-clear:hover { background: rgba(255,255,255,.3); }
+
+/* ------------------------------------------------------------------ */
+/*  Filter dropdown panel                                              */
+/* ------------------------------------------------------------------ */
+.filter-panel {
+  position: fixed;
+  top: calc(60px + env(safe-area-inset-top));
+  right: 14px;
+  z-index: 80;
+  width: min(360px, calc(100vw - 28px));
+  max-height: calc(100vh - 80px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.4);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: filter-in .14s ease-out;
+}
+.filter-panel.hidden { display: none; }
+@keyframes filter-in {
+  from { opacity: 0; transform: translateY(-4px) scale(.98); }
+  to   { opacity: 1; transform: none; }
+}
+.filter-panel-inner {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px;
+}
+.filter-section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .16em;
+  color: var(--text-faint);
+  margin: 14px 10px 6px;
+}
+.filter-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.filter-row:hover { background: var(--bg-elev-2); }
+.filter-row.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+.filter-row.is-active:hover { background: var(--accent); }
+.filter-row .count {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.filter-row.is-active .count { color: rgba(255,255,255,.7); }
+.filter-row.is-all { font-weight: 600; }
+
+/* Filter bottom sheet (All / Genre / Tag) */
+.filter-sheet { max-height: 80vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.filter-check { color: var(--accent-text); font-weight: 700; }
+.filter-check.hidden { display: none; }
+.filter-section-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; width: 100%;
+  background: transparent; border: 0;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px; font-weight: 600;
+  color: var(--text);
+  cursor: pointer; text-align: left;
+}
+.filter-section-toggle:hover { background: var(--bg-elev-2); }
+.filter-chevron { transition: transform .18s ease; color: var(--text-dim); }
+.filter-section-toggle.is-open .filter-chevron { transform: rotate(180deg); }
+.filter-list {
+  max-height: 38vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  margin: 0 4px 8px;
+}
+.filter-list.hidden { display: none; }
+.filter-item {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; width: 100%;
+  background: transparent; border: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px; color: var(--text);
+  cursor: pointer; text-align: left;
+}
+.filter-item:hover { background: var(--bg-elev-2); }
+.filter-item.is-current {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.filter-item-title {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.filter-item-sub {
+  font-size: 12px; color: var(--text-faint);
+  white-space: nowrap; flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+.filter-empty {
+  padding: 12px; font-size: 13px; color: var(--text-faint);
+}
+.filter-hint { margin-top: 6px; }
+
+/* Genres — single column list (longer titles) */
+.filter-list { padding: 0; }
+
+/* ------------------------------------------------------------------ */
+/*  Settings bottom sheet                                              */
+/* ------------------------------------------------------------------ */
+.settings-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 90; display: flex; align-items: flex-end; }
+.settings-overlay.hidden { display: none; }
+.settings-backdrop { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,.5); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+.settings-sheet {
+  position: relative; width: 100%; max-width: 720px; margin: 0 auto;
+  background: var(--bg-elev);
+  border-top-left-radius: 22px; border-top-right-radius: 22px;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -16px 40px rgba(0,0,0,.4);
+  padding: 10px 20px calc(24px + env(safe-area-inset-bottom));
+  max-height: 86vh; overflow-y: auto;
+  animation: sheetUp .26s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.settings-grip { width: 40px; height: 4px; border-radius: 999px; background: var(--border); margin: 4px auto 14px; }
+.settings-head { margin-bottom: 18px; }
+.settings-head h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--text); }
+/* Full-page browser overlays (Qobuz/Tidal/Pitchfork) put the close button on
+   the same row as the title, pinned top-right. Scoped to these overlays so the
+   plain Settings/Filter heads (title only, no button) are unaffected. */
+#qobuz-overlay .settings-head,
+#tidal-overlay .settings-head,
+#pitchfork-overlay .settings-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.settings-sub { font-size: 13px; color: var(--text-faint); }
+.settings-block { padding: 4px 0; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.settings-label { font-size: 16px; color: var(--text); }
+/* Artist link in album modal */
+.modal-artist-link {
+  background: none; border: none; padding: 0;
+  color: var(--accent-text); font-size: inherit; font-family: inherit;
+  cursor: pointer; text-align: left;
+  transition: opacity .15s ease;
+}
+.modal-artist-link:hover { opacity: .75; }
+.modal-subtitle-year { color: var(--text-dim); }
+
+/* Artist albums view */
+.artist-view-back {
+  min-height: var(--tap-min);
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-dim); font-size: 13px; padding: 5px 12px;
+  cursor: pointer; margin-right: 10px; transition: color .15s, background .15s;
+  flex-shrink: 0;
+}
+.artist-view-back:hover { color: var(--text); background: var(--bg-elev); }
+.count-text { font-size: 13px; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-section-header {
+  grid-column: 1 / -1;
+  font-size: 13px; font-weight: 600; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: .06em;
+  padding: 12px 0 4px;
+}
+.artist-view-empty {
+  grid-column: 1 / -1; padding: 48px 0;
+  text-align: center; color: var(--text-dim); font-size: 15px;
+}
+
+/* Artist header, LMS-remote style: large centred round portrait on top,
+   bio beneath it, centred Show more + "Bio: <source>" caption. The Qobuz
+   artist screen reuses .artist-bio-body/.artist-bio-foot for its bio block
+   under its own compact header row. */
+.artist-bio-head {
+  grid-column: 1 / -1;
+  padding: 6px 0 12px;
+  display: flex; flex-direction: column; align-items: center;
+}
+.artist-bio-avatar {
+  width: min(46vw, 200px); height: min(46vw, 200px);
+  border-radius: 50%; object-fit: cover;
+  background: var(--bg-elev);
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-card);
+}
+.artist-bio-body { width: 100%; max-width: 680px; min-width: 0; }
+.artist-bio-body .bio-text { font-size: 13.5px; line-height: 1.6; color: var(--text-dim); }
+.artist-bio-foot {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 2px; margin-top: 6px;
+}
+.artist-bio-src  { font-size: 12px; color: var(--text-faint); }
+/* Qobuz artist screen: bio sits under the compact avatar+name row, so its
+   footer stays inline/left rather than centred. */
+.qobuz-artist-bio { margin-top: 10px; }
+.qobuz-artist-bio .artist-bio-foot { flex-direction: row; align-items: center; gap: 12px; }
+.content-count {
+  display: flex; align-items: center; padding: 8px 16px;
+  font-size: 14px; color: var(--text-dim);
+}
+.content-count.hidden { display: none; }
+
+.settings-info-btn {
+  /*  Was 18x14 — the smallest tap target in the app by a wide margin. The glyph
+      stays the same size; the hit area no longer is.  */
+  min-width: 32px; min-height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; padding: 0 0 0 4px;
+  color: var(--text-faint); font-size: 14px; cursor: pointer;
+  vertical-align: middle; line-height: 1; transition: color .15s ease;
+}
+.settings-info-btn:hover { color: var(--accent-text); }
+
+.settings-info-toast {
+  position: fixed; bottom: calc(88px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  color: var(--text); font-size: 14px; line-height: 1.5;
+  padding: 12px 18px; border-radius: 12px; max-width: min(400px, 92vw);
+  box-shadow: var(--shadow-modal); z-index: 9999;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease;
+}
+.settings-info-toast.visible { opacity: 1; pointer-events: auto; }
+
+.settings-select-wrap { position: relative; flex: 0 0 auto; }
+.settings-select {
+  appearance: none; -webkit-appearance: none;
+  background: var(--bg-elev-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 12px;
+  font-size: 15px; padding: 9px 34px 9px 16px;
+  min-width: 110px; cursor: pointer;
+}
+.settings-select option { background: var(--bg-elev-2); color: var(--text); }
+.settings-caret { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--text-dim); pointer-events: none; }
+.settings-divider { height: 1px; background: var(--border); margin: 18px 0; }
+
+/* Settings home: category list. Each row pushes into a pane. */
+.settings-nav { display: flex; flex-direction: column; gap: 6px; }
+.settings-nav-item {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  padding: 12px 14px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--bg-elev-2);
+  color: var(--text); text-align: left; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.settings-nav-item:hover { background: var(--bg-elev); border-color: var(--text-faint); }
+.settings-nav-item:active { transform: scale(.995); }
+.settings-nav-ico {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 10px;
+  background: var(--bg-elev); color: var(--accent-text);
+}
+.settings-nav-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.settings-nav-title { font-size: 16px; font-weight: 600; color: var(--text); }
+.settings-nav-desc { font-size: 12.5px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-nav-caret { flex: 0 0 auto; color: var(--text-faint); }
+
+/* Pane header: back chevron + title, mirroring a pushed page. */
+.settings-pane-head { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+.settings-pane-head h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--text); }
+.settings-back {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; margin-left: -6px;
+  border: none; border-radius: 999px; background: none;
+  color: var(--text-dim); cursor: pointer;
+  transition: color .15s ease, background .15s ease;
+}
+.settings-back:hover { color: var(--text); background: var(--bg-elev-2); }
+.settings-back:active { transform: scale(.94); }
+
+.settings-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 22px; }
+.settings-version { font-size: 13px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.settings-repo {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-elev-2);
+  color: var(--text-dim); font-size: 13px; text-decoration: none;
+  transition: color .15s ease, background .15s ease;
+}
+.settings-repo:hover { color: var(--text); background: var(--bg-elev); }
+.settings-update-btn {
+  min-height: var(--ctl-h-sm); padding: 0 14px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg-elev-2); color: var(--text-dim); font-size: 13px;
+  cursor: pointer; transition: color .15s ease, background .15s ease;
+}
+.settings-update-btn:hover:not(:disabled) { color: var(--text); background: var(--bg-elev); }
+.settings-update-btn:disabled { opacity: .6; cursor: default; }
+/* When a check has found an update, the button IS the install action —
+   accent it so it reads as tappable. The :hover restatement out-ranks the
+   generic hover rule above (0,3,0 beats 0,2,0) so the accent text survives
+   desktop hover. */
+.settings-update-btn.is-update-ready {
+  color: var(--accent-text); border-color: var(--accent); font-weight: 600;
+}
+.settings-update-btn.is-update-ready:hover:not(:disabled) { color: var(--accent-text); }
+.settings-token-row {
+  display: flex; gap: 8px; align-items: center; margin-top: 6px;
+}
+.settings-token-input {
+  flex: 1; min-width: 0;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px;
+  color: var(--text); font-size: 13px; font-family: inherit;
+}
+.settings-token-input:focus { outline: none; border-color: var(--accent); }
+.settings-token-status { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+/* Explanatory line under a settings row — the sentence that says why the
+   control above it exists, rather than what it is called. */
+.settings-note { font-size: 12px; color: var(--text-faint); margin-top: 6px; line-height: 1.45; }
+
+/* Import: tracks matched under a different album than the share named. Not a
+   warning — the track WAS found — but not silent either, because it is a
+   substitution the user is entitled to see. */
+.share-sub-note { color: var(--text-dim); }
+.import-substituted li { color: var(--text-faint); }
+
+/* ------------------------------------------------------------------ */
+/*  Docker migration banner                                            */
+/* ------------------------------------------------------------------ */
+.docker-banner { background: #7c5500; color: #fff; padding: 16px 20px; font-size: 14px; line-height: 1.6; }
+.docker-banner.hidden { display: none; }
+.docker-banner-body { max-width: 900px; margin: 0 auto; }
+.docker-banner-body strong { font-weight: 700; }
+.docker-banner-pre {
+  margin: 12px 0; padding: 12px 14px;
+  background: rgba(0,0,0,0.35); border-radius: 8px;
+  font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;
+  color: #e8e8e8;
+}
+.docker-banner-dismiss {
+  margin-top: 10px; padding: 7px 18px; border-radius: 8px; border: none;
+  background: rgba(255,255,255,0.2); color: #fff; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background .15s ease;
+}
+.docker-banner-dismiss:hover { background: rgba(255,255,255,0.3); }
+
+/* ------------------------------------------------------------------ */
+/*  Confirm dialog                                                     */
+/* ------------------------------------------------------------------ */
+.confirm-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 95; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.confirm-overlay.hidden { display: none; }
+.confirm-backdrop { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,.55); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+.confirm-box {
+  position: relative; width: 100%; max-width: 340px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 18px; padding: 22px 20px 16px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.45);
+  animation: searchReveal .18s ease;
+}
+.confirm-msg { margin: 0 0 18px; font-size: 16px; line-height: 1.4; color: var(--text); text-align: center; }
+.confirm-actions { display: flex; gap: 10px; }
+.confirm-btn {
+  flex: 1 1 0; height: 44px; border-radius: 12px;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  background: var(--bg-elev-2); color: var(--text);
+  border: 1px solid var(--border);
+  transition: filter .15s ease, transform .08s ease;
+}
+.confirm-btn:active { transform: scale(.97); }
+.confirm-primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+
+/* ------------------------------------------------------------------ */
+/*  Toggle switch (settings)                                           */
+/* ------------------------------------------------------------------ */
+.switch { position: relative; display: inline-flex; flex: 0 0 auto; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-track {
+  width: 46px; height: 28px; border-radius: 999px;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  display: inline-flex; align-items: center; padding: 0 3px;
+  transition: background .18s ease, border-color .18s ease;
+}
+.switch-thumb {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--text-dim); transform: translateX(0);
+  transition: transform .18s ease, background .18s ease;
+}
+.switch input:checked + .switch-track { background: var(--accent); border-color: transparent; }
+.switch input:checked + .switch-track .switch-thumb { transform: translateX(18px); background: #fff; }
+.switch input:focus-visible + .switch-track { box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* Range slider in the settings sheet (wall-display rotation interval). */
+.settings-range { flex: 1; max-width: 180px; accent-color: var(--accent); cursor: pointer; }
+
+/* --- Now-playing: device picker + volume popover (v1.4.0) --------------- */
+.np-secondary { position: relative; }
+
+.np-popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  z-index: 6;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-modal);
+  padding: 10px;
+}
+.np-popover.hidden { display: none; }
+.np-device-popover { left: 0; width: 230px; }
+/* The now-playing volume popover is the same full-width Roon-style sheet as
+   the mini bar's (user request: identical control on both screens). Fixed
+   positioning spans the phone width; .vol-sheet supplies the interior. */
+.np-vol-popover {
+  position: fixed;
+  left: 0; right: 0;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  margin: 0 10px;
+  z-index: 71;
+  width: auto; min-width: 0;
+}
+
+.np-popover-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--text-faint); padding: 2px 8px 8px;
+}
+.np-device-list { display: flex; flex-direction: column; gap: 2px; max-height: min(48vh, 320px); overflow-y: auto; }
+.np-device-item {
+  flex-shrink: 0;  /* keep natural row height when the list overflows — shrink made rows overlap */
+  text-align: left; background: transparent; border: 0; cursor: pointer;
+  color: var(--text); font-size: 15px; padding: 10px; border-radius: 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.np-device-item:hover { background: var(--bg-elev); }
+.np-device-item.is-current { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.np-device-empty { color: var(--text-faint); font-size: 14px; padding: 8px 10px; }
+/* Second line under a zone name, listing the outputs in a grouped zone. */
+.np-device-item { line-height: 1.25; }
+.np-device-sub {
+  display: block; margin-top: 2px;
+  font-size: 12px; font-weight: 400; color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis;
+}
+.np-device-item.is-current .np-device-sub { color: inherit; opacity: .8; }
+/* Footer action in a zone popover ("Group zones…"). */
+.np-popover-action {
+  display: block; width: 100%; margin-top: 8px;
+  padding: 9px 10px; border: 0; border-top: 1px solid var(--border);
+  border-radius: 0 0 8px 8px;
+  background: transparent; color: var(--accent-text);
+  font-size: 14px; font-weight: 600; text-align: left; cursor: pointer;
+}
+.np-popover-action:hover { background: var(--bg-elev); }
+
+/* --- Zone grouping sheet (built by openLibSheet, so it inherits .lib-sheet) - */
+.group-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: transparent; color: var(--text);
+  font-size: 15px; text-align: left; cursor: pointer;
+}
+.group-row + .group-row { margin-top: 6px; }
+.group-row.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+/* The anchor is disabled because it must stay ticked, not because it is
+   unavailable — dimming it would read as "this zone can't be used". */
+.group-row.is-anchor { cursor: default; }
+.group-row:disabled:not(.is-anchor) { cursor: not-allowed; opacity: .5; }
+.group-box {
+  flex: 0 0 auto;
+  width: 20px; height: 20px; border-radius: 5px;
+  border: 1.5px solid var(--text-faint);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; line-height: 1; color: transparent;
+}
+.group-row.is-on .group-box { border-color: currentColor; color: currentColor; }
+.group-text { min-width: 0; flex: 1 1 auto; }
+.group-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-note {
+  display: block; margin-top: 2px;
+  font-size: 12px; color: var(--text-faint);
+}
+.group-row.is-on .group-note { color: inherit; opacity: .8; }
+
+/* Smart-playlist rows reuse .dev-row; the name is the tappable part. */
+.smart-open {
+  flex: 1 1 auto; min-width: 0;
+  background: transparent; border: 0; padding: 0;
+  text-align: left; cursor: pointer; color: inherit; font: inherit;
+}
+.smart-open:hover .dev-name { color: var(--accent-text); }
+
+/* Playlist tiles: a 2x2 mosaic of the first few tracks' covers, as Roon draws
+   them. The wrap already sizes and clips the tile, so the grid just fills it.
+   Three covers leave the last cell empty rather than stretching one to fit. */
+.album-art-mosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+}
+/* The base .album-art-wrap img rule (100%/cover) already sizes each one to its
+   grid cell, so nothing more is needed here. */
+/* Two covers read better as halves than as a half-empty 2x2. */
+.album-art-mosaic[data-mosaic="2"] { grid-template-rows: 1fr; }
+
+/* --- Roon playlist detail (read + play) ----------------------------------- */
+/* Rendered into the shared grid container, so it must span every column
+   rather than sitting in one cell. */
+.playlist-detail { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 14px; }
+.playlist-back { align-self: flex-start; }
+.playlist-head { display: flex; flex-direction: column; gap: 4px; }
+.playlist-title {
+  margin: 0; font-size: 22px; font-weight: 700; color: var(--text);
+  border-bottom: 1px solid var(--panel-hairline); padding-bottom: 8px;
+}
+.playlist-sub { font-size: 14px; color: var(--text-dim); }
+.playlist-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.playlist-empty { font-size: 14px; color: var(--text-faint); }
+/* A playlist that cannot run because the feature behind its query is switched
+   off. Danger-coloured because it is the reason nothing is on screen, not a
+   quiet aside — and given room to wrap, since it names the setting to change. */
+.playlist-empty.is-unavailable {
+  color: var(--danger); line-height: 1.45; max-width: 46em; white-space: normal;
+}
+/* An albums playlist shows a wall of tiles, sized by .album-grid exactly as
+   every other wall is. It sits inside .playlist-detail's flex column, so it
+   must NOT inherit the grid-column span that container needed for itself. */
+.playlist-albums { grid-column: auto; }
+.playlist-tracks { list-style: none; margin: 0; padding: 0; }
+.playlist-tracks .track-row {
+  padding: 11px 2px; border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.playlist-tracks .track-row:last-child { border-bottom: 0; }
+.playlist-tracks .track-row:hover { background: var(--bg-elev); }
+.playlist-tracks .track-title { color: var(--text); font-size: 15px; }
+.playlist-tracks .track-artist { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
+.playlist-more { align-self: flex-start; }
+.playlist-more.hidden { display: none; }
+
+/* Track rows that carry the artwork of the album they came from. */
+.track-row-art { display: flex; align-items: center; gap: 12px; }
+.track-art {
+  flex: 0 0 auto; width: 44px; height: 44px; border-radius: 4px;
+  overflow: hidden; background: var(--bg-elev-2);
+}
+.track-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.track-art.no-image { background: var(--bg-elev-2); }
+.track-text { min-width: 0; flex: 1 1 auto; }
+.track-row-art .track-title,
+.track-row-art .track-artist {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* --- Device power sheet (Roon standby / convenience switch) --------------- */
+/* A row here is NOT a button: the name is static and the actions inside it are
+   the controls, so it must not be a <button> containing buttons. */
+.dev-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font-size: 15px;
+}
+.dev-row + .dev-row { margin-top: 6px; }
+.dev-text { min-width: 0; flex: 1 1 auto; }
+.dev-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-status { display: block; margin-top: 2px; font-size: 12px; color: var(--text-faint); }
+.dev-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.dev-btn {
+  min-height: var(--ctl-h-sm); padding: 0 11px; border: 1px solid var(--border); border-radius: 999px;
+  background: transparent; color: var(--text-dim);
+  font-size: 13px; font-family: inherit; cursor: pointer; white-space: nowrap;
+}
+.dev-btn:hover { background: var(--bg-elev-2); color: var(--text); }
+.dev-btn:disabled { opacity: .5; cursor: not-allowed; }
+/* Powered up — the button reads as the live state, not as the action. */
+.dev-btn.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+.dev-all-off { width: 100%; margin-top: 6px; text-align: center; }
+
+.np-vol-fixed {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--text-dim); font-size: 13px; padding: 2px 4px; white-space: nowrap;
+}
+.np-vol-fixed.hidden { display: none; }
+.np-vol-fixed svg { width: 16px; height: 16px; flex: 0 0 auto; }
+
+/* ------------------------------------------------------------------ */
+/*  Phone landscape block overlay                                      */
+/*  Phones in landscape have height ≤ ~500px; tablets/desktop do not. */
+/* ------------------------------------------------------------------ */
+.landscape-block {
+  display: none;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 1000; /* inset longhands: old Safari */
+  background: var(--bg);
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 20px;
+  color: var(--text-dim);
+  font-size: 15px; line-height: 1.5;
+  text-align: center;
+  padding: 32px;
+  -webkit-user-select: none; user-select: none;
+}
+.landscape-block p { margin: 0; }
+.landscape-block svg { opacity: .55; }
+/* Show only when phone is in landscape (max-height catches phones, not tablets) */
+@media (orientation: landscape) and (max-height: 500px) {
+  .landscape-block { display: flex; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Compass / play-unheard spin animation                              */
+/* ------------------------------------------------------------------ */
+@keyframes compass-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(720deg); }
+}
+#play-unheard-topbar.spinning {
+  color: var(--accent-text);
+  border-color: var(--accent);
+  pointer-events: none;
+}
+#play-unheard-topbar.spinning svg {
+  animation: compass-spin 2s cubic-bezier(.4,0,.2,1) forwards;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Label select / merge UI                                            */
+/* ------------------------------------------------------------------ */
+
+/* "Done" button in topbar — only shown when in select mode (album or label) */
+.label-select-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 38px; padding: 0 12px;
+  background: var(--bg-elev); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  white-space: nowrap;
+}
+.label-select-toggle.hidden { display: none; }
+.label-select-toggle:hover { color: var(--text); background: var(--bg-elev-2); }
+.label-select-toggle.is-active {
+  background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent);
+}
+
+/* Selected tile states — applies to both label tiles and regular album tiles */
+.album.is-selected .album-art-wrap,
+.album.label-tile.is-first-selected .album-art-wrap {
+  outline: 2.5px solid rgba(255,255,255,.35);
+  outline-offset: -2px;
+}
+.album.label-tile.is-first-selected .album-art-wrap {
+  outline-color: var(--accent-text);
+}
+/* Checkmark badge */
+.album.is-selected .album-art-wrap::after,
+.album.label-tile.is-first-selected .album-art-wrap::after {
+  content: "";
+  position: absolute; top: 5px; right: 5px; z-index: 2;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(255,255,255,.55)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E")
+    center/13px no-repeat;
+}
+.album.label-tile.is-first-selected .album-art-wrap::after {
+  background-color: var(--accent-text);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230b1418' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+}
+[data-theme="light"] .album.label-tile.is-first-selected .album-art-wrap::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+}
+
+/* "N merged" text under the label subtitle */
+.album-merged-info {
+  font-size: 10px; color: var(--accent-text);
+  margin-top: 1px; cursor: pointer; user-select: none;
+  letter-spacing: .02em;
+}
+.album-merged-info:hover { text-decoration: underline; }
+
+/* Bottom merge action bar */
+.label-merge-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 75;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  /* Solid, no backdrop blur — fixed bar over the scroller (see .mini-transport). */
+  background: var(--bg-elev-2);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 16px rgba(0,0,0,.22);
+}
+.label-merge-bar.hidden { display: none; }
+.label-merge-info {
+  flex: 1; min-width: 0;
+  font-size: 13px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.label-merge-info strong { color: var(--text); }
+.label-merge-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.label-merge-actions .action-btn { flex: none; min-height: var(--ctl-h); padding: 0 var(--ctl-pad-x); }
+
+/* Unmerge bottom sheet */
+.label-unmerge-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 80;
+  background: var(--bg-elev); border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  padding: 0 0 calc(8px + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 32px rgba(0,0,0,.4);
+  max-height: 55vh; overflow-y: auto;
+}
+.label-unmerge-sheet.hidden { display: none; }
+.label-unmerge-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px; color: var(--text-dim);
+  position: sticky; top: 0; background: var(--bg-elev);
+}
+.label-unmerge-header strong { color: var(--text); }
+.label-unmerge-list { padding: 6px 0; }
+.label-unmerge-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.label-unmerge-row:last-child { border-bottom: none; }
+.label-unmerge-source {
+  flex: 1; font-size: 14px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.label-unmerge-remove {
+  flex-shrink: 0; width: 32px; height: 32px;
+  color: var(--danger); border-color: var(--danger);
+}
+.label-unmerge-remove:hover { background: rgba(224,100,100,.12); }
+
+/* Qobuz browser overlay — full-screen, fixed-frame variant of the settings
+   sheet. The sheet's height is viewport-driven, never content-driven, so the
+   frame stays put while results load/clear (no bottom-sheet "ducking" on
+   mobile while typing). Scoped to the Qobuz overlay only — the base
+   .settings-overlay/.settings-sheet rules used by Settings are untouched. */
+#qobuz-overlay, #tidal-overlay, #pitchfork-overlay { align-items: stretch; }
+#qobuz-overlay .qobuz-sheet,
+#tidal-overlay .qobuz-sheet,
+#pitchfork-overlay .qobuz-sheet {
+  /* Same reason as .modal-panel: the overlay is a fixed inset:0 parent, so a
+     percentage covers the safe areas that dvh leaves out. */
+  height: 100%;
+  max-height: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  padding-top: 0; /* the pinned header carries the top padding instead */
+}
+/* Header block (grip, title/close, search box, tab chips) pinned to the top
+   of the sheet's scroll area. The sheet's top padding moves onto the wrapper
+   so pinned content never slides under a notch, and its background hides
+   rows scrolling beneath. The 2px bottom padding stops the tabs' bottom
+   margin collapsing out of the wrapper, so the background covers the full
+   pinned area. */
+#qobuz-overlay .qobuz-pin,
+#tidal-overlay .qobuz-pin,
+#pitchfork-overlay .qobuz-pin {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-elev);
+  padding-top: calc(10px + env(safe-area-inset-top));
+  padding-bottom: 2px;
+}
+
+/* Qobuz New Releases overlay list */
+.qobuz-nr-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: 4px 0 8px; }
+.qobuz-nr-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px; border-radius: 10px; background: var(--bg-elev-2);
+  cursor: pointer;
+}
+.qobuz-nr-row:active { background: var(--bg-elev); }
+
+/* Qobuz album detail (review) view */
+.qobuz-nr-detail { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding: 4px 0 8px; }
+.qobuz-nr-back {
+  align-self: flex-start; cursor: pointer;
+  background: none; border: none; color: var(--accent-text);
+  font-size: 15px; padding: 4px 2px;
+}
+.qobuz-nr-detail-head { display: flex; gap: 14px; align-items: flex-start; }
+.qobuz-nr-detail-art {
+  flex-shrink: 0; width: 96px; height: 96px; border-radius: 8px;
+  object-fit: cover; background: var(--bg-elev);
+}
+.qobuz-nr-detail-meta { flex: 1; min-width: 0; }
+.qobuz-nr-detail-title  { font-weight: 700; font-size: 17px; }
+.qobuz-nr-detail-artist { font-size: 14px; opacity: 0.8; margin-top: 2px; }
+.qobuz-nr-detail .qobuz-nr-fav { align-self: flex-start; }
+.qobuz-nr-review { font-size: 14px; line-height: 1.5; }
+.qobuz-nr-review-text { white-space: pre-wrap; }
+.qobuz-nr-review-src { display: inline-block; margin-top: 10px; color: var(--accent-text); }
+.qobuz-nr-art {
+  flex-shrink: 0; width: 56px; height: 56px; border-radius: 6px;
+  object-fit: cover; background: var(--bg-elev);
+}
+.qobuz-nr-meta { flex: 1; min-width: 0; }
+.qobuz-nr-title  { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qobuz-nr-artist { font-size: 13px; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qobuz-nr-date   { font-size: 11px; opacity: 0.5; margin-top: 2px; }
+.qobuz-nr-fav {
+  flex-shrink: 0; cursor: pointer; white-space: nowrap;
+  padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-elev);
+  color: var(--text); font-size: 13px;
+}
+.qobuz-nr-fav:active { border-color: var(--accent); }
+.qobuz-nr-fav.is-done { color: var(--accent-text); border-color: var(--accent); opacity: 0.85; }
+.qobuz-nr-fav:disabled { cursor: default; }
+
+/* Muted "version" suffix (e.g. Deluxe Edition) after album titles */
+.qobuz-nr-version { font-weight: 400; font-size: 12px; opacity: 0.6; }
+
+/* Qobuz browser: catalogue search box */
+.qobuz-search-row { position: relative; display: flex; margin: 2px 0 8px; }
+.qobuz-search-row input {
+  flex: 1; min-width: 0;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 36px 8px 10px;
+  color: var(--text); font-size: 14px; font-family: inherit;
+  -webkit-appearance: none; appearance: none;
+}
+.qobuz-search-row input:focus { outline: none; border-color: var(--accent); }
+.qobuz-search-row input::placeholder { color: var(--text-faint); }
+.qobuz-search-row input::-webkit-search-cancel-button { display: none; }
+#qobuz-search-clear, #tidal-search-clear {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; border-radius: 50%;
+  border: none; background: none; cursor: pointer;
+  color: var(--text-dim); font-size: 18px; line-height: 1; padding: 0;
+}
+#qobuz-search-clear:active, #tidal-search-clear:active { color: var(--text); }
+
+/* Qobuz browser: tab chips (horizontal scroll, no wrap) */
+#qobuz-tabs, #tidal-tabs {
+  display: flex; gap: 8px; overflow-x: auto;
+  padding: 2px 0 8px; margin-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+#qobuz-tabs::-webkit-scrollbar, #tidal-tabs::-webkit-scrollbar { display: none; }
+.qobuz-tab {
+  flex-shrink: 0; white-space: nowrap; cursor: pointer;
+  padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-elev);
+  color: var(--text-dim); font-size: 13px; font-family: inherit;
+}
+.qobuz-tab.is-active { color: var(--accent-text); border-color: var(--accent); }
+
+/* Qobuz browser: artist matches strip (search results) */
+#qobuz-artists, #tidal-artists {
+  display: flex; gap: 12px; overflow-x: auto;
+  padding: 4px 0 10px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+#qobuz-artists::-webkit-scrollbar, #tidal-artists::-webkit-scrollbar { display: none; }
+.qobuz-artist-chip {
+  flex-shrink: 0; width: 68px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--text); font-family: inherit;
+}
+.qobuz-artist-thumb {
+  width: 56px; height: 56px; border-radius: 50%;
+  object-fit: cover; background: var(--bg-elev);
+}
+.qobuz-artist-name {
+  max-width: 68px; font-size: 11px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Qobuz browser: artist discography header */
+#qobuz-artist-head, #tidal-artist-head { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 10px; }
+.qobuz-artist-head-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.qobuz-artist-head-art {
+  flex-shrink: 0; width: 64px; height: 64px; border-radius: 50%;
+  object-fit: cover; background: var(--bg-elev);
+}
+.qobuz-artist-head-name {
+  min-width: 0; font-weight: 700; font-size: 17px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Qobuz browser: load-more paging button */
+#qobuz-load-more, #tidal-load-more {
+  width: 100%; margin: 10px 0 4px; padding: 10px 12px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg-elev); color: var(--text);
+  font-size: 13px; font-family: inherit; cursor: pointer;
+}
+#qobuz-load-more:active, #tidal-load-more:active { border-color: var(--accent); }
+#qobuz-load-more:disabled, #tidal-load-more:disabled { cursor: default; opacity: 0.7; }
+
+/* ---- Pitchfork magazine page (uses CSS vars, so it's theme-aware) ---- */
+/* Woven mosaic: a 3-column grid where every third tile is a 2×2 "large" square
+   and the large one alternates sides row to row, so two small squares always
+   stack beside each large — a deliberate big/small rhythm down the columns.
+   Album/artist text is overlaid on the cover (bottom gradient) so the squares
+   pack with no below-tile text breaking the grid. grid-auto-flow: dense lets
+   the small tiles backfill the cells the large ones don't occupy. Row height is
+   driven by each tile's own aspect-ratio:1/1 (small = one column wide → square;
+   large spans 2 cols + 2 rows → a square twice the size). */
+.pf-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-flow: row dense;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 6px 0 12px;
+}
+.pf-card {
+  background: none; border: none; padding: 0; margin: 0;
+  cursor: pointer; text-align: left; color: var(--text); font-family: inherit;
+}
+.pf-card:active { transform: scale(.98); }
+/* Large tiles: every 3rd item is 2×2; consecutive larges alternate left/right
+   (6n+1 → left column, 6n+4 → starts at column 2 → right). Together 6n+1 and
+   6n+4 cover every 3n+1 position. */
+.pf-card:nth-child(6n+1) { grid-column: 1 / span 2; grid-row: span 2; }
+.pf-card:nth-child(6n+4) { grid-column: 2 / span 2; grid-row: span 2; }
+
+.pf-card-art {
+  position: relative; width: 100%; aspect-ratio: 1 / 1;
+  border-radius: 10px; overflow: hidden; background: var(--bg-elev-2);
+}
+/* Absolutely-positioned cover so a non-square source image can never inflate
+   the tile past its forced square (the accidental little/large before this).
+   Longhand top/left, NOT the inset shorthand — Safari ≤14 lacks inset AND
+   aspect-ratio, so on the padding-top fallback path an inset-only img gets
+   all-auto offsets and is clipped to a blank tile (the v1.5.99 lesson). */
+.pf-card-art img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+@supports not (aspect-ratio: 1 / 1) {
+  .pf-card-art { height: 0; padding-top: 100%; }
+}
+.pf-art-fallback::after {
+  content: "♪"; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 32px; color: var(--text-faint); opacity: .5;
+}
+/* Score chip (top-left) + BNM badge (top-right) — text overlay owns the bottom. */
+.pf-score {
+  position: absolute; left: 6px; top: 6px;
+  min-width: 30px; padding: 2px 7px; border-radius: 999px;
+  background: rgba(0,0,0,.72); color: #fff;
+  font-size: 12px; font-weight: 700; text-align: center;
+  font-variant-numeric: tabular-nums; z-index: 2;
+}
+.pf-card:nth-child(6n+1) .pf-score,
+.pf-card:nth-child(6n+4) .pf-score { font-size: 15px; padding: 3px 10px; }
+.pf-score-bnm { background: #d4a017; color: #1a1000; }
+.pf-bnm {
+  position: absolute; right: 6px; top: 6px; z-index: 2;
+  padding: 2px 6px; border-radius: 6px;
+  background: #d4a017; color: #1a1000;
+  font-size: 10px; font-weight: 800; letter-spacing: .04em;
+}
+/* Album/artist overlaid on the bottom of the cover. */
+.pf-card-meta {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+  padding: 16px 8px 7px;
+  /* Strong enough at ~35% height that the first (highest) title line stays
+     legible on light covers; still fades fully out above the text block. */
+  background: linear-gradient(to top, rgba(0,0,0,.88) 30%, rgba(0,0,0,.62) 65%, rgba(0,0,0,0));
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,.6);
+}
+.pf-card-album  { font-size: 12.5px; font-weight: 700; line-height: 1.2;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pf-card-artist { font-size: 11px; opacity: .85; margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Larger text on the big tiles (they have the room). */
+.pf-card:nth-child(6n+1) .pf-card-album,
+.pf-card:nth-child(6n+4) .pf-card-album { font-size: 16px; }
+.pf-card:nth-child(6n+1) .pf-card-artist,
+.pf-card:nth-child(6n+4) .pf-card-artist { font-size: 12.5px; }
+
+.pf-empty, .pf-loading {
+  grid-column: 1 / -1; color: var(--text-faint); font-size: 14px;
+  padding: 24px 8px; text-align: center;
+}
+
+/* Detail (single review) view */
+.pf-detail { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; padding: 4px 0 16px; }
+.pf-back {
+  align-self: flex-start; cursor: pointer;
+  background: none; border: none; color: var(--accent-text);
+  font-size: 15px; padding: 4px 2px; font-family: inherit;
+}
+.pf-detail-head { display: flex; gap: 14px; align-items: flex-start; }
+.pf-detail-art {
+  position: relative; flex-shrink: 0; width: 120px; height: 120px;
+  border-radius: 10px; object-fit: cover; background: var(--bg-elev-2);
+}
+.pf-detail-headmeta { flex: 1; min-width: 0; }
+.pf-detail-album  { font-weight: 700; font-size: 20px; line-height: 1.2; }
+.pf-detail-artist { font-size: 15px; color: var(--text-dim); margin-top: 3px; }
+.pf-detail-scorerow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+/* In the detail head the score/BNM sit inline (not overlaid), so clear the
+   absolute positioning the card variants use. */
+.pf-detail-scorerow .pf-score,
+.pf-detail-scorerow .pf-bnm { position: static; }
+.pf-detail-scorerow .pf-score { font-size: 15px; padding: 3px 10px; }
+.pf-detail-body { font-size: 15px; line-height: 1.6; }
+.pf-detail-body p { margin: 0 0 12px; }
+.pf-detail-note { color: var(--text-dim); font-style: italic; }
+.pf-detail-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.pf-action {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 11px 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg-elev-2);
+  color: var(--text); font-size: 15px; font-family: inherit; cursor: pointer;
+  text-decoration: none;
+}
+.pf-action:active { border-color: var(--accent); }
+.pf-action-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.pf-action-link { color: var(--accent-text); background: none; border-color: transparent; }
+
+/* Tidal device-authorization pending block (settings sheet) */
+.tidal-auth-pending {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  margin: 10px 0; padding: 12px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-elev-2);
+}
+.tidal-auth-link {
+  color: var(--accent-text); font-size: 14px; font-weight: 600;
+  text-decoration: underline; word-break: break-all; text-align: center;
+}
+.tidal-auth-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 22px; letter-spacing: .18em; color: var(--text);
+  padding: 4px 10px; border-radius: 8px; background: var(--bg-elev);
+}
+.tidal-auth-wait { font-size: 12px; color: var(--text-faint); text-align: center; }
+
+/* ------------------------------------------------------------------ */
+/*  Old-Safari (<15) square-tile fallback                              */
+/*  Safari before 15 ignores aspect-ratio, so each cover <img>'s       */
+/*  intrinsic size inflates/deflates the grid tracks (unequal columns, */
+/*  colliding text). Prop the square with a padding-top spacer and     */
+/*  absolutely position the artwork. Modern browsers never apply any   */
+/*  of this: the whole block is inside @supports not (aspect-ratio).   */
+/* ------------------------------------------------------------------ */
+@supports not (aspect-ratio: 1 / 1) {
+  .album-art-wrap::before { content: ""; display: block; padding-top: 100%; }
+  .album-art-wrap img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  .album-art-wrap.is-label-logo img { top: 10%; left: 10%; width: 80%; height: 80%; }
+
+  /* Label text tile is a COLUMN flex of <span> words — the ::before
+     spacer would become the first flex item and stack a square's worth
+     of height above the words. Drop the spacer and prop the square with
+     50% vertical padding on a zero-height content box instead: the words
+     stay flex-centred on the content box, which sits exactly at the
+     vertical middle of the square. width:auto lets the grid stretch the
+     border box to the track despite content-box sizing. */
+  .album-art-wrap.is-label-text::before { content: none; }
+  .album-art-wrap.is-label-text {
+    box-sizing: content-box; width: auto; height: 0; padding: 50% 8px;
+  }
+  /* cqw units don't exist on old Safari — give the words a fixed size */
+  .album-art-wrap.is-label-text span { font-size: 12px; }
+
+  /* Album modal artwork relies on aspect-ratio too */
+  .modal-art { position: relative; }
+  .modal-art::before { content: ""; display: block; padding-top: 100%; }
+  .modal-art img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  /* …except the Now-playing tab, where the art is height-driven flex (the
+     img keeps its intrinsic square ratio natively — no shim wanted). */
+  .modal.np-mode.tab-album .modal-art::before { content: none; }
+  .modal.np-mode.tab-album .modal-art img { position: static; width: auto; height: 100%; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Side menu (hamburger drawer) + Home landing                        */
+/* ------------------------------------------------------------------ */
+/* The original top-bar controls are moved into the side menu; they stay
+   in the DOM (hidden) as the action engine that menu items trigger. */
+.topbar-controls { display: none; }
+.menu-toggle { margin-right: 4px; }
+
+.menu-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 95; display: flex; }
+.menu-overlay.hidden { display: none; }
+.menu-backdrop {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  background: rgba(0,0,0,.5);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.menu-drawer {
+  position: relative; z-index: 1;
+  width: min(82vw, 320px); height: 100%;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  box-shadow: 8px 0 40px rgba(0,0,0,.4);
+  display: flex; flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  overflow-y: auto;
+  animation: menuSlideIn .24s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes menuSlideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+.menu-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 10px; }
+.menu-brand { font-size: 17px; font-weight: 700; color: var(--text); }
+.menu-list { display: flex; flex-direction: column; padding: 4px 8px 16px; gap: 2px; }
+.menu-sep { height: 1px; background: var(--border); margin: 8px; }
+.menu-item {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; padding: 12px; border-radius: 10px;
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--text); font-size: 15px; font-family: inherit; text-align: left;
+  transition: background .12s ease, transform .06s ease;
+}
+.menu-item:hover { background: var(--bg-elev-2); }
+.menu-item:active { transform: scale(.99); }
+.menu-item.hidden { display: none; }
+.menu-item svg { width: 22px; height: 22px; flex-shrink: 0; color: var(--text-dim); }
+.menu-item span { flex: 1; }
+/* A two-line menu row: label above, live state below. The inner spans must not
+   each claim `flex: 1` from the row, so the wrapper takes the growth and the
+   lines stack inside it. */
+.menu-item-lines { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.menu-item-lines > span { flex: 0 0 auto; }
+.menu-sub { font-size: 12px; color: var(--text-dim); line-height: 1.3; }
+.menu-sub:empty { display: none; }   /* no snapshot yet — no blank second line */
+
+.home-view.hidden { display: none; }
+/* Mirrors main's own padding at each breakpoint (style.css: main { padding:
+   14px } / 18px ≥768 / 22px ≥1200). Scoped to Home so the carousels can bleed
+   past the gutter without main itself being restyled. */
+#home-sections { --home-gutter: 14px; }
+@media (min-width: 768px)  { #home-sections { --home-gutter: 18px; } }
+@media (min-width: 1200px) { #home-sections { --home-gutter: 22px; } }
+/* Roon-style section rhythm: a bold title, a hairline under it, then the row.
+   No panel, no tint, no watermark — the sections are separated by that rule and
+   by whitespace alone, on the flat page background. */
+.home-section { margin: 0 0 30px; }
+.home-section-title {
+  font-size: 21px; font-weight: 700; color: var(--text);
+  margin: 0 0 10px; letter-spacing: -.01em;
+}
+/* The hairline. --border, not --panel-hairline: the latter was tuned to sit on
+   a tinted panel and is nearly invisible on the flat page, while --border is
+   the same hairline the top bar and filter bar already draw on this background,
+   in both themes. */
+.home-section-title { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+/* Clickable section headers — the title doubles as a link into the full view.
+   A trailing chevron hints it's tappable. inline-flex would shrink-wrap the
+   title and take the rule with it, so the link stays full-width and the chevron
+   is pushed to the far end of the row. */
+.home-section-link { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.home-section-link::after {
+  content: "›"; font-size: 22px; line-height: 1; color: var(--text-faint);
+  transition: transform .15s ease; margin-left: auto;
+}
+.home-section-link:hover { color: var(--accent, var(--text)); }
+.home-section-link:hover::after { transform: translateX(3px); }
+.home-section-link:focus-visible { outline: 2px solid var(--accent, #4a90d9); outline-offset: 3px; border-radius: 4px; }
+
+/* The two below-the-fold sections skip rendering until scrolled near — on a
+   phone the first paint only lays out the unplayed + random rows. The
+   intrinsic size reserves roughly one carousel row so the scrollbar doesn't
+   jump. (Older Safari ignores content-visibility — harmless.) */
+.home-section-library,
+.home-section-lotw,
+.home-section-genres {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+.home-carousel {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: 1fr;          /* phone / portrait: single row */
+  grid-auto-columns: 150px;
+  gap: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  padding-bottom: 4px;
+  /* Left-aligned, as Roon has it. This used to be `safe center`, which was
+     right when each row sat inside its own panel — a short row centred in the
+     card. On the flat layout a centred short row floats away from the title
+     above it and looks like a mistake. */
+  justify-content: start;
+  /* Bleed to the screen edges so the next tile is half-visible and the row
+     reads as scrollable — the whole point of Roon's edge-to-edge carousels.
+     The negative margin cancels main's gutter, the padding puts it back INSIDE
+     the scroller so the first tile still lines up under the section title, and
+     scroll-padding keeps it there after a scroll. --home-gutter tracks main's
+     padding at each breakpoint (style.css: main { padding: 14/18/22px }) so
+     main itself doesn't have to be touched. */
+  margin-inline: calc(var(--home-gutter) * -1);
+  padding-inline: var(--home-gutter);
+  scroll-padding-inline-start: var(--home-gutter);
+}
+.home-carousel::-webkit-scrollbar { display: none; }
+.home-carousel .album { width: auto; flex-shrink: 0; }
+/* Unplayed + Random: single row on phones, 2 rows on landscape tablets AND
+   desktops — 2 rows fills the width of wide screens better than 3 short rows. */
+@media (min-width: 768px) and (orientation: landscape) {
+  .home-carousel { grid-template-rows: repeat(2, auto); }
+}
+/* Label of the week is ALWAYS a single-row carousel on every screen (phone,
+   landscape tablet, desktop). This two-class selector (specificity 0,2,0) beats
+   the single-class multi-row rule in the breakpoint above (0,1,0) regardless of
+   source order — media queries add no specificity — so it never wraps. */
+.home-carousel.home-carousel-1row { grid-template-rows: 1fr; }
+.home-carousel-empty { color: var(--text-faint); font-size: 13px; padding: 8px 2px; }
+
+/* --------------------------------------------------------------------------
+   Smart Picks — albums by artists NOT in the library.
+   Two presentations of one card: a plain tile in the Home carousel (so the row
+   reads like the ones around it) and a full row on the Smart Picks screen with
+   the reason line and the actions. Every colour is a theme token, so both light
+   and dark palettes come out right without a second rule set.
+   -------------------------------------------------------------------------- */
+.pick-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.home-carousel .pick-card { width: 150px; cursor: pointer; }
+.pick-art {
+  position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: 8px;
+  overflow: hidden; background: var(--bg-elev); border: 1px solid var(--border);
+}
+.pick-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Marks the one pick a day that is deliberately unlike the library, so it is
+   not mistaken for a bad adjacent recommendation. */
+.pick-meta { min-width: 0; }
+.pick-artist {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pick-album {
+  font-size: 12px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pick-reason {
+  font-size: 12px; color: var(--text-faint); margin-top: 4px;
+  white-space: normal;              /* the reason is the point — never clip it */
+}
+
+/* The full screen: one card per row, art beside the text.
+   Rendered into the shared #album-grid container, so it must span every column
+   rather than sitting in one cell — without this the whole screen renders at
+   1/3 of the viewport on a phone and 1/9 on desktop (~110px), inside which the
+   96px art block and the two pill buttons cannot fit. Same rule, and the same
+   reason, as .playlist-detail above. */
+.pick-list { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 14px; }
+.pick-card-full {
+  flex-direction: row; align-items: flex-start; gap: 14px;
+  padding: 12px; border-radius: 12px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+}
+/* The one pick a day chosen for being UNLIKE the library gets an accent edge,
+   so it reads as deliberate rather than as the recommender misfiring. */
+.pick-card-full .pick-art { width: 96px; flex: 0 0 96px; }
+.pick-card-full .pick-meta { flex: 1 1 auto; }
+.pick-card-full .pick-artist { font-size: 15px; white-space: normal; }
+.pick-card-full .pick-album  { font-size: 13px; white-space: normal; }
+.pick-actions { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; }
+.pick-add, .pick-block {
+  min-height: var(--ctl-h-sm); padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  cursor: pointer; white-space: nowrap;
+}
+.pick-add { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.pick-add.is-done { background: var(--bg); color: var(--text-dim); border-color: var(--border); }
+/* Roon has the album — this is an ordinary play, so it reads as the primary
+   action rather than as another "add something" step. */
+.pick-play { letter-spacing: .01em; }
+.pick-add:disabled, .pick-block:disabled { opacity: .6; cursor: default; }
+.pick-block { color: var(--text-dim); }
+/* On a phone the two buttons sit under the text rather than beside it — a
+   96px art block plus two stacked pill buttons does not fit a 360px screen. */
+@media (max-width: 520px) {
+  .pick-card-full { flex-wrap: wrap; }
+  .pick-actions { flex-direction: row; width: 100%; }
+  .pick-add, .pick-block { flex: 1 1 0; text-align: center; }
+}
+/* 12 genre buttons divide evenly into 2 / 3 / 4 / 6 columns, so every screen
+   width shows full rows with no lone trailing card. */
+.home-genre-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 560px)  { .home-genre-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 900px)  { .home-genre-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1200px) { .home-genre-grid { grid-template-columns: repeat(6, 1fr); } }
+.home-genre-card {
+  padding: 18px 14px; border-radius: 12px; min-height: 58px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  color: var(--text); font-size: 15px; font-weight: 600; font-family: inherit;
+  cursor: pointer; text-align: left;
+  display: flex; align-items: center;
+  transition: border-color .12s ease, background .12s ease, transform .06s ease;
+}
+.home-genre-card:hover  { border-color: var(--accent); background: var(--bg-elev-2); }
+.home-genre-card:active { transform: scale(.98); }
+
+/* Search box relocated into the top bar (Home only). */
+#topbar-search {
+  flex: 0 0 auto; min-width: 0;
+  display: flex; align-items: center;
+  /* The glass rests at the RIGHT edge of the bar at every width. `margin-left`
+     rather than a `justify-content` on .topbar-row, because the row also holds
+     the hamburger and (when a selection exists) the actions menu, which must
+     keep their own edges. Search and #topbar-refresh are never shown together
+     — setTopbarNav() lights exactly one of them — so the two auto margins
+     cannot end up splitting the free space between them. */
+  margin-left: auto;
+}
+/*  Only claim the bar's width once the field is actually open. Before this,
+    the permanently-present box made .topbar-row 48px tall on Home and 40px
+    everywhere else, so the header visibly changed height on navigation.
+    A JS-toggled class rather than :has(), so the rule is testable and does
+    not depend on selector support.  */
+/*  The collapsed margin-left:auto is deliberately left in place here. Auto
+    margins are an ALIGNMENT-stage rule and only ever divide the space still
+    free once flexible lengths have been resolved, so a grow factor takes the
+    row's slack first and leaves the margin nothing: the open field fills the
+    bar, and its right edge stays where the glass was while the left edge
+    travels out. (Measured both ways — clearing the margin here changed not a
+    single pixel, so the declaration was removed rather than kept as a rule
+    that looked load-bearing and wasn't.)  */
+#topbar-search.is-open { flex: 1 1 auto; }
+.search-open { flex: 0 0 auto; }
+.search-open.hidden { display: none; }
+#topbar-search.hidden { display: none; }
+#topbar-search .search-row { margin: 0; }
+#topbar-search .search-row.open { animation: none; }   /* no reveal jump in the bar */
+
+/* Album-of-the-day badge on the first "Not played" tile. */
+.home-aotd .album-art-wrap { position: relative; }
+.aotd-badge {
+  position: absolute; top: 6px; left: 6px; z-index: 2;
+  background: var(--accent); color: var(--on-accent);
+  font-size: 10px; font-weight: 800; letter-spacing: .02em;
+  padding: 2px 7px; border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+
+/* Source badge — top-RIGHT of the cover so it never collides with the
+   album-of-the-day star (top-left). Currently only "local files": three
+   upright spines plus a leaning one, echoing the Library panel's books motif
+   and the reference icon. Absent badge = source unknown, NOT streaming. */
+.album-source {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  width: 22px; height: 22px; border-radius: 6px;
+  background: rgba(10, 14, 20, .62);
+  backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+  box-shadow: 0 1px 4px rgba(0,0,0,.35);
+  pointer-events: none;
+}
+.album-source::before {
+  content: ""; position: absolute; inset: 0;
+  background-color: rgba(255,255,255,.92);
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: 13px 13px;  mask-size: 13px 13px;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
+/* Sample rate / bit depth on the artwork — "24/96", "16/44.1", "MP3".
+   Bottom-left, so it never collides with the source badge top-right.
+   Hidden unless Appearance → Show sample rate is on: the value is always in
+   the payload, so the switch is this one class rather than a refetch. */
+.album-quality {
+  position: absolute; left: 6px; bottom: 6px; z-index: 2;
+  display: none;
+  padding: 2px 5px; border-radius: 5px;
+  background: rgba(10, 14, 20, .62);
+  backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+  box-shadow: 0 1px 4px rgba(0,0,0,.35);
+  color: rgba(255,255,255,.92);
+  font-size: 10px; font-weight: 700; line-height: 1.3;
+  letter-spacing: .02em; font-variant-numeric: tabular-nums;
+  white-space: nowrap; pointer-events: none;
+}
+body.show-quality .album-quality { display: block; }
+/* Better than CD. Roon marks hi-res; there is no room to say so in words, so
+   the badge takes the accent instead. */
+.album-quality.is-hires { color: var(--accent-text); }
+/* The album view's artwork is far bigger than a tile, so the badge scales with
+   it rather than sitting lost in a corner. */
+#modal-quality { left: 8px; bottom: 8px; padding: 3px 7px; font-size: 12px; border-radius: 6px; }
+
+/* Larger on the album detail artwork, which is far bigger than a tile. */
+#modal-source { width: 28px; height: 28px; top: 8px; right: 8px; border-radius: 8px; }
+#modal-source::before { -webkit-mask-size: 16px 16px; mask-size: 16px 16px; }
+/* TIDAL — its overlapping-diamond mark (evenodd leaves the overlap open,
+   which is what gives the logo its character). */
+.album-source.tidal::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%3E%3Cpath%20fill-rule%3D'evenodd'%20fill%3D'%23fff'%20d%3D'M7.6%205.4%20L12%209.8%20L7.6%2014.2%20L3.2%209.8%20Z%20M16.4%205.4%20L20.8%209.8%20L16.4%2014.2%20L12%209.8%20Z%20M12%2010.6%20L16.4%2015%20L12%2019.4%20L7.6%2015%20Z'%2F%3E%3C%2Fsvg%3E");
+          mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%3E%3Cpath%20fill-rule%3D'evenodd'%20fill%3D'%23fff'%20d%3D'M7.6%205.4%20L12%209.8%20L7.6%2014.2%20L3.2%209.8%20Z%20M16.4%205.4%20L20.8%209.8%20L16.4%2014.2%20L12%209.8%20Z%20M12%2010.6%20L16.4%2015%20L12%2019.4%20L7.6%2015%20Z'%2F%3E%3C%2Fsvg%3E");
+}
+/* Qobuz — its "Q" mark. */
+.album-source.qobuz::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%3E%3Cpath%20fill-rule%3D'evenodd'%20fill%3D'%23fff'%20d%3D'M12%202.6%20a9.4%209.4%200%201%200%200%2018.8%20a9.4%209.4%200%201%200%200%20-18.8%20Z%20M12%206.6%20a5.4%205.4%200%201%201%200%2010.8%20a5.4%205.4%200%201%201%200%20-10.8%20Z'%2F%3E%3Crect%20x%3D'12.6'%20y%3D'13.4'%20width%3D'3.6'%20height%3D'9'%20rx%3D'1.4'%20transform%3D'rotate(-42%2014.4%2017.9)'%20fill%3D'%23fff'%2F%3E%3C%2Fsvg%3E");
+          mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%3E%3Cpath%20fill-rule%3D'evenodd'%20fill%3D'%23fff'%20d%3D'M12%202.6%20a9.4%209.4%200%201%200%200%2018.8%20a9.4%209.4%200%201%200%200%20-18.8%20Z%20M12%206.6%20a5.4%205.4%200%201%201%200%2010.8%20a5.4%205.4%200%201%201%200%20-10.8%20Z'%2F%3E%3Crect%20x%3D'12.6'%20y%3D'13.4'%20width%3D'3.6'%20height%3D'9'%20rx%3D'1.4'%20transform%3D'rotate(-42%2014.4%2017.9)'%20fill%3D'%23fff'%2F%3E%3C%2Fsvg%3E");
+}
+.album-source.local::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%20fill%3D'%23fff'%3E%3Crect%20x%3D'3'%20y%3D'4'%20width%3D'3'%20height%3D'16'%20rx%3D'1.2'%2F%3E%3Crect%20x%3D'8.5'%20y%3D'4'%20width%3D'3'%20height%3D'16'%20rx%3D'1.2'%2F%3E%3Crect%20x%3D'14'%20y%3D'4'%20width%3D'3'%20height%3D'16'%20rx%3D'1.2'%2F%3E%3Crect%20x%3D'18.6'%20y%3D'4.9'%20width%3D'3'%20height%3D'16'%20rx%3D'1.2'%20transform%3D'rotate(14%2020.1%2012.9)'%2F%3E%3C%2Fsvg%3E");
+          mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%20fill%3D'%23fff'%3E%3Crect%20x%3D'3'%20y%3D'4'%20width%3D'3'%20height%3D'16'%20rx%3D'1.2'%2F%3E%3Crect%20x%3D'8.5'%20y%3D'4'%20width%3D'3'%20height%3D'16'%20rx%3D'1.2'%2F%3E%3Crect%20x%3D'14'%20y%3D'4'%20width%3D'3'%20height%3D'16'%20rx%3D'1.2'%2F%3E%3Crect%20x%3D'18.6'%20y%3D'4.9'%20width%3D'3'%20height%3D'16'%20rx%3D'1.2'%20transform%3D'rotate(14%2020.1%2012.9)'%2F%3E%3C%2Fsvg%3E");
+}
+
+/* ------------------------------------------------------------------ */
+/*  Album detail refresh — Home-language styling (v1.6.6 onward)       */
+/*  The detail modal borrows the Home screen's visual language:        */
+/*  1. an ambient blurred-cover glow washing the top of the panel,     */
+/*  2. Tracks + "About this album" as tinted 16px panels with the      */
+/*     Home cut-off watermark treatment (vinyl / quote marks),         */
+/*  3. softer hairline track separators tuned for tinted panels,       */
+/*  4. the np-mode Queue tab as the same panel (queue motif + glow),   */
+/*  5. tappable track rows with per-track Play now / Queue actions.     */
+/*  (A v1.6.9 Now-playing panel was tried and reverted in v1.6.12 —     */
+/*  that screen is deliberately Roon-style.)                            */
+/*  Deliberately quiet: low opacities, existing Home tint variables.   */
+/* ------------------------------------------------------------------ */
+
+/* 1 — Ambient cover glow. Absolutely positioned inside .modal-panel
+   (which already has overflow:hidden), so it sits behind the scrolling
+   body as a fixed wash. scale() pushes the blur's fringed edges outside
+   the panel; the mask fades it to nothing well above mid-panel so text
+   further down never sits on it. Decorative only: pointer-events none. */
+.modal-ambient {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 46%;
+  max-height: 420px;
+  object-fit: cover;
+  /* The source is a tiny 96px cover (see setModalAmbient) — upscaling it to
+     panel width does most of the smoothing, so a light blur finishes the job
+     at a fraction of the old 30px-on-800px raster cost while looking the
+     same: a faint image of the album under the art, not just a colour wash. */
+  filter: blur(12px) saturate(1.1);
+  transform: scale(1.5);
+  opacity: .26;
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, rgba(0,0,0,.6) 60%, transparent 100%);
+          mask-image: linear-gradient(to bottom, black 0%, rgba(0,0,0,.6) 60%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+/* Light theme: a blurred cover over a white panel reads stronger than the
+   same opacity over near-black, so pull it back further. */
+[data-theme="light"] .modal-ambient { opacity: .17; }
+/* Off on every screen now: Roon's album and queue screens are flat black, and
+   a blurred cover wash behind flat rows is the last piece of the card-era look.
+   The element, its JS (setModalAmbient / window.__setModalAmbient) and the
+   transport poll that keeps it pointed at the playing track are all left in
+   place, so restoring it is a one-line change rather than a rebuild. */
+.modal-ambient { display: none; }
+
+/* 2 — Home-style tinted panels. The panel shell, watermark placement, theme
+   flip, and the Tracks panel's vinyl motif are all SHARED with the Home
+   section rules (grouped selectors around line 2460) — only the deltas live
+   here. Tracks reuses the Random-albums teal (vinyl motif matches it);
+   About this album reuses the Label-of-the-week violet; the Queue tab
+   reuses the Not-played blue-grey. */
+
+/* Watermarks sit under dense text here (unlike Home's tile rows), so run
+   them fainter than Home's .11 dark / .14 light. Same specificity as the
+   shared rules, later in the file — these win by source order. */
+
+/* 3 — Track rows on the flat album view: full-width rows separated by the
+   app's standard hairline, as Roon has them. --border, not --panel-hairline:
+   the latter was tuned to sit on the tinted panel this list used to live in
+   and is nearly invisible on the page background (same reasoning as the Home
+   section rules). The list keeps its framing border-top now that no panel
+   frames it, and the last row's border is what closes the list. */
+.track-list-wrap .track-list li { border-bottom: 1px solid var(--border); }
+
+/* 4 — Selectable tracks (v1.6.10): each row in the Tracks panel expands on
+   tap to reveal Play now / Queue for that single track. Hover/selection
+   washes are translucent to sit on the flat page. The buttons ARE
+   .action-btn (shared recipe: colors, primary, hover, disabled) with a
+   row-scale override — flex:none undoes .action-btn's stretch-to-fill,
+   and min-height keeps the tap target at the app's 38-40px norm. */
+.track-list li.t-row { cursor: pointer; transition: background .12s ease; }
+.track-list li.t-row:hover { background: rgba(255,255,255,.04); }
+.track-list li.t-row.is-open {
+  background: rgba(255,255,255,.05);
+  border-radius: 10px;
+  border-bottom-color: transparent;
+  flex-wrap: wrap;
+  padding-left: 8px; padding-right: 8px;
+}
+[data-theme="light"] .track-list li.t-row:hover { background: rgba(26,39,64,.05); }
+[data-theme="light"] .track-list li.t-row.is-open { background: rgba(26,39,64,.06); }
+/* Track select target. Hidden until the list is armed, so entering select
+   mode doesn't reflow every row. align-self:center because .track-list li is
+   align-items:flex-start — a two-line row would otherwise top-align it. */
+.t-mark {
+  display: none;
+  flex: 0 0 auto; align-self: center;
+  width: 22px; height: 22px; padding: 0;
+  border: 2px solid var(--text-faint); border-radius: 50%;
+  background: transparent; cursor: pointer;
+  position: relative;
+}
+.track-list.is-selecting .t-mark { display: block; }
+.t-mark:hover { border-color: var(--text-dim); }
+/* The tick appears only once the circle has actually been tapped — a hollow
+   circle means "selectable", a tick means "selected". */
+.t-row.is-picked .t-mark { border-color: var(--accent); background: var(--accent); }
+.t-row.is-picked .t-mark::after {
+  content: ""; position: absolute;
+  left: 5px; top: 1px; width: 6px; height: 11px;
+  border: solid var(--on-accent); border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.t-row.is-picked { background: var(--accent-soft); border-radius: 8px; }
+
+.t-actions {
+  flex-basis: 100%;
+  display: flex; gap: 8px;
+  padding: 8px 0 6px 34px;   /* clears the 22px number column + 12px gap */
+}
+.t-actions .action-btn {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 9px 18px;
+  font-size: 12.5px; font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Queue tab — flat, full-bleed rows (Roon parity)                     */
+/* ------------------------------------------------------------------ */
+/* The rows run edge to edge. .modal-body's horizontal padding is shared with
+   the album view and the Now playing screen, so it is cancelled HERE with a
+   negative margin rather than removed there, and paid back as row padding so
+   the text still lines up. --queue-gutter tracks .modal-body's padding, which
+   is 18px and becomes 28px at >=720px (see the @media block on .modal-body). */
+#tab-queue {
+  --queue-gutter: 18px;
+  margin-inline: calc(var(--queue-gutter) * -1);
+}
+@media (min-width: 720px) { #tab-queue { --queue-gutter: 28px; } }
+/* The summary line keeps the text gutter; only the ROWS go full-bleed. */
+#tab-queue .queue-summary { padding-inline: var(--queue-gutter); }
+#tab-queue .queue-list li { padding-inline: var(--queue-gutter); }
+#tab-queue .q-divider { padding-inline: var(--queue-gutter); }
+
+/* Hairlines on the flat background: --border, the app's standard, not the
+   --panel-hairline that was tuned for the tint this list used to sit on. */
+#tab-queue .queue-list li { border-bottom-color: var(--border); }
+#tab-queue .q-divider-line { background: var(--border); }
+
+/* The now-playing row is a full-bleed block, edge to edge — Roon highlights
+   the whole row rather than insetting a rounded pill. The radius and the
+   accent tint both belonged to the inset look. */
+#tab-queue .queue-list li.is-now {
+  background: var(--bg-elev-2);
+  border-radius: 0;
+  border-bottom-color: var(--border);
+}
+
+/* Washes re-tuned for a flat background — the old values were mixed against
+   the panel tint and are too faint without it. */
+#tab-queue .queue-list li.is-tappable { border-radius: 0; }
+#tab-queue .queue-list li.is-tappable:hover { background: rgba(255,255,255,.06); }
+/* :active must be restated after :hover — during a press both match, and the
+   id-scoped hover rule would otherwise out-rank the base accent flash. */
+#tab-queue .queue-list li.is-tappable:active { background: var(--accent-soft); }
+[data-theme="light"] #tab-queue .queue-list li.is-tappable:hover { background: rgba(26,39,64,.06); }
+[data-theme="light"] #tab-queue .queue-list li.is-tappable:active { background: var(--accent-soft); }
+
+/* Roon's queue rows are taller, with a bold title over the artist and a
+   larger square thumbnail. */
+#tab-queue .queue-list li { padding-block: 10px; gap: 14px; }
+#tab-queue .queue-list .q-art { width: 52px; height: 52px; border-radius: 3px; }
+#tab-queue .queue-list .q-title { font-size: 15px; font-weight: 600; }
+
+/* Full-width rows need the np-mode column cap lifted — .modal.np-mode
+   .modal-info caps every np pane at 460px, which would leave the queue
+   floating in the middle of a tablet screen. Scoped to the queue tab so the
+   Now playing screen keeps its centred column. */
+.modal.np-mode.tab-queue .modal-info { max-width: none; }
+
+/* ------------------------------------------------------------------ */
+/*  Library wall — sort + focus                                        */
+/*  Two pills under the top bar, and bottom sheets built from the same  */
+/*  language as the filter/settings sheets. Roon's own Sort/Focus run   */
+/*  on a private API; these are computed from the extension's snapshot. */
+/* ------------------------------------------------------------------ */
+/* Sort pill | direction arrow | Focus pill. The arrow is sized to content so
+   the two pills stay equal width whatever the sort label says. */
+/* Roon's own phone header: Focus on the left, Sort on the right, nothing
+   between them and no boxes around either. The row used to be three heavy
+   pills in a grid — SORT | arrow | FOCUS — which is the part that did not
+   look like Roon. Text controls, one hairline, and the row recedes behind the
+   albums where it belongs. */
+.library-controls {
+  /*  Focus pinned LEFT, Sort and the magnifier grouped RIGHT.
+      justify-content: space-between put the middle child — Sort — in the
+      centre of the row once the filter became a third control, so it floated
+      away from the thing it belongs next to, and did so MORE the wider the
+      screen got.
+      The auto margin on .lib-ctl-sort below is what does the grouping, and it
+      does it alone: auto margins consume the free space before justify-content
+      is applied, so no justify-content value here can change the result. It is
+      left at the default rather than restated, so nothing in this rule claims
+      to be doing work it is not.  */
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 0 12px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--panel-hairline);
+}
+.library-controls .lib-ctl-sort { margin-left: auto; }
+/*  …except while the filter field is open, where the free space belongs to
+    the input rather than to the margin. An auto margin wins over flex-grow,
+    so it has to be released or the field opens at zero width.  */
+.library-controls.is-filtering .lib-ctl-sort { margin-left: 0; }
+.library-controls.hidden { display: none; }
+.lib-ctl {
+  display: flex; align-items: center; gap: 6px;
+  /* Without this the flex item will not shrink below its content, so a long
+     sort label pushes the row wider than the viewport instead of ellipsising. */
+  min-width: 0;
+  padding: 6px 2px; min-height: 44px;
+  background: none; border: 0; border-radius: 8px;
+  color: var(--text); font-family: inherit; font-size: 14px; font-weight: 600;
+  cursor: pointer;
+}
+.lib-ctl:hover  { color: var(--accent-text); }
+.lib-ctl:active { opacity: .7; }
+.lib-ctl-text {
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* The chevron reads as "there is a screen behind this", matching
+   .home-section-link's treatment. */
+.lib-ctl-chevron { font-size: 19px; line-height: 1; color: var(--text-faint); }
+.lib-ctl-focus.is-active,
+.lib-ctl-focus.is-active .lib-ctl-chevron { color: var(--accent-text); }
+/* How many filters are on. A count, not the filter names: two facets already
+   wrap onto a second line on a phone, and the sheet is where the detail lives. */
+.lib-ctl-badge {
+  flex: 0 0 auto;
+  min-width: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: var(--on-accent);
+  font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+}
+/* A label, not a button: it says which way the current sort runs. The control
+   that CHANGES it is the sort sheet, which the whole row opens. */
+.lib-ctl-arrow { flex: 0 0 auto; font-size: 15px; line-height: 1; color: var(--accent-text); }
+.lib-ctl-caret { flex: 0 0 auto; font-size: 13px; line-height: 1; color: var(--text-faint); }
+
+.lib-sheet-backdrop {
+  position: fixed; inset: 0;
+  /* 90 = the bottom-sheet layer (.settings-overlay). It MUST beat
+     .mini-transport (70) and its volume popover (71): the transport bar is
+     fixed to the bottom of the viewport, and at the old z-index of 60 it
+     painted straight over the foot of this sheet — hiding the last sort rows
+     and the whole Clear all / Show albums footer, and eating their taps. */
+  z-index: 90;
+  background: rgba(0,0,0,.55);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.lib-sheet {
+  width: 100%; max-width: 560px;
+  max-height: 82vh;
+  /* dvh follows mobile Safari's collapsing toolbars; the vh above is the
+     fallback for browsers without it. vh alone means the LARGE viewport, so
+     with the toolbar showing a full sheet is taller than the visible area —
+     and because it is bottom-anchored, the overflow pushes its title off the
+     TOP of the screen. */
+  max-height: 82dvh;
+  display: flex; flex-direction: column;
+  background: var(--bg-elev); color: var(--text);
+  border-radius: 16px 16px 0 0;
+  border-top: 1px solid var(--border);
+  box-shadow: var(--shadow-modal);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@media (min-width: 560px) { .lib-sheet { border-radius: 16px; margin-bottom: 24px; } }
+.lib-sheet-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 14px 8px; border-bottom: 1px solid var(--panel-hairline);
+  flex: 0 0 auto;
+}
+.lib-sheet-head h3 { font-size: 16px; font-weight: 700; margin: 0; }
+/* Explicit flex sizing across head/body/foot: only the body scrolls, and the
+   head and footer are never shrunk to make room for a long facet list.
+   Chromium already behaves this way at today's list lengths — this states the
+   intent so a future longer Focus list can't quietly squeeze the buttons. */
+.lib-sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 14px 14px; }
+.lib-sheet-foot {
+  display: flex; gap: 8px; padding: 10px 14px 14px;
+  border-top: 1px solid var(--panel-hairline);
+  flex: 0 0 auto;
+}
+.lib-sheet-foot .action-btn { flex: 1 1 0; }
+
+/* Multi-select actions menu. Anchored to its own button rather than to the
+   topbar so it tracks the button wherever the row's flex layout puts it.
+   z-index clears the mini-transport (70) and the album modal (50) — the menu
+   is reachable from the album view, which paints over the topbar entirely. */
+.sel-menu-wrap { position: relative; margin-left: auto; flex: 0 0 auto; }
+.sel-menu-wrap.hidden { display: none; }
+/* When both are present the shuffle button keeps its own right-edge anchor,
+   so the pair sits together instead of splitting across the bar. */
+.sel-menu-wrap:not(.hidden) ~ #topbar-refresh { margin-left: 8px; }
+#select-menu-btn { display: flex; align-items: center; gap: 4px; width: auto; padding: 0 8px; }
+.sel-count {
+  min-width: 20px; height: 20px; padding: 0 5px;
+  border-radius: 10px; background: var(--accent); color: var(--on-accent);
+  font-size: 12px; font-weight: 700; line-height: 20px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.sel-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 90;
+  min-width: 200px; padding: 6px;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow-modal);
+}
+.sel-menu.hidden { display: none; }
+.sel-menu-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--text-faint); padding: 4px 8px 8px;
+}
+.sel-menu-item {
+  min-height: var(--ctl-h);
+  display: block; width: 100%; padding: 10px;
+  border: 0; border-radius: 8px; background: transparent;
+  color: var(--text); font-size: 15px; text-align: left; cursor: pointer;
+}
+.sel-menu-item:hover { background: var(--bg-elev); }
+.sel-menu-item[data-sel-act="clear"] { color: var(--text-dim); }
+.sel-menu-item.hidden { display: none; }
+.sel-menu-item.is-danger { color: var(--danger); }
+
+/* Overflow menu — the three-dots-in-a-circle affordance, used wherever a screen
+   has more secondary actions than belong on a row. The dropdown reuses
+   .sel-menu above so there is one dropdown look in the app. */
+.overflow-wrap { position: relative; flex: 0 0 auto; }
+.overflow-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; padding: 0;
+  border-radius: 999px; border: 0; background: transparent;
+  color: var(--text); cursor: pointer;
+}
+.overflow-btn svg { width: 26px; height: 26px; }
+.overflow-btn:hover { filter: brightness(1.2); }
+.overflow-btn:active { transform: scale(.94); }
+/* The menu is anchored to the button, and on a narrow screen the button is at
+   the right-hand end of its row — so it opens leftwards to stay on screen. */
+.overflow-menu { top: calc(100% + 6px); right: 0; }
+
+/* Parked inside the album view. The modal paints over the top bar, so the menu
+   moves into the modal's own header band — to the LEFT of Share and ×, which
+   sit at right:12px and right:60px. z-index clears those (2). */
+.sel-menu-wrap.in-modal {
+  position: absolute; top: 12px; right: 108px; z-index: 3;
+  margin-left: 0;
+}
+.sel-menu-wrap.in-modal .sel-menu { right: 0; }
+
+/* Import report + the add-to-playlist picker rows. */
+/* A <label> wrapping a hidden <input type=file> — the only way to style a file
+   picker consistently, and it keeps the whole control tappable. */
+.import-file { display: block; width: 100%; margin-top: 10px; text-align: center; cursor: pointer; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  clip: rect(0 0 0 0); clip-path: inset(50%); overflow: hidden; white-space: nowrap;
+}
+.import-result { margin-top: 12px; }
+.import-missing {
+  margin: 6px 0 12px; padding-left: 18px;
+  color: var(--text-dim); font-size: 0.86rem; line-height: 1.5;
+}
+.import-save { width: 100%; margin-top: 8px; }
+.sheet-row { display: block; width: 100%; margin-bottom: 8px; text-align: left; }
+
+/* "Play something unheard", as the first tile of the Not-played row. Borrows
+   .album wholesale so it sizes with the carousel on every screen; only the
+   art square is different. */
+.unheard-art {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+.unheard-glyph { font-size: 2.4rem; line-height: 1; color: var(--accent-text); }
+.home-unheard-tile .album-title { color: var(--accent-text); }
+.home-unheard-tile:hover .unheard-art { background: var(--accent); }
+.home-unheard-tile:hover .unheard-glyph { color: var(--on-accent); }
+.home-unheard-tile.spinning .unheard-glyph { animation: unheard-spin 1s linear infinite; }
+@keyframes unheard-spin { to { transform: rotate(360deg); } }
+/* Share sheet — the blob is the payload, so it gets the room and the monospace
+   face; everything above it is the honest accounting of what went in. */
+.share-sum { font-weight: 600; margin: 4px 0 6px; }
+/* Each reason the file is less than the whole playlist gets its own line —
+   run together in one sentence, the important half went unread. */
+.share-warn {
+  color: var(--danger); font-size: 0.86rem; line-height: 1.4; margin-bottom: 6px;
+}
+.share-note { color: var(--text-dim); font-size: 0.86rem; margin: 10px 0; }
+.share-blob {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem; line-height: 1.35;
+  padding: 8px; border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev); color: var(--text);
+  /* Long unbroken base64 must wrap, or the sheet scrolls sideways. */
+  word-break: break-all; white-space: pre-wrap;
+}
+/* Sort rows — ARC's layout: a fixed arrow column, then the label. The arrow
+   is present only on the selected row, and tapping that row flips it. */
+.lib-sort-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  padding: 13px 12px; margin-top: 4px; border-radius: 10px;
+  background: transparent; border: 1px solid transparent;
+  color: var(--text-dim); font-family: inherit; cursor: pointer;
+}
+.lib-sort-row:hover { background: var(--bg-elev-2); }
+.lib-sort-row.is-on { color: var(--accent-text); background: var(--accent-soft); }
+.lib-sort-arrow {
+  flex: 0 0 20px; text-align: center;
+  font-size: 19px; line-height: 1; color: var(--accent-text);
+}
+.lib-sort-text { display: flex; flex-direction: column; min-width: 0; }
+.lib-sort-label { font-size: 15px; font-weight: 600; }
+.lib-sort-row.is-on .lib-sort-label { font-weight: 700; }
+.lib-sort-note { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+/* Collapsible Focus categories. With ten of them — some hundreds of labels
+   long — a flat sheet is a scroll with no end, so each is a header that opens.
+   The header is a real button spanning the full width: on a phone the whole row
+   is the target, not the little caret. */
+.lib-sheet-section { border-top: 1px solid var(--panel-hairline); }
+.lib-sheet-section:first-child { border-top: 0; }
+.lib-sheet-section-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 13px 2px; min-height: 44px;
+  background: none; border: 0; color: inherit; font-family: inherit;
+  cursor: pointer; text-align: left;
+}
+.lib-sheet-section-label {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--text-faint);
+}
+.lib-sheet-section.is-open .lib-sheet-section-label { color: var(--text); }
+/* How many of this category's filters are on, so a collapsed section still
+   says whether it is doing anything. */
+.lib-sheet-section-count {
+  flex: 0 0 auto;
+  min-width: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: var(--on-accent);
+  font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+}
+.lib-sheet-section-caret { flex: 0 0 auto; font-size: 13px; color: var(--text-faint); }
+.lib-chips { display: flex; flex-wrap: wrap; gap: 7px; padding-bottom: 12px; }
+.lib-chip {
+  padding: 7px 12px; border-radius: 999px;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 12.5px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+}
+.lib-chip:hover { border-color: var(--accent); }
+.lib-chip.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+/* Excluded — Roon's tap-again-to-invert, which it shows in red against the
+   green of an included one. The strike-through carries the same meaning
+   without relying on colour alone, which red-on-dark does not survive for
+   every reader. */
+.lib-chip.is-not {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--text); text-decoration: line-through;
+}
+.lib-sheet-note {
+  margin-top: 16px; font-size: 11.5px; line-height: 1.5;
+  color: var(--text-faint);
+}
+/* Coverage caption under a facet's chips — same voice as .lib-sheet-note but
+   attached to the section it qualifies rather than the sheet as a whole. */
+.lib-facet-note {
+  margin-top: 8px; font-size: 11.5px; line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Theme picker (Settings → Appearance)                               */
+/*  A single-select list confirmed with Apply, in the same visual      */
+/*  language as the Library Sort sheet and the filter list: the        */
+/*  selected row carries the accent wash and a tick.                   */
+/* ------------------------------------------------------------------ */
+.theme-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; }
+.theme-row {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; text-align: left;
+  padding: 11px 12px; border-radius: 12px;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  color: var(--text); font-family: inherit; cursor: pointer;
+}
+.theme-row:hover { border-color: var(--text-faint); }
+.theme-row.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.theme-row-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.theme-row-label { font-size: 15px; font-weight: 600; }
+.theme-row.is-on .theme-row-label { color: var(--accent-text); font-weight: 700; }
+.theme-row-note { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.theme-row-check {
+  flex: 0 0 16px; text-align: center;
+  color: var(--accent-text); font-weight: 700; font-size: 15px;
+}
+
+/* Each swatch previews its OWN theme, not the one currently applied — that is
+   the point of a picker. The nested [data-theme]/[data-palette] attributes on
+   the swatch re-declare that palette's tokens locally, so these two colours
+   come from the same source of truth as the real thing and can never drift
+   from it. */
+.theme-swatch {
+  flex: 0 0 auto;
+  width: 40px; height: 28px; border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  position: relative; overflow: hidden;
+}
+.theme-swatch::after {
+  content: ""; position: absolute;
+  right: 5px; top: 50%; transform: translateY(-50%);
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--accent);
+}
+
+.theme-apply-row { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.theme-apply-hint { font-size: 12.5px; color: var(--text-faint); }
+.theme-apply-row .action-btn { flex: 0 0 auto; min-width: 110px; }
+
+/*  Home Screen settings — which rows show, and in what order.
+    Grip on the left, name, switch on the right. The row is the drag target's
+    parent; only the grip starts a drag, so a tap anywhere else still reaches
+    the switch.  */
+.home-rows-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.home-row-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 2px; min-height: 44px;
+  border-bottom: 1px solid var(--panel-hairline);
+  background: var(--bg-elev);
+}
+.home-row-item:last-child { border-bottom: 0; }
+.home-row-item.is-dragging {
+  background: var(--bg-elev-2);
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+}
+.home-row-grip {
+  flex: 0 0 auto; width: 32px; min-height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-faint); font-size: 18px; line-height: 1;
+  cursor: grab; touch-action: none;   /* the drag owns the gesture, not the scroller */
+}
+.home-row-item.is-dragging .home-row-grip { cursor: grabbing; }
+/* Two lines once a row carries a reason, so the ellipsis has to go — a
+   truncated explanation is no explanation. */
+.home-row-item.is-unavailable .home-row-name {
+  display: flex; flex-direction: column; gap: 2px;
+  overflow: visible; white-space: normal; text-overflow: clip;
+}
+.home-row-item.is-unavailable .home-row-name,
+.home-row-item.is-unavailable .home-row-grip { opacity: .6; }
+.home-row-why { font-size: 12px; color: var(--text-dim); line-height: 1.3; }
+.home-row-name {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 15px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/*  Library wall: the funnel text filter.
+    Sits left of Focus and Sort in #library-controls, and expands in place
+    rather than opening a sheet — the point is to type and watch the wall
+    narrow, which a sheet covering the wall would defeat.  */
+.lib-filter-wrap { display: flex; align-items: center; flex: 0 0 auto; }
+.library-controls.is-filtering .lib-filter-wrap { flex: 1 1 auto; min-width: 0; }
+.lib-filter-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--tap-min); min-height: var(--tap-min);
+  background: none; border: 0; color: var(--text-dim);
+  cursor: pointer; padding: 0;
+}
+.lib-filter-btn.is-active { color: var(--accent-text); }
+.lib-filter-input {
+  flex: 1 1 auto; min-width: 0; width: 100%;
+  min-height: var(--ctl-h);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--ctl-radius);
+  padding: 0 12px;
+  color: var(--text); font-size: 14px;
+  font-family: inherit;
+  -webkit-appearance: none; appearance: none;
+}
+.lib-filter-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.lib-filter-input::placeholder { color: var(--text-faint); }

@@ -1,0 +1,1192 @@
+package com.musicd.lite.api
+
+import com.musicd.lite.Log
+import com.musicd.lite.MusicdLite
+import com.musicd.lite.http.HttpServer
+import com.musicd.lite.http.Request
+import com.musicd.lite.http.Response
+import com.musicd.lite.library.AlbumRecord
+import com.musicd.lite.library.Albums
+import com.musicd.lite.library.LibraryView
+import com.musicd.lite.library.Normalize
+import com.musicd.lite.library.Search
+import com.musicd.lite.meta.Metadata
+import com.musicd.lite.roon.AlbumFilter
+import com.musicd.lite.roon.BrowseException
+import com.musicd.lite.roon.MooSocket
+import com.musicd.lite.roon.ZoneSettings
+import com.musicd.lite.store.YearSource
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** The bundled front-end: MusicD-Remote's own public/ directory, verbatim. */
+interface StaticAssets {
+    /** Bytes and content type for a web path such as "/app.js", or null. */
+    fun read(path: String): Pair<ByteArray, String>?
+}
+
+/**
+ * MusicD-Remote's HTTP API, reimplemented over the native Roon client.
+ *
+ * The front-end is unmodified, so these responses have to match the shapes it
+ * already reads. Where a feature is not in this build the endpoint still
+ * answers, in the shape the UI expects, saying the feature is off — the front
+ * end has first-class "this feature is disabled" handling for exactly this, and
+ * a 404 would instead surface as an error toast on a screen the user never
+ * asked for.
+ */
+class RemoteApi(
+    private val app: MusicdLite,
+    private val assets: StaticAssets
+) : HttpServer.Handler {
+
+    private companion object {
+        const val TAG = "Api"
+        const val RANDOM_DEFAULT = 30
+        const val HISTORY_DAYS = 30
+        const val HISTORY_MAX_TILES = 60
+
+        /** Roon rejects a play of more albums than this in one go. */
+        const val PLAY_MULTI_MAX = 400
+    }
+
+    private val roon get() = app.roon
+    private val index get() = app.index
+    private val store get() = app.store()
+    private val view get() = app.view
+    private val settings get() = app.settings
+
+    override fun handle(request: Request): Response {
+        val path = request.path
+        return try {
+            if (path.startsWith("/api/")) apiRoute(request, path) else staticRoute(request, path)
+        } catch (e: BrowseException) {
+            // A stale offset is a transient condition with a rebuild already
+            // due, so it gets a 409 "try again" rather than a 500.
+            Json.error(if (e.stale) 409 else 500, e.message ?: "Roon browse failed")
+        } catch (e: MooSocket.MooException) {
+            Json.error(503, e.message ?: "Not paired with a Roon Core")
+        } catch (e: IllegalArgumentException) {
+            Json.error(400, e.message ?: "Bad request")
+        } catch (e: Exception) {
+            Log.w(TAG, "$path failed: ${e.message}", e)
+            Json.error(500, e.message ?: "Internal error")
+        }
+    }
+
+    // ------------------------------------------------------------- static
+
+    private fun staticRoute(request: Request, path: String): Response {
+        if (request.method != "GET" && request.method != "HEAD") {
+            return Json.error(405, "Method not allowed")
+        }
+        // The wall display is its own page; everything else that is not a file
+        // is the single-page app, so a deep link still opens it.
+        val wanted = when {
+            path == "/" || path.isEmpty() -> "/index.html"
+            path == "/display" -> "/display.html"
+            else -> path
+        }
+        val hit = assets.read(wanted) ?: assets.read("/index.html")
+        ?: return Response.text(404, "The bundled front-end is missing from this build")
+        return Response.bytes(
+            200, hit.second, hit.first,
+            // The assets ship inside the APK and only change when the app does,
+            // so the WebView may hold them for the life of the process.
+            mapOf("Cache-Control" to "public, max-age=3600")
+        )
+    }
+
+    // ---------------------------------------------------------------- API
+
+    private fun apiRoute(request: Request, path: String): Response {
+        val post = request.method == "POST"
+
+        // Image is the highest-volume route; keep it first.
+        if (path.startsWith("/api/image/")) return image(request, path.removePrefix("/api/image/"))
+
+        return when (path) {
+            "/api/status" -> status()
+            "/api/zones" -> zones()
+            "/api/outputs" -> outputs()
+            "/api/zone-state" -> zoneState(request)
+            "/api/queue" -> queue(request)
+            "/api/control" -> control(request)
+            "/api/seek" -> seek(request)
+            "/api/volume" -> volume(request)
+            "/api/zone-settings" -> zoneSettings(request)
+            "/api/pause-all" -> requirePost(post) { roon.pauseAll(); Json.ok() }
+            "/api/mute-all" -> muteAll(request)
+            "/api/group-outputs" -> groupOutputs(request, group = true)
+            "/api/ungroup-outputs" -> groupOutputs(request, group = false)
+            "/api/transfer-zone" -> transferZone(request)
+            "/api/play-from-here" -> playFromHere(request)
+            "/api/output/standby" -> outputControl(request, standby = true)
+            "/api/output/convenience-switch" -> outputControl(request, standby = false)
+
+            "/api/random-albums" -> randomAlbums(request)
+            "/api/library/albums" -> libraryAlbums(request)
+            "/api/library/facets" -> libraryFacets(request)
+            "/api/library/rescan", "/api/reindex" ->
+                requirePost(post) { app.rebuildIndex("asked for a rescan"); Json.ok() }
+            "/api/library-stats" -> Json.obj(
+                JSONObject().put("albums", index.count).put("building", index.isBuilding)
+            )
+
+            "/api/album" -> album(request)
+            "/api/album/extras" -> albumExtras(request)
+            "/api/album/now-playing" -> nowPlayingAlbum(request)
+            "/api/play" -> playAlbum(request, "play_now")
+            "/api/play-track" -> playTrack(request)
+            "/api/play-multi" -> playMulti(request)
+            "/api/play-unheard" -> playUnheard(request)
+
+            "/api/search" -> search(request)
+            "/api/search-status" -> Json.obj(
+                JSONObject()
+                    .put("ready", index.isBuilt)
+                    .put("building", index.isBuilding)
+                    .put("progress", index.progress)
+                    .put("count", index.count)
+            )
+
+            "/api/artist-albums" -> artistAlbums(request)
+            "/api/artist-bio" -> artistBio(request)
+
+            "/api/filters/genres" -> genres()
+            "/api/filters/decades" -> decades()
+            "/api/filters/tags" -> tags()
+
+            "/api/home/unplayed" -> homeUnplayed(request)
+            "/api/home/history" -> homeHistory(request)
+            "/api/home/album-of-the-day" -> albumOfTheDay()
+            "/api/home/genre-groups" -> genreGroups()
+
+            "/api/radio" -> radio(request)
+            "/api/smart-picks" -> smartPicks(request)
+            "/api/smart-picks/block" -> smartPickBlock(request)
+            "/api/smart-picks/rebuild" -> requirePost(post) { Json.ok() }
+
+            "/api/settings/home-rows" -> if (post) saveHomeRows(request) else homeRows()
+            "/api/settings/display" -> if (post) saveDisplay(request) else displaySettings()
+            "/api/settings/smart-picks" -> if (post) saveSmartPicks(request) else smartPickSettings()
+            "/api/settings/labels" -> labelsSetting(post)
+            "/api/display/content" -> displayContent(request)
+
+            "/api/shortcut/zones" -> zones()
+            "/api/shortcut/play-random" -> shortcutPlay(request, unheardOnly = false)
+            "/api/shortcut/play-unheard" -> shortcutPlay(request, unheardOnly = true)
+
+            else -> notInLite(path)
+        }
+    }
+
+    private inline fun requirePost(isPost: Boolean, body: () -> Response): Response =
+        if (isPost) body() else Json.error(405, "POST required")
+
+    // -------------------------------------------------------------- status
+
+    private fun status(): Response {
+        val s = roon.status
+        return Json.obj(
+            JSONObject()
+                .put("paired", roon.isPaired)
+                .put("core_id", s.coreId ?: JSONObject.NULL)
+                .put("core_name", s.coreName ?: JSONObject.NULL)
+                .put("zone_count", roon.zones().size)
+                .put("library_importing", false)
+                .put("library_recheck_pending", index.isBuilding)
+                .put("index_built_at", index.builtAt)
+                .put("index_count", index.count)
+                // Not in MusicD-Remote's shape, and additive on purpose: the
+                // pairing screen needs to say WHY it is waiting, and on a phone
+                // "enable the extension in Roon" is the whole first-run story.
+                .put("stage", s.stage.name.lowercase())
+                .put("stage_detail", s.detail ?: JSONObject.NULL)
+                .put("index_progress", index.progress)
+                .put("version", app.version)
+                .put("lite", true)
+        )
+    }
+
+    // --------------------------------------------------------------- zones
+
+    private fun zones(): Response {
+        val list = roon.zones().map { z ->
+            JSONObject()
+                .put("zone_id", z.zoneId)
+                .put("display_name", z.displayName)
+                .put("state", z.state)
+                .put("settings", z.settings.toJson())
+                .put("outputs", JSONArray().also { a -> z.outputs.forEach { a.put(it.toJson()) } })
+        }
+        return Json.obj(JSONObject().put("zones", Json.arrayOf(list)))
+    }
+
+    private fun outputs(): Response {
+        if (!roon.isPaired) return Json.error(503, "Not paired with a Roon Core")
+        val zoneName = roon.zones().associate { it.zoneId to it.displayName }
+        val list = roon.outputs().map { o ->
+            o.toJson().put("zone_name", o.zoneId?.let { zoneName[it] } ?: "")
+        }
+        return Json.obj(JSONObject().put("outputs", Json.arrayOf(list)))
+    }
+
+    private fun zoneState(request: Request): Response {
+        if (!roon.isPaired) return Json.error(503, "Not paired with a Roon Core")
+        val zone = roon.zone(request.str("zone"))
+            ?: return Json.obj(JSONObject().put("zone", JSONObject.NULL))
+        val np = zone.nowPlaying
+
+        val outputs = zone.outputs.map { o ->
+            JSONObject()
+                .put("output_id", o.outputId)
+                .put("display_name", o.displayName)
+                .put("is_muted", o.volume?.isMuted ?: false)
+                .put("volume", o.volume?.toJson() ?: JSONObject.NULL)
+        }
+
+        val nowPlaying = if (np == null) JSONObject.NULL else JSONObject()
+            .put("line1", np.line1)
+            .put("line2", np.line2)
+            .put("line3", np.line3)
+            .put("artists", artistLinks(np.line2))
+            .put("image_key", np.imageKey ?: JSONObject.NULL)
+            .put("length", np.lengthSeconds ?: JSONObject.NULL)
+            .put("seek_position", np.seekPosition ?: JSONObject.NULL)
+
+        return Json.obj(
+            JSONObject().put(
+                "zone",
+                JSONObject()
+                    .put("zone_id", zone.zoneId)
+                    .put("display_name", zone.displayName)
+                    .put("state", zone.state)
+                    .put("is_play_allowed", zone.isPlayAllowed)
+                    .put("is_pause_allowed", zone.isPauseAllowed)
+                    .put("is_next_allowed", zone.isNextAllowed)
+                    .put("is_previous_allowed", zone.isPreviousAllowed)
+                    .put("is_seek_allowed", zone.isSeekAllowed)
+                    .put("settings", zone.settings.toJson())
+                    .put("outputs", Json.arrayOf(outputs))
+                    .put("now_playing", nowPlaying)
+            )
+        )
+    }
+
+    /**
+     * A credit split into individually linkable names.
+     *
+     * `linkable` says whether the library can actually open a screen for that
+     * name. It matters on the now-playing line because that is the TRACK
+     * artist: on a compilation most track artists have no album of their own,
+     * and linking them all would be a row of dead ends.
+     */
+    private fun artistLinks(credit: String): JSONArray {
+        val names = Normalize.splitArtists(credit)
+        if (names.isEmpty()) return JSONArray()
+        val known = index.albums.mapTo(HashSet()) { it.nArtist }
+        val perName = HashSet<String>()
+        for (al in index.albums) for (a in al.artistNames) perName += a.normalized
+        return JSONArray().also { arr ->
+            for (n in names) {
+                arr.put(
+                    JSONObject()
+                        .put("name", n.name)
+                        .put("linkable", n.normalized in known || n.normalized in perName)
+                )
+            }
+        }
+    }
+
+    private fun queue(request: Request): Response {
+        val zoneId = request.str("zone") ?: return Json.error(400, "zone is required")
+        val items = roon.queue(zoneId)
+        return Json.obj(JSONObject().put("items", Json.arrayOf(items.map { it.toJson() })))
+    }
+
+    // ------------------------------------------------------------ transport
+
+    private fun control(request: Request): Response {
+        val id = request.str("zone_or_output_id") ?: return Json.error(400, "zone_or_output_id is required")
+        val command = request.str("command") ?: ""
+        val allowed = listOf("play", "pause", "playpause", "stop", "previous", "next")
+        if (command !in allowed) {
+            return Json.error(400, "invalid command, allowed: ${allowed.joinToString(", ")}")
+        }
+        roon.control(id, command)
+        return Json.ok()
+    }
+
+    private fun seek(request: Request): Response {
+        val id = request.str("zone_or_output_id") ?: return Json.error(400, "zone_or_output_id is required")
+        val seconds = request.int("seconds") ?: return Json.error(400, "seconds is required")
+        val how = request.str("how")?.takeIf { it == "relative" || it == "absolute" } ?: "absolute"
+        roon.seek(id, how, seconds)
+        return Json.ok()
+    }
+
+    /**
+     * Volume is per OUTPUT, not per zone. A grouped zone has one output per
+     * device, each with its own type, range and step, so a zone-level change
+     * drives all of them.
+     */
+    private fun volume(request: Request): Response {
+        val body = Json.body(request)
+        val how = body.optString("how").ifEmpty { "absolute" }
+        val value = body.optDouble("value", Double.NaN)
+        if (value.isNaN()) return Json.error(400, "value is required")
+
+        val outputId = body.optString("output_id").takeIf { it.isNotEmpty() }
+        val targets = if (outputId != null) {
+            listOfNotNull(roon.outputs().firstOrNull { it.outputId == outputId })
+        } else {
+            val zone = roon.zone(body.optString("zone_or_output_id").takeIf { it.isNotEmpty() })
+                ?: return Json.error(400, "output_id or zone_or_output_id is required")
+            zone.volumeOutputs
+        }
+        if (targets.isEmpty()) return Json.error(400, "that zone has no volume control")
+
+        for (out in targets) {
+            val vol = out.volume ?: continue
+            // An incremental control has no scale to step through: Roon's own
+            // guidance is that only a relative +1/-1 is legal.
+            if (vol.isIncremental) {
+                roon.changeVolume(out.outputId, "relative", if (value >= 0) 1.0 else -1.0)
+            } else {
+                roon.changeVolume(out.outputId, how, value)
+            }
+        }
+        return Json.ok()
+    }
+
+    private fun zoneSettings(request: Request): Response {
+        val body = Json.body(request)
+        val id = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "zone_or_output_id is required")
+        val patch = JSONObject()
+        if (body.has("shuffle")) patch.put("shuffle", body.optBoolean("shuffle"))
+        if (body.has("auto_radio")) patch.put("auto_radio", body.optBoolean("auto_radio"))
+        if (body.has("loop")) {
+            val loop = body.optString("loop")
+            if (loop !in ZoneSettings.LOOP_MODES) {
+                return Json.error(400, "loop must be one of ${ZoneSettings.LOOP_MODES.joinToString(", ")}")
+            }
+            patch.put("loop", loop)
+        }
+        if (patch.length() == 0) return Json.error(400, "nothing to change")
+        roon.changeSettings(id, patch)
+        return Json.ok()
+    }
+
+    private fun muteAll(request: Request): Response {
+        val how = request.str("how")?.takeIf { it == "mute" || it == "unmute" } ?: "mute"
+        var touched = 0
+        for (output in roon.outputs()) {
+            if (output.volume == null) continue
+            runCatching { roon.mute(output.outputId, how); touched++ }
+        }
+        return Json.ok(JSONObject().put("outputs", touched))
+    }
+
+    private fun groupOutputs(request: Request, group: Boolean): Response {
+        val arr = Json.body(request).optJSONArray("output_ids")
+            ?: return Json.error(400, "output_ids array is required")
+        val ids = (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotEmpty) }
+        if (ids.size < (if (group) 2 else 1)) {
+            return Json.error(400, if (group) "grouping needs at least two outputs" else "no outputs given")
+        }
+        if (group) roon.groupOutputs(ids) else roon.ungroupOutputs(ids)
+        return Json.ok()
+    }
+
+    private fun transferZone(request: Request): Response {
+        val body = Json.body(request)
+        val from = body.optString("from").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "from is required")
+        val to = body.optString("to").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "to is required")
+        roon.transferZone(from, to)
+        return Json.ok()
+    }
+
+    private fun playFromHere(request: Request): Response {
+        val body = Json.body(request)
+        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "zone_or_output_id is required")
+        val item = body.optLong("queue_item_id", -1)
+        if (item < 0) return Json.error(400, "queue_item_id is required")
+        roon.playFromHere(zone, item)
+        return Json.ok()
+    }
+
+    private fun outputControl(request: Request, standby: Boolean): Response {
+        val body = Json.body(request)
+        val outputId = body.optString("output_id").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "output_id is required")
+        val controlKey = body.optString("control_key").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "control_key is required")
+        if (standby) roon.standby(outputId, controlKey) else roon.convenienceSwitch(outputId, controlKey)
+        return Json.ok()
+    }
+
+    // ---------------------------------------------------------- discovery
+
+    private fun filterOf(request: Request): AlbumFilter? = AlbumFilter.parse(
+        request.str("filter_type"), request.str("filter_value"), request.str("filter_parent")
+    )
+
+    private fun randomAlbums(request: Request): Response {
+        val count = (request.int("count") ?: RANDOM_DEFAULT).coerceIn(1, 96)
+        val filter = filterOf(request)
+
+        // Unfiltered picks come straight from the snapshot: the same shape the
+        // browse path returns, with full-library offsets, so open and play work
+        // unchanged. That removes a browse walk plus one load per tile from
+        // every Home visit.
+        if (filter == null || filter.type == AlbumFilter.DECADE) {
+            val pool = if (filter == null) index.albums else {
+                val decade = filter.value.removeSuffix("s").toIntOrNull()
+                    ?: return Json.error(400, "unrecognised decade ${filter.value}")
+                index.albums.filter {
+                    val y = view.albumYearOf(it)
+                    y != null && y >= decade && y < decade + 10
+                }
+            }
+            if (pool.isEmpty() && !index.isBuilt) {
+                return Json.error(503, "The library is still being scanned")
+            }
+            val picked = view.sample(pool, count)
+            return Json.obj(
+                JSONObject()
+                    .put("albums", Json.albums(picked))
+                    .put("total", pool.size)
+                    .put("filtered", filter != null)
+            )
+        }
+
+        // A genre or tag has its own Roon list with its own offsets, so it has
+        // to be walked live.
+        val picked = roon.tree.withSession { key ->
+            val nav = roon.tree.navigateToAlbumList(key, filter)
+            if (nav.total == 0) return@withSession emptyList<JSONObject>() to 0
+            val want = minOf(count, nav.total)
+            val offsets = LinkedHashSet<Int>()
+            while (offsets.size < want) offsets += (0 until nav.total).random()
+            val out = ArrayList<JSONObject>(want)
+            for (off in offsets) {
+                val item = runCatching { roon.tree.load(nav.hierarchy, key, off, 1).items.firstOrNull() }
+                    .getOrNull() ?: continue
+                if (item.hint == "header") continue
+                out += Json.album(AlbumRecord(off, item.title, item.subtitle, item.imageKey))
+            }
+            out to nav.total
+        }
+        return Json.obj(
+            JSONObject()
+                .put("albums", Json.arrayOf(picked.first))
+                .put("total", picked.second)
+                .put("filtered", true)
+        )
+    }
+
+    private fun libraryAlbums(request: Request): Response {
+        if (!index.isBuilt) return Json.error(503, "The library index is still building")
+        val q = view.sanitize(
+            request.str("sort"), request.str("dir"), request.str("prefix"),
+            request.str("played"), request.str("genre"), request.str("decade"), request.str("seed")
+        )
+        val all = view.select(q)
+        val offset = (request.int("offset") ?: 0).coerceIn(0, all.size)
+        val count = (request.int("count") ?: 60).coerceIn(1, 200)
+        val page = all.subList(offset, minOf(offset + count, all.size))
+        return Json.obj(
+            JSONObject()
+                .put("albums", Json.albums(page))
+                .put("offset", offset)
+                .put("total", all.size)
+        )
+    }
+
+    /**
+     * Which focus values actually exist, with counts, so the sheet never offers
+     * a facet that would return nothing. Counted through the same tables the
+     * filter selects through: a facet that counts one way and selects another is
+     * worse than either being wrong alone, because the number promises something
+     * the list then fails to deliver.
+     */
+    private fun libraryFacets(request: Request): Response {
+        if (!index.isBuilt) return Json.error(503, "The library index is still building")
+
+        val decadeChips = view.decades().map { (decade, n) ->
+            JSONObject().put("id", "${decade}s").put("label", "${decade}s").put("count", n)
+        }
+
+        val genreCounts = HashMap<String, Int>()
+        for ((_, genres) in store.albumGenresAll()) {
+            for (g in genres) genreCounts[g] = (genreCounts[g] ?: 0) + 1
+        }
+        val genreChips = genreCounts.entries.sortedByDescending { it.value }.take(40)
+            .map { JSONObject().put("id", it.key).put("label", it.key).put("count", it.value) }
+
+        val everPlayed = view.playedTitlesSince(0)
+        val played = index.albums.count { it.title.lowercase().trim() in everPlayed }
+
+        val playedChips = listOf(
+            JSONObject().put("id", "never").put("label", "Never played").put("count", index.count - played),
+            JSONObject().put("id", "played").put("label", "Played").put("count", played),
+            JSONObject().put("id", "6").put("label", "Not in 6 months")
+                .put("count", view.unplayed(6).size),
+            JSONObject().put("id", "12").put("label", "Not in a year")
+                .put("count", view.unplayed(12).size)
+        )
+
+        val facets = JSONArray()
+            .put(JSONObject().put("id", "decade").put("label", "Decade").put("values", Json.arrayOf(decadeChips)))
+            .put(JSONObject().put("id", "played").put("label", "Listening").put("values", Json.arrayOf(playedChips)))
+        if (genreChips.isNotEmpty()) {
+            facets.put(JSONObject().put("id", "genre").put("label", "Genre").put("values", Json.arrayOf(genreChips)))
+        }
+
+        return Json.obj(
+            JSONObject()
+                .put("facets", facets)
+                .put("total", index.count)
+                .put("sorts", Json.strings(LibraryView.SORTS))
+        )
+    }
+
+    // ---------------------------------------------------------------- album
+
+    private fun expectOf(request: Request) =
+        Albums.Expect(request.str("title"), request.str("subtitle") ?: request.str("artist"))
+
+    private fun album(request: Request): Response {
+        val offset = request.int("offset") ?: return Json.error(400, "offset is required")
+        val r = app.albums.open(offset, null, null, filterOf(request), expectOf(request))
+        return Json.obj(albumViewJson(r))
+    }
+
+    private fun albumViewJson(r: Albums.AlbumView): JSONObject = JSONObject()
+        .put(
+            "album",
+            JSONObject()
+                .put("title", r.title)
+                .put("subtitle", r.subtitle)
+                .put("image_key", r.imageKey ?: JSONObject.NULL)
+                .put("source", JSONObject.NULL)
+        )
+        .put(
+            "tracks",
+            Json.arrayOf(r.tracks.map { JSONObject().put("title", it.title).put("subtitle", it.subtitle) })
+        )
+        .put(
+            "actions",
+            Json.arrayOf(r.actions.map { JSONObject().put("kind", it.kind).put("title", it.title) })
+        )
+        .put("offset", r.offset)
+        .put("artists", artistLinks(r.subtitle))
+        .put("library_moved", r.libraryMoved)
+        .put("partial", r.partial)
+        .put("declared_tracks", r.declaredTracks ?: JSONObject.NULL)
+
+    private fun albumExtras(request: Request): Response {
+        val title = request.str("title") ?: return Json.error(400, "title is required")
+        val artist = request.str("artist") ?: ""
+        val extras = app.metadata.extras(title, artist)
+
+        // A year learned here is worth keeping: it feeds the Decade filter and
+        // the year sort, which otherwise only fill in as albums are played.
+        val record = index.relocate(title, artist)
+        if (record != null && extras.year != null) {
+            runCatching {
+                store.putAlbumYear(record.key, extras.year, YearSource.MUSICBRAINZ)
+            }
+        }
+        val year = extras.year ?: record?.let { view.albumYearOf(it) }
+
+        fun bio(b: Metadata.Bio?): Any = if (b == null) JSONObject.NULL else
+            JSONObject()
+                .put("description", b.description)
+                .put("source", b.source)
+                .put("url", b.url ?: JSONObject.NULL)
+                // The lite build has no label chain, and the album card reads
+                // this field. Null keeps the row hidden rather than blank.
+                .put("label", JSONObject.NULL)
+
+        return Json.obj(
+            JSONObject()
+                .put("year", year ?: JSONObject.NULL)
+                .put("album", bio(extras.album))
+                .put("artist", bio(extras.artist))
+        )
+    }
+
+    /** Match what a zone is playing back to a library tile, so it can be opened. */
+    private fun nowPlayingAlbum(request: Request): Response {
+        val zone = roon.zone(request.str("zone"))
+            ?: return Json.obj(JSONObject().put("album", JSONObject.NULL))
+        val np = zone.nowPlaying
+            ?: return Json.obj(JSONObject().put("album", JSONObject.NULL))
+        val hit = index.relocate(np.line3, np.line2) ?: index.relocate(np.line3, null)
+        return Json.obj(
+            JSONObject().put("album", hit?.let { Json.album(it) } ?: JSONObject.NULL)
+        )
+    }
+
+    // -------------------------------------------------------------- playing
+
+    private fun playAlbum(request: Request, defaultKind: String): Response {
+        val body = Json.body(request)
+        val offset = body.optInt("offset", -1)
+        if (offset < 0) return Json.error(400, "offset is required")
+        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "zone_or_output_id is required")
+        val kind = body.optString("kind").takeIf { it.isNotEmpty() } ?: defaultKind
+        val r = app.albums.open(
+            offset, zone, kind,
+            AlbumFilter.parse(
+                body.optString("filter_type"), body.optString("filter_value"),
+                body.optString("filter_parent")
+            ),
+            Albums.Expect(
+                body.optString("title").takeIf { it.isNotEmpty() },
+                body.optString("subtitle").takeIf { it.isNotEmpty() }
+            )
+        )
+        return Json.ok(
+            JSONObject().put("invoked", r.invoked ?: JSONObject.NULL).put("offset", r.offset)
+        )
+    }
+
+    private fun playTrack(request: Request): Response {
+        val body = Json.body(request)
+        val offset = body.optInt("offset", -1)
+        if (offset < 0) return Json.error(400, "offset is required")
+        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "zone_or_output_id is required")
+        val trackIndex = body.optInt("track_index", -1)
+        if (trackIndex < 0) return Json.error(400, "track_index is required")
+        val kind = body.optString("kind").takeIf { it.isNotEmpty() } ?: "play_now"
+        val (invoked, track) = app.albums.invokeTrack(
+            offset, trackIndex, body.optString("track_title").takeIf { it.isNotEmpty() },
+            zone, kind,
+            AlbumFilter.parse(
+                body.optString("filter_type"), body.optString("filter_value"),
+                body.optString("filter_parent")
+            ),
+            Albums.Expect(
+                body.optString("title").takeIf { it.isNotEmpty() },
+                body.optString("subtitle").takeIf { it.isNotEmpty() }
+            )
+        )
+        return Json.ok(JSONObject().put("invoked", invoked).put("track", track))
+    }
+
+    /**
+     * Queue several albums back to back.
+     *
+     * The first goes on with the caller's kind (usually "play_now"); every one
+     * after is queued, because "play now" for each would leave only the last
+     * one playing. Failures are counted rather than aborting the run: nineteen
+     * albums queued and one refused is a better outcome than nothing.
+     */
+    private fun playMulti(request: Request): Response {
+        val body = Json.body(request)
+        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "zone_or_output_id is required")
+        val arr = body.optJSONArray("albums") ?: return Json.error(400, "albums array is required")
+        if (arr.length() == 0) return Json.error(400, "no albums given")
+        if (arr.length() > PLAY_MULTI_MAX) {
+            return Json.error(400, "at most $PLAY_MULTI_MAX albums at a time")
+        }
+        val firstKind = body.optString("kind").takeIf { it.isNotEmpty() } ?: "play_now"
+
+        var queued = 0
+        val failed = ArrayList<String>()
+        for (i in 0 until arr.length()) {
+            val a = arr.optJSONObject(i) ?: continue
+            val offset = a.optInt("offset", -1)
+            if (offset < 0) continue
+            val kind = if (i == 0) firstKind else "queue"
+            try {
+                app.albums.open(
+                    offset, zone, kind, null,
+                    Albums.Expect(
+                        a.optString("title").takeIf { it.isNotEmpty() },
+                        a.optString("subtitle").takeIf { it.isNotEmpty() }
+                    )
+                )
+                queued++
+            } catch (e: Exception) {
+                failed += a.optString("title").ifEmpty { "offset $offset" }
+            }
+        }
+        if (queued == 0) {
+            return Json.error(502, "Roon refused every album: ${failed.take(3).joinToString(", ")}")
+        }
+        return Json.ok(
+            JSONObject().put("queued", queued).put("failed", Json.strings(failed))
+        )
+    }
+
+    private fun playUnheard(request: Request): Response {
+        val body = Json.body(request)
+        val zone = body.optString("zone_or_output_id").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "zone_or_output_id is required")
+        val months = body.optInt("months", 6).coerceIn(1, 120)
+        val pool = view.unplayed(months).ifEmpty { index.albums }
+        val album = view.sample(pool, 1).firstOrNull()
+            ?: return Json.error(503, "The library index is still building")
+        val r = app.albums.open(
+            album.offset, zone, "play_now", null, Albums.Expect(album.title, album.subtitle)
+        )
+        return Json.ok(JSONObject().put("album", Json.album(album)).put("invoked", r.invoked ?: JSONObject.NULL))
+    }
+
+    private fun shortcutPlay(request: Request, unheardOnly: Boolean): Response {
+        val zone = request.str("zone") ?: roon.zones().firstOrNull()?.zoneId
+        ?: return Json.error(503, "No zones available")
+        val pool = if (unheardOnly) view.unplayed(6).ifEmpty { index.albums } else index.albums
+        val album = view.sample(pool, 1).firstOrNull()
+            ?: return Json.error(503, "The library index is still building")
+        app.albums.open(album.offset, zone, "play_now", null, Albums.Expect(album.title, album.subtitle))
+        return Json.ok(JSONObject().put("album", Json.album(album)))
+    }
+
+    // --------------------------------------------------------------- search
+
+    private fun search(request: Request): Response {
+        val q = request.str("q") ?: ""
+        val limit = (request.int("limit") ?: 40).coerceIn(1, 200)
+        if (q.isBlank()) {
+            return Json.obj(JSONObject().put("albums", JSONArray()).put("artists", JSONArray()).put("labels", JSONArray()))
+        }
+        val hits = Search.albums(index.albums, q, limit)
+        val artists = Search.artists(index.albums, q)
+        return Json.obj(
+            JSONObject()
+                .put("albums", Json.arrayOf(hits.map { Json.album(it.album, JSONObject().put("score", it.score)) }))
+                .put(
+                    "artists",
+                    Json.arrayOf(artists.map {
+                        JSONObject().put("name", it.name).put("albumCount", it.albumCount)
+                    })
+                )
+                // Labels are not in this build; an empty array keeps the search
+                // sheet's label section collapsed rather than erroring.
+                .put("labels", JSONArray())
+                .put("ready", index.isBuilt)
+        )
+    }
+
+    private fun artistAlbums(request: Request): Response {
+        val artist = request.str("artist") ?: return Json.error(400, "artist is required")
+        val want = Normalize.text(artist)
+        if (want.isEmpty() || index.albums.isEmpty()) {
+            return Json.obj(
+                JSONObject().put("artist", artist).put("primary", JSONArray()).put("featured", JSONArray())
+            )
+        }
+        val primary = ArrayList<AlbumRecord>()
+        val featured = ArrayList<AlbumRecord>()
+        for (al in index.albums) {
+            when {
+                al.nArtist == want -> primary += al
+                al.artistNames.any { it.normalized == want } -> featured += al
+            }
+        }
+        primary.sortBy { it.sortTitle }
+        featured.sortBy { it.sortTitle }
+        return Json.obj(
+            JSONObject()
+                .put("artist", artist)
+                .put("primary", Json.albums(primary))
+                .put("featured", Json.albums(featured))
+        )
+    }
+
+    private fun artistBio(request: Request): Response {
+        val artist = request.str("artist") ?: return Json.error(400, "artist is required")
+        val bio = app.metadata.wikipediaArtist(artist, "")
+            ?: return Json.obj(JSONObject().put("bio", JSONObject.NULL))
+        return Json.obj(
+            JSONObject().put(
+                "bio",
+                JSONObject()
+                    .put("description", bio.description)
+                    .put("source", bio.source)
+                    .put("url", bio.url ?: JSONObject.NULL)
+            )
+        )
+    }
+
+    // -------------------------------------------------------------- filters
+
+    private fun genres(): Response {
+        if (!roon.isPaired) return Json.error(503, "Not paired with a Roon Core")
+        val items = roon.tree.withSession { key ->
+            roon.tree.browse("genres", key, popAll = true)
+            roon.tree.loadLevel("genres", key, 1000).items
+        }
+        val genres = items.filter { it.hint != "header" }.map {
+            JSONObject().put("title", it.title).put("subtitle", it.subtitle)
+        }
+        return Json.obj(JSONObject().put("genres", Json.arrayOf(genres)))
+    }
+
+    private fun decades(): Response {
+        if (!index.isBuilt) return Json.error(503, "The library index is still building")
+        val decades = view.decades().map { (decade, n) ->
+            JSONObject()
+                .put("title", "${decade}s")
+                .put("subtitle", "$n album" + if (n == 1) "" else "s")
+        }
+        return Json.obj(JSONObject().put("decades", Json.arrayOf(decades)))
+    }
+
+    private fun tags(): Response {
+        if (!roon.isPaired) return Json.obj(JSONObject().put("tags", JSONArray()))
+        val items = try {
+            roon.tree.withSession { key ->
+                roon.tree.browse("browse", key, popAll = true)
+                val lib = roon.tree.findItemByTitle("browse", key, "Library", 50)
+                    ?: return@withSession emptyList()
+                roon.tree.browse("browse", key, itemKey = lib.itemKey)
+                val tagsNode = roon.tree.findItemByTitle("browse", key, "Tags", 100)
+                    ?: return@withSession emptyList()
+                roon.tree.browse("browse", key, itemKey = tagsNode.itemKey)
+                roon.tree.loadLevel("browse", key, 1000).items
+            }
+        } catch (e: Exception) {
+            // A library with no tags has no Tags node at all — an empty list,
+            // not an error the user has to dismiss.
+            Log.d(TAG, "no tags: ${e.message}")
+            emptyList()
+        }
+        return Json.obj(
+            JSONObject().put(
+                "tags",
+                Json.arrayOf(items.filter { it.hint != "header" }
+                    .map { JSONObject().put("title", it.title).put("subtitle", it.subtitle) })
+            )
+        )
+    }
+
+    // ----------------------------------------------------------------- home
+
+    private fun homeUnplayed(request: Request): Response {
+        val months = (request.int("months") ?: 6).coerceIn(1, 120)
+        val count = (request.int("count") ?: RANDOM_DEFAULT).coerceIn(1, 96)
+        val pool = view.unplayed(months)
+        return Json.obj(
+            JSONObject()
+                .put("albums", Json.albums(view.sample(pool, count)))
+                .put("total", pool.size)
+                .put("months", months)
+        )
+    }
+
+    private fun homeHistory(request: Request): Response {
+        val count = (request.int("count") ?: HISTORY_MAX_TILES).coerceIn(1, HISTORY_MAX_TILES)
+        return Json.obj(
+            JSONObject()
+                .put("albums", Json.albums(view.history(HISTORY_DAYS, count)))
+                .put("days", HISTORY_DAYS)
+        )
+    }
+
+    private fun albumOfTheDay(): Response {
+        val album = view.albumOfTheDay()
+            ?: return Json.obj(JSONObject().put("album", JSONObject.NULL))
+        // A suggestion you have already taken is not a suggestion.
+        if (view.playedToday(album)) {
+            return Json.obj(JSONObject().put("album", JSONObject.NULL).put("played", true))
+        }
+        return Json.obj(JSONObject().put("album", Json.album(album)))
+    }
+
+    /**
+     * The Home genre row. Roon's genre tree is a flat list plus one deep
+     * "Pop/Rock" node that holds most of a typical library, so the row shows the
+     * top-level genres by album count and lets the sheet drill in.
+     */
+    private fun genreGroups(): Response {
+        if (!roon.isPaired) return Json.obj(JSONObject().put("groups", JSONArray()))
+        val items = try {
+            roon.tree.withSession { key ->
+                roon.tree.browse("genres", key, popAll = true)
+                roon.tree.loadLevel("genres", key, 1000).items
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "genre groups unavailable: ${e.message}")
+            emptyList()
+        }
+        val counted = items.filter { it.hint != "header" }.map {
+            it to (Regex("(\\d[\\d,]*)\\s*albums?", RegexOption.IGNORE_CASE)
+                .find(it.subtitle)?.groupValues?.get(1)?.replace(",", "")?.toIntOrNull() ?: 0)
+        }.sortedByDescending { it.second }
+        val groups = counted.take(24).map { (item, n) ->
+            JSONObject()
+                .put("title", item.title)
+                .put("subtitle", item.subtitle)
+                .put("count", n)
+                .put("image_key", item.imageKey ?: JSONObject.NULL)
+        }
+        return Json.obj(JSONObject().put("groups", Json.arrayOf(groups)))
+    }
+
+    // ---------------------------------------------------------------- radio
+
+    private fun radio(request: Request): Response {
+        if (request.method == "POST") {
+            val body = Json.body(request)
+            val zone = body.optString("zone").takeIf { it.isNotEmpty() }
+                ?: return Json.error(400, "zone is required")
+            val enabled = body.optBoolean("enabled", false)
+            app.radio.setEnabled(zone, enabled)
+            return Json.ok(JSONObject().put("enabled", enabled))
+        }
+        val zone = request.str("zone")
+        return Json.obj(
+            JSONObject()
+                .put("enabled", app.radio.isEnabled(zone))
+                .put("zones", Json.strings(app.radio.enabledZones()))
+        )
+    }
+
+    // ----------------------------------------------------------- smart picks
+
+    /**
+     * A short list of albums the user probably has not heard lately, refreshed
+     * daily and stable within the day, minus anything they have blocked.
+     */
+    private fun smartPicks(request: Request): Response {
+        if (!settings.smartPicksEnabled()) {
+            return Json.obj(JSONObject().put("albums", JSONArray()).put("enabled", false))
+        }
+        val count = (request.int("count") ?: 12).coerceIn(1, 48)
+        val blocked = store.blockedPicks()
+        val pool = view.unplayed(6).filter { it.key !in blocked }
+        // Seeded by the day so the row does not reshuffle on every Home visit.
+        val seed = LibraryView.fnv1a(java.time.LocalDate.now().toString())
+        val picks = pool.sortedBy { LibraryView.seededRank(it.key, seed) }.take(count)
+        return Json.obj(
+            JSONObject()
+                .put("albums", Json.albums(picks))
+                .put("enabled", true)
+                .put("total", pool.size)
+        )
+    }
+
+    private fun smartPickBlock(request: Request): Response {
+        val body = Json.body(request)
+        val title = body.optString("title").takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "title is required")
+        val key = AlbumRecord(0, title, body.optString("subtitle"), null).key
+        store.blockPick(key)
+        return Json.ok()
+    }
+
+    // -------------------------------------------------------------- settings
+
+    private fun homeRowsJson(): JSONArray = Json.arrayOf(
+        settings.homeRows().map { (id, on) ->
+            JSONObject().put("id", id).put("on", on)
+                .put("unavailable", settings.homeRowUnavailable(id) ?: JSONObject.NULL)
+        }
+    )
+
+    private fun homeRows(): Response = Json.obj(JSONObject().put("rows", homeRowsJson()))
+
+    private fun saveHomeRows(request: Request): Response {
+        val arr = Json.body(request).optJSONArray("rows")
+            ?: return Json.error(400, "rows array is required")
+        val clean = ArrayList<Pair<String, Boolean>>()
+        val seen = HashSet<String>()
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i) ?: continue
+            val id = r.optString("id").takeIf { it in Settings.HOME_ROW_IDS } ?: continue
+            if (!seen.add(id)) continue
+            clean += id to r.optBoolean("on", true)
+        }
+        if (clean.isEmpty()) return Json.error(400, "no recognisable rows")
+        settings.saveHomeRows(clean)
+        // Answered through the same repair path the GET uses, so the client is
+        // told what was actually stored rather than what it sent.
+        return Json.ok(JSONObject().put("rows", homeRowsJson()))
+    }
+
+    private fun displaySettings(): Response = Json.obj(
+        JSONObject().put("enabled", settings.displayEnabled()).put("seconds", settings.displaySeconds())
+    )
+
+    private fun saveDisplay(request: Request): Response {
+        val body = Json.body(request)
+        settings.saveDisplay(
+            if (body.has("enabled")) body.optBoolean("enabled") else null,
+            if (body.has("seconds")) body.optInt("seconds") else null
+        )
+        return Json.ok(
+            JSONObject().put("enabled", settings.displayEnabled()).put("seconds", settings.displaySeconds())
+        )
+    }
+
+    private fun smartPickSettings(): Response = Json.obj(
+        JSONObject()
+            .put("enabled", settings.smartPicksEnabled())
+            .put("hour", settings.smartPicksHour())
+            .put("auto_add", settings.smartPicksAutoAdd())
+            .put("service_ready", index.isBuilt)
+    )
+
+    private fun saveSmartPicks(request: Request): Response {
+        val body = Json.body(request)
+        if (body.has("hour")) {
+            val h = body.optInt("hour", -1)
+            if (h !in 0..23) return Json.error(400, "hour must be 0-23")
+        }
+        settings.saveSmartPicks(
+            if (body.has("enabled")) body.optBoolean("enabled") else null,
+            if (body.has("hour")) body.optInt("hour") else null,
+            if (body.has("auto_add")) body.optBoolean("auto_add") else null
+        )
+        return Json.ok(
+            JSONObject()
+                .put("enabled", settings.smartPicksEnabled())
+                .put("hour", settings.smartPicksHour())
+                .put("auto_add", settings.smartPicksAutoAdd())
+        )
+    }
+
+    /**
+     * The labels switch, answered honestly.
+     *
+     * The front-end already treats `enabled: false` as "hide the Labels screen
+     * and its Home row", which is exactly the shape this build needs — so the
+     * feature disappears from the UI through its own supported path rather than
+     * leaving a menu entry that leads to an error.
+     */
+    private fun labelsSetting(isPost: Boolean): Response {
+        if (isPost) {
+            return Json.error(400, Settings.LABELS_UNAVAILABLE)
+        }
+        return Json.obj(
+            JSONObject()
+                .put("enabled", false)
+                .put("count", 0)
+                .put("scanning", false)
+                .put("unavailable", Settings.LABELS_UNAVAILABLE)
+        )
+    }
+
+    // --------------------------------------------------------- wall display
+
+    private fun displayContent(request: Request): Response {
+        if (!settings.displayEnabled()) {
+            return Json.error(403, "The wall display is switched off in Settings")
+        }
+        val zone = roon.zone(request.str("zone")) ?: roon.zones().firstOrNull { it.isPlaying }
+        val np = zone?.nowPlaying
+        val album = np?.let { index.relocate(it.line3, it.line2) }
+        val related = album?.let { hit ->
+            index.albums.filter { it.nArtist == hit.nArtist && it.key != hit.key }.take(12)
+        } ?: emptyList()
+        return Json.obj(
+            JSONObject()
+                .put("seconds", settings.displaySeconds())
+                .put("zone", zone?.displayName ?: JSONObject.NULL)
+                .put("state", zone?.state ?: "stopped")
+                .put(
+                    "now_playing",
+                    if (np == null) JSONObject.NULL else JSONObject()
+                        .put("line1", np.line1).put("line2", np.line2).put("line3", np.line3)
+                        .put("image_key", np.imageKey ?: JSONObject.NULL)
+                        .put("length", np.lengthSeconds ?: JSONObject.NULL)
+                        .put("seek_position", np.seekPosition ?: JSONObject.NULL)
+                )
+                .put("album", album?.let { Json.album(it) } ?: JSONObject.NULL)
+                .put("related", Json.albums(related))
+        )
+    }
+
+    // ---------------------------------------------------------------- image
+
+    private fun image(request: Request, rawKey: String): Response {
+        val key = rawKey.substringBefore('?')
+        if (key.isEmpty()) return Json.error(400, "image key is required")
+        val width = (request.int("width") ?: request.int("w") ?: 512).coerceIn(32, 2048)
+        val height = (request.int("height") ?: request.int("h") ?: width).coerceIn(32, 2048)
+        val scale = request.str("scale")?.takeIf { it in setOf("fit", "fill", "stretch") } ?: "fit"
+
+        val url = roon.imageUrl(key, width, height, scale)
+            ?: return Json.error(503, "Not paired with a Roon Core")
+        val art = app.art.get(url, "$key|$width|$height|$scale")
+            ?: return Json.error(404, "Roon has no art for that key")
+        return Response.bytes(
+            200, art.contentType, art.bytes,
+            // Roon's image keys are content-addressed: the same key is always
+            // the same picture, so this can be cached hard.
+            mapOf("Cache-Control" to "public, max-age=604800, immutable")
+        )
+    }
+
+    // ----------------------------------------------------- not in this build
+
+    /**
+     * Endpoints the original serves that this build does not.
+     *
+     * Answered in the UI's own "feature off" shape wherever one exists, so the
+     * screen renders its empty state instead of an error. Anything with no such
+     * shape gets a 501 that says what is missing and why, which is more use than
+     * a bare 404.
+     */
+    private fun notInLite(path: String): Response = when {
+        // Labels, and everything the label index feeds.
+        path.startsWith("/api/labels") || path == "/api/label-albums" ->
+            Json.error(501, Settings.LABELS_UNAVAILABLE)
+
+        path == "/api/filters/labels" -> Json.obj(JSONObject().put("labels", JSONArray()))
+        path == "/api/home/label-of-the-week" -> Json.obj(JSONObject().put("label", JSONObject.NULL))
+        path == "/api/settings/discogs-token" -> Json.obj(JSONObject().put("token", ""))
+        path == "/api/settings/fanart-key" -> Json.obj(JSONObject().put("key", ""))
+        path == "/api/settings/label-folder-depth" -> Json.obj(JSONObject().put("depth", 0))
+
+        // Streaming services. Both need an account login the app has no place to
+        // put yet; the UI hides its Qobuz/TIDAL rows when neither is connected.
+        path.startsWith("/api/qobuz") || path.startsWith("/api/settings/qobuz") ->
+            Json.obj(JSONObject().put("connected", false).put("albums", JSONArray()))
+        path.startsWith("/api/tidal") || path.startsWith("/api/settings/tidal") ->
+            Json.obj(JSONObject().put("connected", false).put("albums", JSONArray()))
+        path == "/api/search/external" ->
+            Json.obj(JSONObject().put("albums", JSONArray()).put("artists", JSONArray()))
+
+        // Self-update is a Docker-era feature: an APK updates by being installed.
+        path.startsWith("/api/update") ->
+            Json.obj(
+                JSONObject().put("available", false).put("current", app.version)
+                    .put("note", "Update the app by installing a newer APK.")
+            )
+
+        // Reading file tags needs a mounted music directory, which a phone
+        // does not have.
+        path == "/api/music-mount" -> Json.obj(JSONObject().put("mounted", false).put("path", ""))
+
+        // Pitchfork review scraping is not carried over.
+        path.startsWith("/api/pitchfork") ->
+            Json.obj(JSONObject().put("reviews", JSONArray()).put("review", JSONObject.NULL))
+
+        // Playlists, sharing and saved lists are not in this build yet. Empty
+        // collections keep their screens at "nothing here" rather than an error.
+        path == "/api/playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
+        path == "/api/user-playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
+        path == "/api/smart-playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
+        path.startsWith("/api/playlist") || path.startsWith("/api/user-playlist") ||
+            path.startsWith("/api/smart-playlist") || path.startsWith("/api/share") ->
+            Json.error(501, "Playlists and sharing aren't in the lite build yet.")
+
+        path.startsWith("/api/debug") -> Json.error(501, "Debug endpoints aren't in the lite build.")
+
+        else -> Json.error(404, "No such endpoint: $path")
+    }
+}
