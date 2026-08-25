@@ -110,11 +110,15 @@ jobs:
             echo "dist/$APK is already committed — nothing to publish."
             exit 0
           fi
-          mkdir -p dist
           # One APK in the tree at a time. The old one is superseded rather
           # than kept: the README links to a single file, and git still has
           # every previous version in its history.
+          #
+          # mkdir comes AFTER this, not before: `git rm` of the last file in a
+          # directory removes the directory too, so creating it first and
+          # copying afterwards fails with "No such file or directory".
           git rm -q --ignore-unmatch 'dist/musicd-remote-lite-*.apk'
+          mkdir -p dist
           cp "$APK" "dist/$APK"
           # The README's download link is rewritten here rather than by hand,
           # because a link that has to be remembered is a link that eventually
