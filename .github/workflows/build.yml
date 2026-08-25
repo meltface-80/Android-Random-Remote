@@ -110,16 +110,23 @@ jobs:
             echo "dist/$APK is already committed — nothing to publish."
             exit 0
           fi
-          mkdir -p dist
           # One APK in the tree at a time. The old one is superseded rather
           # than kept: the README links to a single file, and git still has
           # every previous version in its history.
+          #
+          # mkdir comes AFTER this, not before: `git rm` of the last file in a
+          # directory removes the directory too, so creating it first and
+          # copying afterwards fails with "No such file or directory".
           git rm -q --ignore-unmatch 'dist/musicd-remote-lite-*.apk'
+          mkdir -p dist
           cp "$APK" "dist/$APK"
           # The README's download link is rewritten here rather than by hand,
           # because a link that has to be remembered is a link that eventually
           # points at a version that no longer exists.
-          sed -i -E "s#dist/musicd-remote-lite-[0-9][^)\"]*\.apk#dist/$APK#g" README.md
+          # Every mention, not just the path: the link TEXT names the version
+          # too, and a label that disagrees with what it downloads is worse
+          # than no label.
+          sed -i -E "s#musicd-remote-lite-[0-9][0-9A-Za-z._-]*\.apk#$APK#g" README.md
           git add "dist/$APK" README.md
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

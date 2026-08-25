@@ -1,5 +1,6 @@
 package com.musicd.lite.api
 
+import com.musicd.lite.str
 import com.musicd.lite.store.Store
 import org.json.JSONArray
 import org.json.JSONObject
@@ -56,7 +57,7 @@ class Settings(private val store: Store) {
         if (stored != null) {
             for (i in 0 until stored.length()) {
                 val r = stored.optJSONObject(i) ?: continue
-                val id = r.optString("id").takeIf { it in HOME_ROW_IDS } ?: continue
+                val id = r.str("id").takeIf { it in HOME_ROW_IDS } ?: continue
                 if (!seen.add(id)) continue
                 out += id to r.optBoolean("on", true)
             }
@@ -112,7 +113,7 @@ class Settings(private val store: Store) {
 
     fun radioZones(): Set<String> {
         val arr = doc(KEY_RADIO_ZONES).optJSONArray("zones") ?: return emptySet()
-        return (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotEmpty) }
+        return (0 until arr.length()).mapNotNull { arr.str(it).takeIf(String::isNotEmpty) }
             .toSet()
     }
 

@@ -87,6 +87,10 @@ class MainActivity : Activity() {
                 displayZoomControls = false
             }
             webViewClient = LocalClient()
+            // Clipboard, Web Share and blob downloads, which a WebView does not
+            // have — see ShareBridge. Reachable only from our own loopback
+            // page: LocalClient sends every other URL to the browser.
+            addJavascriptInterface(ShareBridge(this@MainActivity), ShareBridge.NAME)
         }
         root.addView(web)
         setContentView(root)
@@ -147,6 +151,10 @@ class MainActivity : Activity() {
     }
 
     private inner class LocalClient : WebViewClient() {
+        override fun onPageFinished(view: WebView, url: String) {
+            ShareBridge.install(view)
+        }
+
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url ?: return false
             val local = RemoteService.instance?.app?.rootUrl

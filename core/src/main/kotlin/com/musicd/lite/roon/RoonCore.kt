@@ -1,5 +1,6 @@
 package com.musicd.lite.roon
 
+import com.musicd.lite.str
 import com.musicd.lite.Log
 import com.musicd.lite.store.Store
 import okhttp3.OkHttpClient
@@ -252,8 +253,8 @@ class RoonCore(
         try {
             val info = ws.call(RoonServices.REGISTRY, "info", expect = null)
             info.bodyText?.let { JSONObject(it) }?.let { body ->
-                coreId = body.optString("core_id").takeIf { it.isNotEmpty() } ?: coreId
-                coreName = body.optString("display_name").takeIf { it.isNotEmpty() } ?: coreName
+                coreId = body.str("core_id").takeIf { it.isNotEmpty() } ?: coreId
+                coreName = body.str("display_name").takeIf { it.isNotEmpty() } ?: coreName
             }
 
             publish(
@@ -283,10 +284,10 @@ class RoonCore(
             // pair can be minutes. Everything after that arrives on the same id.
             val registered = ws.call(RoonServices.REGISTRY, "register", reginfo, expect = "Registered")
             val body = registered.bodyText?.let { JSONObject(it) }
-            val id = body?.optString("core_id")?.takeIf { it.isNotEmpty() } ?: coreId
+            val id = body?.str("core_id")?.takeIf { it.isNotEmpty() } ?: coreId
             coreId = id
-            coreName = body?.optString("display_name")?.takeIf { it.isNotEmpty() } ?: coreName
-            body?.optString("token")?.takeIf { it.isNotEmpty() }?.let { token ->
+            coreName = body?.str("display_name")?.takeIf { it.isNotEmpty() } ?: coreName
+            body?.str("token")?.takeIf { it.isNotEmpty() }?.let { token ->
                 if (id != null) store.saveToken(id, token)
             }
 

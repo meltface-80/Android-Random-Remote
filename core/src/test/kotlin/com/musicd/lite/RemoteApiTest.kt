@@ -79,7 +79,8 @@ class RemoteApiTest {
             assets = assets,
             artDir = null,
             version = "test",
-            httpPort = 0
+            httpPort = 0,
+            importSettleMs = 0          // no need to wait out an import in a test
         ) { _, _, _ -> core }
         app.start()
         // Pairing is what normally triggers this; the scripted Core is simply
@@ -374,6 +375,30 @@ class RemoteApiTest {
         val (code, text) = get("/api/labels/logo-candidates")
         assertEquals(501, code)
         assertTrue(JSONObject(text).getString("error").isNotEmpty())
+    }
+
+    @Test
+    fun rescanReportsAnOutcomeTheFrontEndUnderstands() {
+        // The UI maps j.status to its toast and shows "Rescan failed" for
+        // anything else, so acknowledging the request without saying what
+        // happened reads to the user as a broken button.
+        val (code, text) = post("/api/library/rescan", "{}")
+        assertEquals(text, 200, code)
+        val body = JSONObject(text)
+        assertEquals("rebuilt", body.getString("status"))
+        assertEquals(5, body.getInt("count"))
+    }
+
+    @Test
+    fun rescanSaysSoWhenThereIsNoCore() {
+        core.paired = false
+        val body = JSONObject(post("/api/library/rescan", "{}").second)
+        assertEquals("unpaired", body.getString("status"))
+    }
+
+    @Test
+    fun rescanIsAPostOnly() {
+        assertEquals(405, get("/api/library/rescan").first)
     }
 
     @Test

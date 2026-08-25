@@ -1,5 +1,6 @@
 package com.musicd.lite.api
 
+import com.musicd.lite.str
 import com.musicd.lite.http.Request
 import com.musicd.lite.http.Response
 import com.musicd.lite.library.AlbumRecord
@@ -62,7 +63,7 @@ object Json {
 /** A query parameter, falling back to the JSON body — the UI uses both. */
 fun Request.str(name: String): String? =
     query[name]?.takeIf { it.isNotEmpty() }
-        ?: Json.body(this).optString(name).takeIf { it.isNotEmpty() }
+        ?: Json.body(this).str(name).takeIf { it.isNotEmpty() }
 
 fun Request.int(name: String): Int? = str(name)?.toIntOrNull()
 

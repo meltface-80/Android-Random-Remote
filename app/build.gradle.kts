@@ -13,8 +13,11 @@ android {
         applicationId = "com.musicd.lite"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // Bumping versionName is what publishes a new APK into dist/ and
+        // repoints the README at it — see the workflow. versionCode must rise
+        // with it or Android refuses to install over the previous build.
+        versionCode = 2
+        versionName = "0.1.1"
     }
 
     buildFeatures {
@@ -58,4 +61,7 @@ dependencies {
     // and SQLite.
     implementation(project(":core"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // FileProvider only. Handing an image to the clipboard or a share sheet
+    // means handing over a content:// URI, and that needs a provider.
+    implementation("androidx.core:core:1.13.1")
 }
