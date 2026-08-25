@@ -50,6 +50,10 @@ class RemoteApi(
 
         /** Roon rejects a play of more albums than this in one go. */
         const val PLAY_MULTI_MAX = 400
+
+        /** Said to anyone who reaches a streaming login this build does not have. */
+        const val STREAMING_UNAVAILABLE =
+            "%s isn't in the lite build. Roon streams it through its own account anyway."
     }
 
     /** Zones with a multi-album fill in flight. */
@@ -190,7 +194,7 @@ class RemoteApi(
             "/api/shortcut/play-random" -> shortcutPlay(request, unheardOnly = false)
             "/api/shortcut/play-unheard" -> shortcutPlay(request, unheardOnly = true)
 
-            else -> notInLite(path)
+            else -> notInLite(path, post)
         }
     }
 
@@ -1315,7 +1319,7 @@ class RemoteApi(
      * shape gets a 501 that says what is missing and why, which is more use than
      * a bare 404.
      */
-    private fun notInLite(path: String): Response = when {
+    private fun notInLite(path: String, isPost: Boolean = false): Response = when {
         // Labels, and everything the label index feeds.
         path.startsWith("/api/labels") || path == "/api/label-albums" ->
             Json.error(501, Settings.LABELS_UNAVAILABLE)
@@ -1324,12 +1328,23 @@ class RemoteApi(
         path == "/api/home/label-of-the-week" -> Json.obj(JSONObject().put("label", JSONObject.NULL))
         path == "/api/settings/label-folder-depth" -> Json.obj(JSONObject().put("depth", 0))
 
-        // Streaming services. Both need an account login the app has no place to
-        // put yet; the UI hides its Qobuz/TIDAL rows when neither is connected.
+        // Streaming services.
+        //
+        // Both logins in the original go through unofficial APIs that the two
+        // services' terms forbid, and they buy catalogue browsing only — Roon
+        // streams Qobuz and TIDAL through its own account either way. So there
+        // is no client here, and the Streaming accounts pane is hidden.
+        //
+        // A GET still answers "not connected", which is the shape the status
+        // reader wants. A POST used to answer with that same body, and the page
+        // reads `ok` — so a login attempt reported the unhelpful "Qobuz connect
+        // failed". It now says what is actually true.
         path.startsWith("/api/qobuz") || path.startsWith("/api/settings/qobuz") ->
-            Json.obj(JSONObject().put("connected", false).put("albums", JSONArray()))
+            if (isPost) Json.error(501, STREAMING_UNAVAILABLE.format("Qobuz"))
+            else Json.obj(JSONObject().put("connected", false).put("albums", JSONArray()))
         path.startsWith("/api/tidal") || path.startsWith("/api/settings/tidal") ->
-            Json.obj(JSONObject().put("connected", false).put("albums", JSONArray()))
+            if (isPost) Json.error(501, STREAMING_UNAVAILABLE.format("TIDAL"))
+            else Json.obj(JSONObject().put("connected", false).put("albums", JSONArray()))
         path == "/api/search/external" ->
             Json.obj(JSONObject().put("albums", JSONArray()).put("artists", JSONArray()))
 

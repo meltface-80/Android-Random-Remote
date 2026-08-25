@@ -444,22 +444,42 @@ class RemoteApiTest {
     }
 
     @Test
-    fun homeRowsRepairThemselvesAndReportWhatIsUnavailable() {
+    fun homeRowsRepairThemselvesAndOfferOnlyRowsThisBuildServes() {
         val rows = json("/api/settings/home-rows").getJSONArray("rows")
-        assertEquals(7, rows.length())
-        val lotw = (0 until rows.length()).map { rows.getJSONObject(it) }
-            .first { it.getString("id") == "lotw" }
-        // The Label of the Week row cannot be served by this build, and says so
-        // rather than rendering empty.
-        assertNotNull(lotw.getString("unavailable"))
+        val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }
+        assertEquals(
+            listOf("unplayed", "history", "picks", "random", "library", "genres"),
+            ids
+        )
+        // The settings screen renders its list from this response, so a row
+        // this build can never serve must be absent rather than present and
+        // greyed out. Label of the week is the one.
+        assertFalse("lotw" in ids)
 
         // A stored layout that predates a row must still get that row back.
         val (code, _) = post("/api/settings/home-rows", """{"rows":[{"id":"random","on":false}]}""")
         assertEquals(200, code)
         val repaired = json("/api/settings/home-rows").getJSONArray("rows")
-        assertEquals(7, repaired.length())
+        assertEquals(6, repaired.length())
         assertEquals("random", repaired.getJSONObject(0).getString("id"))
         assertFalse(repaired.getJSONObject(0).getBoolean("on"))
+    }
+
+    /**
+     * A stored layout from an older build still names "lotw". It must be
+     * dropped on the way back out, not carried through into the settings list.
+     */
+    @Test
+    fun aStoredLayoutNamingARetiredRowLosesIt() {
+        post(
+            "/api/settings/home-rows",
+            """{"rows":[{"id":"lotw","on":true},{"id":"random","on":true}]}"""
+        )
+        val ids = json("/api/settings/home-rows").getJSONArray("rows").let { rows ->
+            (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }
+        }
+        assertFalse("lotw" in ids)
+        assertEquals("random", ids.first())
     }
 
     @Test
@@ -487,6 +507,27 @@ class RemoteApiTest {
         val (code, text) = get("/api/labels/logo-candidates")
         assertEquals(501, code)
         assertTrue(JSONObject(text).getString("error").isNotEmpty())
+    }
+
+    /**
+     * A streaming login has to fail with a REASON.
+     *
+     * GET answers "not connected", which is what the status reader wants — but
+     * the POST behind the Connect button answered with that same body, and the
+     * page reads `ok`. Its fallback text is "Qobuz connect failed", which says
+     * nothing about why and reads as a bug rather than an absent feature.
+     */
+    @Test
+    fun aStreamingLoginFailsWithAReasonRatherThanJustFailing() {
+        for (service in listOf("qobuz", "tidal")) {
+            val (code, text) = post("/api/settings/$service", """{"username":"a","password":"b"}""")
+            assertEquals(text, 501, code)
+            val error = JSONObject(text).getString("error")
+            assertTrue(error, error.contains("lite build"))
+            // Still "not connected" on the read side, so the status line and
+            // the hidden menu entries keep working.
+            assertFalse(json("/api/settings/$service").getBoolean("connected"))
+        }
     }
 
     @Test

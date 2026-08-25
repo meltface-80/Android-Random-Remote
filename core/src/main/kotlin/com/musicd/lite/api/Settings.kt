@@ -20,7 +20,18 @@ class Settings(private val store: Store) {
          * order and membership are one fact and splitting them is how they end
          * up contradicting each other.
          */
-        val HOME_ROW_IDS = listOf("unplayed", "history", "picks", "random", "library", "lotw", "genres")
+        /**
+         * The Home rows this build can serve.
+         *
+         * "lotw" (Label of the week) is deliberately absent rather than listed
+         * as unavailable. The settings screen renders its list from whatever
+         * this returns, so a row kept here appears there — greyed out, with a
+         * switch that cannot move and a note saying why. For a feature that is
+         * never coming back in this build that is one more thing to read, not
+         * information. The Home section itself is hidden in index.html, since
+         * with the row gone from here nothing positions it.
+         */
+        val HOME_ROW_IDS = listOf("unplayed", "history", "picks", "random", "library", "genres")
 
         const val KEY_HOME_ROWS = "home_rows"
         const val KEY_DISPLAY = "display"
@@ -31,9 +42,12 @@ class Settings(private val store: Store) {
         const val KEY_LAST_ZONE = "last_zone"
 
         /**
-         * The one row the lite build cannot serve. "Label of the week" needs the
-         * label index, which needs a scan of file tags on a mounted music
-         * directory plus four external metadata services.
+         * Why every label route in this build answers the way it does.
+         *
+         * Record labels come from a scan of file tags on a mounted music
+         * directory, resolved against five external metadata services. Neither
+         * half is here, so the label browser, the label filter and the
+         * label-of-the-week row are all out — see notInLite.
          */
         const val LABELS_UNAVAILABLE =
             "Record labels aren't part of the lite build — it has no music folder to read tags from."
@@ -80,7 +94,6 @@ class Settings(private val store: Store) {
      * row is unavailable everywhere.
      */
     fun homeRowUnavailable(id: String): String? = when {
-        id == "lotw" -> LABELS_UNAVAILABLE
         id == "picks" && !smartPicksEnabled() -> "Smart Picks is off in Settings"
         else -> null
     }
