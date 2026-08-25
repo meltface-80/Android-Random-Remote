@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The front-end's own background, so the window never flashes a
+         different colour behind the page while it loads. -->
+    <color name="app_background">#FF0E1012</color>
+    <color name="icon_background">#FF101418</color>
+</resources>

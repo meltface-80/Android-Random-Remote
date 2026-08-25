@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Two reasons cleartext has to be allowed, both local:
+
+  1. The Roon extension API is an unencrypted WebSocket (ws://) on the LAN, and
+     the image service is plain HTTP on the same host and port. Roon exposes no
+     TLS endpoint for extensions.
+  2. The front-end is served from 127.0.0.1 by this app's own HTTP server.
+
+  Neither leaves the device or the local network. The metadata lookups that DO
+  leave the network (MusicBrainz, Wikipedia) are HTTPS and unaffected.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

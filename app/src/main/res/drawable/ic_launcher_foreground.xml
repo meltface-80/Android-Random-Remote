@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A record and a tonearm, drawn in the adaptive-icon's 108dp box. Android
+     crops adaptive icons to whatever shape the launcher uses and guarantees
+     only the centre 72dp, so nothing that matters goes outside it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#7AC8FF"
+        android:pathData="M54,26a28,28 0 1,0 0.01,0zM54,34a20,20 0 1,1 -0.01,0zM54,48a6,6 0 1,0 0.01,0z" />
+    <path
+        android:strokeColor="#E8F3FF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M76,30 L68,50" />
+</vector>
