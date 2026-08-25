@@ -436,6 +436,47 @@ class RemoteApiTest {
         assertTrue(core.calls.isEmpty())
     }
 
+    /**
+     * The two radios are mutually exclusive, and the server is where that has
+     * to live — both directions have to hold however the switch was reached.
+     *
+     * Roon Radio and Random Album Radio both answer "what plays when the queue
+     * runs out", so both on means two things racing to fill one queue.
+     */
+    @Test
+    fun turningOnRoonRadioStandsDownTheRandomAlbumRadio() {
+        assertEquals(200, post("/api/radio", """{"zone":"z1","enabled":true}""").first)
+        assertTrue(json("/api/radio?zone=z1").getBoolean("enabled"))
+
+        val (code, text) = post("/api/zone-settings", """{"zone_or_output_id":"z1","auto_radio":true}""")
+        assertEquals(text, 200, code)
+        assertTrue(JSONObject(text).getBoolean("random_album_radio_stands_down"))
+        assertFalse("ours must be off once Roon's is on", json("/api/radio?zone=z1").getBoolean("enabled"))
+    }
+
+    @Test
+    fun turningOnTheRandomAlbumRadioTurnsRoonRadioOff() {
+        // The zone reports Roon Radio on, so enabling ours has to switch it off.
+        core.zonesList = core.zonesList.map { zone ->
+            zone.copy(settings = zone.settings.copy(autoRadio = true))
+        }
+        val (code, text) = post("/api/radio", """{"zone":"z1","enabled":true}""")
+        assertEquals(text, 200, code)
+        assertTrue(JSONObject(text).getBoolean("roon_radio_off"))
+        assertTrue(
+            core.calls.toString(),
+            core.calls.any { it.startsWith("settings:z1:") && it.contains("\"auto_radio\":false") }
+        )
+    }
+
+    @Test
+    fun switchingOffRoonRadioLeavesTheOtherAlone() {
+        assertEquals(200, post("/api/radio", """{"zone":"z1","enabled":true}""").first)
+        val (_, text) = post("/api/zone-settings", """{"zone_or_output_id":"z1","auto_radio":false}""")
+        assertFalse(JSONObject(text).getBoolean("random_album_radio_stands_down"))
+        assertTrue(json("/api/radio?zone=z1").getBoolean("enabled"))
+    }
+
     @Test
     fun zoneSettingsRejectAnUnknownLoopMode() {
         assertEquals(400, post("/api/zone-settings", """{"zone_or_output_id":"z1","loop":"next"}""").first)
@@ -498,8 +539,6 @@ class RemoteApiTest {
     fun featuresNotInThisBuildDegradeInsteadOfErroring() {
         assertEquals(0, json("/api/filters/labels").getJSONArray("labels").length())
         assertTrue(json("/api/home/label-of-the-week").isNull("label"))
-        assertFalse(json("/api/settings/qobuz").getBoolean("connected"))
-        assertFalse(json("/api/settings/tidal/status").getBoolean("connected"))
         assertFalse(json("/api/update/status").getBoolean("available"))
         assertFalse(json("/api/music-mount").getBoolean("mounted"))
         assertEquals(0, json("/api/playlists").getJSONArray("playlists").length())
@@ -510,23 +549,22 @@ class RemoteApiTest {
     }
 
     /**
-     * A streaming login has to fail with a REASON.
+     * Qobuz and TIDAL are gone from this build, routes included.
      *
-     * GET answers "not connected", which is what the status reader wants — but
-     * the POST behind the Connect button answered with that same body, and the
-     * page reads `ok`. Its fallback text is "Qobuz connect failed", which says
-     * nothing about why and reads as a bug rather than an absent feature.
+     * 501 with a reason rather than 404, so a stale cached page asking for one
+     * of these is told why it is missing.
      */
     @Test
-    fun aStreamingLoginFailsWithAReasonRatherThanJustFailing() {
-        for (service in listOf("qobuz", "tidal")) {
-            val (code, text) = post("/api/settings/$service", """{"username":"a","password":"b"}""")
-            assertEquals(text, 501, code)
-            val error = JSONObject(text).getString("error")
-            assertTrue(error, error.contains("lite build"))
-            // Still "not connected" on the read side, so the status line and
-            // the hidden menu entries keep working.
-            assertFalse(json("/api/settings/$service").getBoolean("connected"))
+    fun theStreamingRoutesAreGoneAndSayWhy() {
+        val paths = listOf(
+            "/api/settings/qobuz", "/api/settings/tidal",
+            "/api/qobuz/new-releases", "/api/tidal/favorite"
+        )
+        for (path in paths) {
+            for ((code, text) in listOf(get(path), post(path, "{}"))) {
+                assertEquals("$path -> $text", 501, code)
+                assertTrue(text, JSONObject(text).getString("error").contains("this build"))
+            }
         }
     }
 

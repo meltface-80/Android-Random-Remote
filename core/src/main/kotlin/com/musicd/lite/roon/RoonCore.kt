@@ -10,6 +10,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -80,6 +81,9 @@ class RoonCore(
     }
 
     private val socket = AtomicReference<MooSocket?>(null)
+
+    /** One subscription key per queue read — see [queue]. */
+    private val nextQueueSubscriptionKey = AtomicInteger(100)
     private val sessionPool = BrowseSessionPool()
 
     private val zoneStore = ZoneStore()
@@ -429,16 +433,33 @@ class RoonCore(
      * live queue feed per client for a sheet that is usually shut within
      * seconds.
      */
+    /**
+     * A zone's queue, read once.
+     *
+     * `zone_or_output_id` is not optional. RoonLabs' own transport API sends it
+     * with every subscribe_queue (lib.js: `{zone_or_output_id, max_item_count}`)
+     * and it is how the Core knows which of its zones the subscription is for.
+     * Sending only max_item_count — which this did — gets a "Subscribed" back
+     * carrying no items, so the queue screen read as permanently empty rather
+     * than as broken.
+     *
+     * The subscription key is per call. Two overlapping reads sharing one key
+     * put the second on top of the first, and the unsubscribe in the finally
+     * block would then cancel a subscription the other call is still waiting on.
+     */
     override fun queue(zoneId: String, count: Int, timeoutMs: Long): List<QueueItem> {
         val ws = ws()
         val latch = CountDownLatch(1)
         val result = AtomicReference<List<QueueItem>?>(null)
         val failure = AtomicReference<String?>(null)
-        val subscriptionKey = 100
+        val subscriptionKey = nextQueueSubscriptionKey.getAndIncrement()
 
         val requestId = ws.send(
             RoonServices.TRANSPORT, "subscribe_queue",
-            JSONObject().put("subscription_key", subscriptionKey).put("max_item_count", count)
+            JSONObject()
+                .put("subscription_key", subscriptionKey)
+                .put("zone_or_output_id", zoneId)
+                .put("max_item_count", count)
         ) { msg ->
             if (msg == null) {
                 failure.compareAndSet(null, "Lost the connection")
