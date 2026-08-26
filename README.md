@@ -60,7 +60,7 @@ API testable on a JVM with no emulator — see [Verification](#verification).
 
 ## Install
 
-**Download: [musicd-remote-lite-0.3.3.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.3.3.apk)**
+**Download: [musicd-remote-lite-0.3.5.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.3.5.apk)**
 
 Sideload it on Android 8.0 (API 26) or newer. The file in
 [`dist/`](dist/) is published by CI from the source in this repository, so it is
@@ -115,6 +115,11 @@ original's screens unchanged:
 
 - **Discovery** — a wall of random albums, filtered by genre, tag or decade;
   Album of the Day; a "not played in N months" row; recently played.
+- **Smart Picks** — a handful of albums a day you have not played in six
+  months, drawn from your own library, with a "not for me" that keeps one from
+  coming back.
+- **Play Unheard** — one button in the topbar, straight to a record you have
+  never played.
 - **The whole library** — a paged, sortable grid (title, artist, year, added,
   play count, last played, or a stable shuffle) with focus facets.
 - **Instant search** over the whole library, matched locally on every keystroke:
@@ -132,6 +137,11 @@ original's screens unchanged:
 - **Pitchfork** — the Latest and Best New Music listings, with scores, covers
   and links out to pitchfork.com. No review text is served, here or upstream:
   the writing is Pitchfork's and the app links to it.
+- **Share cards** — what is playing, rendered to an image and handed to
+  Android's share sheet. The card is drawn in the page itself; nothing is
+  uploaded anywhere to make one.
+- **Updates in the app** — Settings checks for a newer APK and offers it.
+  Android's installer still asks; this only saves finding the download.
 
 Release years come from MusicBrainz and the write-ups from Wikipedia. Both are
 free and need no key.
@@ -153,8 +163,24 @@ the whole reason for the port:
   the zone you were last using — no launcher, no cold start, no WebView. The
   app's most-used action, without the app.
 - **The dial**, as a second launcher icon. A volume ring you sweep with your
-  thumb, album art in the middle, transport under it — and a microphone: say an
-  album or an artist and it plays. One install, two icons, one Roon extension.
+  thumb, album art in the middle, transport under it, and the zone name to tap
+  to change room. One install, two icons, one Roon extension.
+- **Speaking to the dial.** Tap the microphone and say what you want. It
+  listens on the dial itself rather than handing you the system recogniser:
+
+  | Say | Get |
+  |---|---|
+  | "play *Massive Attack*" | finds it in your library and plays it |
+  | "play music" | carries on from where it was paused |
+  | "pause music" | pauses |
+  | "turn up the volume", "louder" | 5% of the output's range, per command |
+  | "next track", "go back" | skip forward or back |
+  | "mute", "unmute" | mutes the zone |
+  | "surprise me" | a random album |
+
+  Control phrases are matched whole, before anything becomes a search — which
+  is the only way "play music" can resume while "play music by Neil Young"
+  still plays Neil Young.
 - **The dial as a widget too.** The same view drawn to an image, so the two
   cannot drift apart, with tap targets laid over the controls it drew. The ring
   cannot be swept there — a drag on the home screen belongs to the launcher —
@@ -166,6 +192,12 @@ The dial is not this project's code. It is ported from
 the whole difference between that code and the copy here is a declared list of
 string substitutions. CI regenerates it and fails on any difference, so the
 port cannot quietly diverge; a weekly job asks whether upstream has moved.
+
+Not here, and removed from the interface rather than left as controls that
+cannot work: Qobuz and Tidal, label browsing, playlists, the wall display, and
+sharing a card as a link. Where a screen remains, the API answers "not in this
+build" in the shape the front-end already understands, so it shows its own
+empty state instead of an error.
 
 Speech recognition is Android's own and the matching is this app's library
 index, so "dark side of the moon" finds the record. Nothing about what was said
