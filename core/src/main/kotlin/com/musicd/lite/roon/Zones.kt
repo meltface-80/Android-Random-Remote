@@ -244,6 +244,17 @@ data class Zone(
 
     val primaryVolume: Volume? get() = volumeOutputs.firstOrNull()?.volume
 
+    /**
+     * Whether anything in this zone has a volume control at all.
+     *
+     * Plenty do not: a DAC fed at unity, or an output going into an amp with
+     * its own knob, reports no volume object. Anything drawing a control has to
+     * ask first — offering a slider or a pair of buttons that cannot move
+     * anything is worse than showing none, because the user presses them and
+     * concludes the remote is broken.
+     */
+    val hasVolumeControl: Boolean get() = volumeOutputs.isNotEmpty()
+
     companion object {
         fun parse(o: JSONObject): Zone {
             val outs = ArrayList<Output>()

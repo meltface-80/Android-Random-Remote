@@ -66,6 +66,31 @@ class VolumeTest {
     }
 
     @Test
+    fun aZoneWithNoVolumeObjectHasNoVolumeControl() {
+        // A DAC fed at unity, or an output going into an amp with its own knob,
+        // reports no volume at all. The widget asks this before drawing its
+        // two buttons: buttons that cannot move anything read as a broken
+        // remote rather than as a fixed output.
+        val fixed = com.musicd.lite.roon.Zone.parse(
+            JSONObject(
+                """{"zone_id":"z1","display_name":"Fixed","state":"playing",
+                    "outputs":[{"output_id":"o1","display_name":"DAC"}]}"""
+            )
+        )
+        assertTrue(!fixed.hasVolumeControl)
+        assertEquals(null, fixed.primaryVolume)
+
+        val controllable = com.musicd.lite.roon.Zone.parse(
+            JSONObject(
+                """{"zone_id":"z2","display_name":"Amp","state":"playing",
+                    "outputs":[{"output_id":"o2","display_name":"Amp",
+                      "volume":{"type":"db","min":-80,"max":0,"value":-30,"step":0.5}}]}"""
+            )
+        )
+        assertTrue(controllable.hasVolumeControl)
+    }
+
+    @Test
     fun formatSpeaksTheDevicesOwnUnits() {
         assertEquals("-32.5 dB", volume(
             """{"type":"db","min":-80,"max":0,"value":-32.5,"step":0.5}"""
