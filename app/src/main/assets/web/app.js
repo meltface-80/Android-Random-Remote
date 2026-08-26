@@ -8927,121 +8927,8 @@
     });
   }
 
-  // ----- Wall display (/display): toggle + rotation interval -----
-  const displayToggle    = document.getElementById("display-toggle");
-  const displaySeconds   = document.getElementById("display-seconds");
-  const displaySecsValue = document.getElementById("display-seconds-value");
-
-  async function loadDisplaySettings() {
-    try {
-      const r = await fetch("/api/settings/display");
-      const j = await r.json();
-      if (displayToggle) displayToggle.checked = !!j.enabled;
-      if (displaySeconds && Number.isFinite(parseInt(j.seconds, 10))) {
-        displaySeconds.value = j.seconds;
-        if (displaySecsValue) displaySecsValue.textContent = j.seconds + "s";
-      }
-    } catch (_) { /* display-only status — if the fetch fails, the sheet just shows defaults */ }
-  }
-
-  async function saveDisplaySettings() {
-    try {
-      const r = await fetch("/api/settings/display", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: displayToggle ? displayToggle.checked : false,
-          seconds: displaySeconds ? parseInt(displaySeconds.value, 10) : 10
-        })
-      });
-      const j = await r.json();
-      if (!j.ok) showToast("Display settings didn't persist — check the data volume", "error");
-    } catch (e) {
-      showToast("Failed: " + e.message, "error");
-    }
-  }
-
-  if (displayToggle) displayToggle.addEventListener("change", saveDisplaySettings);
-  if (displaySeconds) {
-    // Live value while dragging; persist on release.
-    displaySeconds.addEventListener("input", () => {
-      if (displaySecsValue) displaySecsValue.textContent = displaySeconds.value + "s";
-    });
-    displaySeconds.addEventListener("change", saveDisplaySettings);
-  }
-  const lfdInput  = document.getElementById("label-folder-depth-input");
-  const lfdSave   = document.getElementById("label-folder-depth-save");
-  const lfdStatus = document.getElementById("label-folder-depth-status");
-
-  async function loadLabelFolderDepth() {
-    try {
-      const r = await fetch("/api/settings/label-folder-depth");
-      const j = await r.json();
-      if (lfdInput && document.activeElement !== lfdInput) lfdInput.value = j.depth || 0;
-      if (lfdStatus) lfdStatus.textContent = j.depth ? ("Using folder depth " + j.depth) : "Off — using file label tags";
-    } catch (_) { /* display-only status — stale on failure is fine */ }
-  }
-
-  if (lfdSave) {
-    lfdSave.addEventListener("click", async () => {
-      const depth = parseInt(lfdInput ? lfdInput.value : "0", 10) || 0;
-      lfdSave.disabled = true;
-      try {
-        const r = await fetch("/api/settings/label-folder-depth", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ depth })
-        });
-        const j = await r.json();
-        if (j.ok) {
-          showToast(j.rescanning ? "Saved — re-scanning labels…" : "Saved", "ok");
-          loadLabelFolderDepth();
-        } else {
-          showToast(j.error || "Failed to save", "error");
-        }
-      } catch (e) {
-        showToast("Failed: " + e.message, "error");
-      } finally {
-        lfdSave.disabled = false;
-      }
-    });
-  }
-
-  // The Qobuz and Tidal account controls are not in this build — see the
-  // note where the service browser used to live. Nothing loads their status
-  // and nothing gates a top-bar button on it, because neither button exists.
-
-  // Settings is a two-level view: a category home list and one pane per
-  // category. Only one .settings-view is visible at a time. The controls and
-  // their IDs are unchanged — they just live inside panes now — so all the
-  // load*/save* wiring above still resolves against the same elements.
-  const sheet = overlay.querySelector(".settings-sheet");
-  const views = sheet ? sheet.querySelectorAll(".settings-view") : [];
-  const showView = (name) => {
-    let matched = false;
-    views.forEach(v => {
-      const isHome = v.getAttribute("data-view") === "home";
-      const key    = isHome ? "home" : v.getAttribute("data-pane");
-      const on     = key === name;
-      v.classList.toggle("hidden", !on);
-      if (on) matched = true;
-    });
-    // Fall back to home if an unknown pane was requested.
-    if (!matched) views.forEach(v => v.classList.toggle("hidden", v.getAttribute("data-view") !== "home"));
-    // Each level starts scrolled to the top, like a pushed page.
-    if (sheet) sheet.scrollTop = 0;
-  };
-  const atHome = () => {
-    const home = sheet && sheet.querySelector('.settings-view[data-view="home"]');
-    return !home || !home.classList.contains("hidden");
-  };
-
-  if (sheet) {
-    sheet.addEventListener("click", (e) => {
-      const nav = e.target.closest(".settings-nav-item");
-      if (nav) { showView(nav.getAttribute("data-pane")); return; }
-      if (e.target.closest("[data-settings-back]")) { showView("home"); return; }
-    });
-  }
+  // The wall display's controls are gone with the feature: it served a page
+  // to other devices, and this server is loopback-only.
 
   // ----- Theme picker -----
   // A single-select list plus Apply, rather than the old instant toggle. The
@@ -9426,7 +9313,7 @@
     renderHomeRowsList();
   }
 
-  const open = () => { showView("home"); pendingThemeId = null; renderThemeList(); loadRadio(); loadVersion(); loadDiscogsToken(); loadFanartKey(); loadDisplaySettings(); loadLabelFolderDepth(); loadSmartPicksSettings(); loadLabelsEnabled(); loadHomeRowsSettings(); overlay.classList.remove("hidden"); };
+  const open = () => { showView("home"); pendingThemeId = null; renderThemeList(); loadRadio(); loadVersion(); loadDiscogsToken(); loadFanartKey(); loadLabelFolderDepth(); loadSmartPicksSettings(); loadLabelsEnabled(); loadHomeRowsSettings(); overlay.classList.remove("hidden"); };
   const close = () => {
     overlay.classList.add("hidden");
   };

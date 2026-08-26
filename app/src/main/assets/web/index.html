@@ -856,16 +856,11 @@
             <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
 
-          <button class="settings-nav-item" type="button" data-pane="display">
-            <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-            </span>
-            <span class="settings-nav-txt">
-              <span class="settings-nav-title">Wall display</span>
-              <span class="settings-nav-desc">Always-on screen &amp; video</span>
-            </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
+          <!-- The wall display is not in this build. It was a page served to
+               OTHER devices on the network, and this app's server is bound to
+               loopback so nothing off the phone can reach it. Opening that up
+               would put an unauthenticated control API on the LAN and keep the
+               phone awake serving a TV; see the README. -->
 
           <button class="settings-nav-item" type="button" data-pane="appearance">
             <span class="settings-nav-ico" aria-hidden="true">
@@ -1060,31 +1055,6 @@
       </div>
 
       <!-- Streaming accounts -->
-      <!-- Wall display -->
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="display">
-        <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
-          </button>
-          <h2>Wall display</h2>
-        </div>
-
-        <div class="settings-block">
-          <div class="settings-row">
-            <span class="settings-label">Wall display <button class="settings-info-btn" data-info="A Roon-style always-on screen at http://<server-ip>:3399/display — point any tablet or TV browser at it. Rotates between album art, artist photos, an album review, artist bios and grids from your library, with a progress bar for the playing zone. When off, the page shows a notice and nothing is fetched." aria-label="Info">ⓘ</button></span>
-            <label class="switch">
-              <input type="checkbox" id="display-toggle" aria-label="Wall display">
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-            </label>
-          </div>
-          <div class="settings-row">
-            <span class="settings-label">Rotate every <span id="display-seconds-value">10s</span></span>
-            <input type="range" id="display-seconds" class="settings-range" min="5" max="60" step="1" value="10"
-                   aria-label="Display rotation interval in seconds">
-          </div>
-        </div>
-      </div>
-
       <!-- Appearance -->
       <div class="settings-view settings-pane hidden" data-view="pane" data-pane="appearance">
         <div class="settings-pane-head">

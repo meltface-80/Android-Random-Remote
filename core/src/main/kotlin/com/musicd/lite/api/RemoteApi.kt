@@ -94,13 +94,11 @@ class RemoteApi(
         if (request.method != "GET" && request.method != "HEAD") {
             return Json.error(405, "Method not allowed")
         }
-        // The wall display is its own page; everything else that is not a file
-        // is the single-page app, so a deep link still opens it.
-        val wanted = when {
-            path == "/" || path.isEmpty() -> "/index.html"
-            path == "/display" -> "/display.html"
-            else -> path
-        }
+        // Anything that is not a file is the single-page app, so a deep link
+        // still opens it. /display used to be its own page; the wall display is
+        // not in this build, so that path falls through to the app like any
+        // other unknown one.
+        val wanted = if (path == "/" || path.isEmpty()) "/index.html" else path
         val hit = assets.read(wanted) ?: assets.read("/index.html")
         ?: return Response.text(404, "The bundled front-end is missing from this build")
         return Response.bytes(
@@ -189,14 +187,12 @@ class RemoteApi(
             "/api/smart-picks/rebuild" -> requirePost(post) { Json.ok() }
 
             "/api/settings/home-rows" -> if (post) saveHomeRows(request) else homeRows()
-            "/api/settings/display" -> if (post) saveDisplay(request) else displaySettings()
             "/api/settings/smart-picks" -> if (post) saveSmartPicks(request) else smartPickSettings()
             "/api/settings/labels" -> labelsSetting(post)
             "/api/settings/discogs-token" ->
                 secret(request, post, Settings.KEY_DISCOGS_TOKEN, "token")
             "/api/settings/fanart-key" ->
                 secret(request, post, Settings.KEY_FANART_KEY, "key")
-            "/api/display/content" -> displayContent(request)
 
             "/api/pitchfork/reviews" -> pitchforkReviews(request)
             "/api/pitchfork/review" -> pitchforkReview(request)
@@ -1290,21 +1286,6 @@ class RemoteApi(
         return Json.ok(JSONObject().put("rows", homeRowsJson()))
     }
 
-    private fun displaySettings(): Response = Json.obj(
-        JSONObject().put("enabled", settings.displayEnabled()).put("seconds", settings.displaySeconds())
-    )
-
-    private fun saveDisplay(request: Request): Response {
-        val body = Json.body(request)
-        settings.saveDisplay(
-            if (body.has("enabled")) body.optBoolean("enabled") else null,
-            if (body.has("seconds")) body.optInt("seconds") else null
-        )
-        return Json.ok(
-            JSONObject().put("enabled", settings.displayEnabled()).put("seconds", settings.displaySeconds())
-        )
-    }
-
     private fun smartPickSettings(): Response = Json.obj(
         JSONObject()
             .put("enabled", settings.smartPicksEnabled())
@@ -1392,41 +1373,6 @@ class RemoteApi(
 
     // --------------------------------------------------------- wall display
 
-    private fun displayContent(request: Request): Response {
-        if (!settings.displayEnabled()) {
-            return Json.error(403, "The wall display is switched off in Settings")
-        }
-        val zone = roon.zone(request.str("zone")) ?: roon.zones().firstOrNull { it.isPlaying }
-        val np = zone?.nowPlaying
-        val album = np?.let { index.relocate(it.line3, it.line2) }
-        val related = album?.let { hit ->
-            index.albums.filter { it.nArtist == hit.nArtist && it.key != hit.key }.take(12)
-        } ?: emptyList()
-        return Json.obj(
-            JSONObject()
-                .put("seconds", settings.displaySeconds())
-                .put("zone", zone?.displayName ?: JSONObject.NULL)
-                .put("state", zone?.state ?: "stopped")
-                .put(
-                    "now_playing",
-                    if (np == null) JSONObject.NULL else JSONObject()
-                        .put("line1", np.line1).put("line2", np.line2).put("line3", np.line3)
-                        .put("image_key", np.imageKey ?: JSONObject.NULL)
-                        .put("length", np.lengthSeconds ?: JSONObject.NULL)
-                        .put("seek_position", np.seekPosition ?: JSONObject.NULL)
-                )
-                .put("album", album?.let { Json.album(it) } ?: JSONObject.NULL)
-                .put("related", Json.albums(related))
-        )
-    }
-
-    // ------------------------------------------------------------ pitchfork
-
-    /**
-     * Pitchfork's listings. No review text is served — the client links out to
-     * pitchfork.com to read it, which is the arrangement the original settled
-     * on and the reason this is portable at all.
-     */
     private fun pitchforkReviews(request: Request): Response {
         val type = if (request.str("type") == "best") "best" else "latest"
         val items = app.pitchfork.reviews(type)

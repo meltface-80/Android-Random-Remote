@@ -131,10 +131,11 @@ class RemoteApiTest {
         assertTrue(text.contains("MusicD"))
 
         assertEquals(200, get("/app.js").first)
-        // The wall display is its own page.
-        assertTrue(get("/display").second.contains("Wall"))
-        // A deep link is still the single-page app, not a 404.
+        // A deep link is still the single-page app, not a 404 — including
+        // /display, which used to be the wall display's own page and is now
+        // just another unknown path.
         assertTrue(get("/library/albums").second.contains("MusicD"))
+        assertTrue(get("/display").second.contains("MusicD"))
     }
 
     @Test
@@ -750,14 +751,19 @@ class RemoteApiTest {
         assertEquals(0, json("/api/home/history").getJSONArray("albums").length())
     }
 
+    /**
+     * The wall display is gone, routes included.
+     *
+     * It served a page to OTHER devices on the network, and this server binds
+     * to loopback — so nothing off the phone could ever reach it. Opening that
+     * up would put an API that controls playback on the LAN with no
+     * authentication in front of it.
+     */
     @Test
-    fun theWallDisplayRefusesWhileItIsSwitchedOff() {
-        assertEquals(403, get("/api/display/content").first)
-        assertEquals(200, post("/api/settings/display", """{"enabled":true,"seconds":30}""").first)
-        val body = json("/api/display/content?zone=z1")
-        assertEquals(30, body.getInt("seconds"))
-        assertEquals("Study", body.getString("zone"))
-        assertEquals("Mezzanine", body.getJSONObject("album").getString("title"))
+    fun theWallDisplayRoutesAreGone() {
+        assertEquals(404, get("/api/display/content").first)
+        assertEquals(404, get("/api/settings/display").first)
+        assertEquals(404, post("/api/settings/display", """{"enabled":true}""").first)
     }
 
     @Test
