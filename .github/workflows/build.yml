@@ -38,7 +38,8 @@ jobs:
       - name: Check the wire format against node-roon-api
         run: |
           git clone --depth 1 https://github.com/RoonLabs/node-roon-api /tmp/node-roon-api
-          node tools/verify-wire.js /tmp/node-roon-api
+          git clone --depth 1 https://github.com/RoonLabs/node-roon-api-transport /tmp/node-roon-api-transport
+          node tools/verify-wire.js /tmp/node-roon-api /tmp/node-roon-api-transport
 
       - name: Upload test report
         if: always()

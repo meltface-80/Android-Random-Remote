@@ -144,30 +144,9 @@
           </svg>
         </button>
 
-        <!-- Qobuz "Q" logomark (Arcticons, CC BY 4.0) — 48-unit viewBox, so the
-             3.6 stroke renders at the same visual weight as the 1.8 strokes
-             on the neighbouring 24-unit icons. -->
-        <button id="qobuz-toggle" class="icon-btn hidden" aria-label="Qobuz" title="Qobuz">
-          <svg width="20" height="20" viewBox="0 0 48 48" fill="none" stroke="currentColor"
-               stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M39.203 39.203A21.43 21.43 0 0 0 45.5 24c0-11.874-9.626-21.5-21.5-21.5S2.5 12.126 2.5 24S12.126 45.5 24 45.5c4.89 0 9.4-1.633 13.012-4.383"/>
-            <circle cx="24" cy="24" r="4.873"/>
-            <path d="M32.944 32.944L45.5 45.5"/>
-          </svg>
-        </button>
+        <!-- Qobuz and Tidal are not in this build; their top-bar buttons,
+             side-menu entries, browsers and logins are all removed. -->
 
-        <!-- Hidden until a Tidal account is connected (app.js loadTidalStatus unhides it) -->
-        <button id="tidal-toggle" class="icon-btn hidden" aria-label="Tidal" title="Tidal">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M2 9l3-3 3 3-3 3z"/>
-            <path d="M9 9l3-3 3 3-3 3z"/>
-            <path d="M16 9l3-3 3 3-3 3z"/>
-            <path d="M9 16l3-3 3 3-3 3z"/>
-          </svg>
-        </button>
-
-        <!-- Hidden trigger for the side-menu "Pitchfork" item (topbar-controls is display:none) -->
         <button id="pitchfork-toggle" class="icon-btn" aria-label="Pitchfork" title="Pitchfork">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -277,14 +256,6 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
           <span>Labels</span>
         </button>
-        <button class="menu-item hidden" type="button" data-target="qobuz-toggle" id="menu-item-qobuz">
-          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M39.203 39.203A21.43 21.43 0 0 0 45.5 24c0-11.874-9.626-21.5-21.5-21.5S2.5 12.126 2.5 24S12.126 45.5 24 45.5c4.89 0 9.4-1.633 13.012-4.383"/><circle cx="24" cy="24" r="4.873"/><path d="M32.944 32.944L45.5 45.5"/></svg>
-          <span>Qobuz</span>
-        </button>
-        <button class="menu-item hidden" type="button" data-target="tidal-toggle" id="menu-item-tidal">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 9l3-3 3 3-3 3z"/><path d="M9 9l3-3 3 3-3 3z"/><path d="M16 9l3-3 3 3-3 3z"/><path d="M9 16l3-3 3 3-3 3z"/></svg>
-          <span>Tidal</span>
-        </button>
         <button class="menu-item" type="button" data-target="pitchfork-toggle">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5h7a3 3 0 0 1 3 3v11a2.5 2.5 0 0 0-2.5-2.5H2z"/><path d="M22 5h-7a3 3 0 0 0-3 3v11a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>
           <span>Pitchfork</span>
@@ -327,20 +298,10 @@
     </nav>
   </div>
 
-  <div id="docker-migration-banner" class="docker-banner hidden" role="alert">
-    <div class="docker-banner-body">
-      <strong>Switch to Docker</strong> — Updates are now Docker-only. Download the latest release from
-      <a href="https://github.com/meltface-80/MusicD-Remote/releases/latest" target="_blank" rel="noopener noreferrer">github.com/meltface-80/MusicD-Remote/releases/latest</a>,
-      then run (replacing VERSION with the release you downloaded):
-      <pre class="docker-banner-pre">sudo mkdir -p /opt/musicd-remote && cd /opt/musicd-remote
-wget https://github.com/meltface-80/MusicD-Remote/releases/download/vVERSION/MusicD-Remote-vVERSION.tar.gz
-tar -xzf MusicD-Remote-vVERSION.tar.gz
-docker build -t musicd-remote:VERSION .
-docker run -d --name musicd-remote --restart unless-stopped --network host -v musicd-remote-data:/app/data musicd-remote:VERSION
-sudo systemctl stop musicd-remote && sudo systemctl disable musicd-remote</pre>
-      <button id="docker-migration-dismiss" class="docker-banner-dismiss" type="button">Got it</button>
-    </div>
-  </div>
+  <!-- The Docker migration banner is not in this build. It told a
+       self-hosted install to move to Docker, and its own gate was
+       `!status.is_docker` — an APK is neither, so on a fresh install it showed
+       shell commands for a machine the user does not have. -->
 
   <div id="update-toast" class="update-toast" role="status" aria-live="polite">
     <div class="update-toast-top">
@@ -617,19 +578,10 @@ sudo systemctl stop musicd-remote && sudo systemctl disable musicd-remote</pre>
                 <button class="np-popover-action" type="button" id="np-unmute-all">Unmute all zones</button>
               </div>
 
-              <!-- Roon Radio: Roon's own keep-playing-forever feature. Lives
-                   here rather than in the transport row because it changes what
-                   happens to the QUEUE, not how the current queue is played. -->
-              <button class="np-mini-btn" id="np-radio" aria-label="Roon Radio" aria-pressed="false">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="2"/>
-                  <path d="M7.76 16.24a6 6 0 0 1 0-8.49"/>
-                  <path d="M16.24 7.76a6 6 0 0 1 0 8.49"/>
-                  <path d="M4.93 19.07a10 10 0 0 1 0-14.14"/>
-                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-                </svg>
-              </button>
+              <!-- Roon Radio moved to Settings -> Playback, under Random album
+                   radio: the two decide the same thing (what plays when the
+                   queue runs out) and are mutually exclusive, which is far
+                   clearer sitting together than one screen apart. -->
 
               <!-- Volume: tap the speaker to reveal the slider (hidden when fixed) -->
               <div class="np-vol">
@@ -799,80 +751,7 @@ sudo systemctl stop musicd-remote && sudo systemctl disable musicd-remote</pre>
   </div>
 
   <!-- Settings bottom sheet -->
-  <!-- Qobuz browser overlay (self-contained; does not touch the album grid) -->
-  <div id="qobuz-overlay" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-label="Qobuz">
-    <div class="settings-backdrop" data-qobuz-close></div>
-    <div class="settings-sheet qobuz-sheet">
-      <div class="qobuz-pin">
-        <div class="settings-grip"></div>
-        <div class="settings-head">
-          <h2>Qobuz</h2>
-          <button id="qobuz-overlay-close" class="icon-btn" type="button" aria-label="Close" data-qobuz-close>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
-        </div>
-        <div class="qobuz-search-row">
-          <input id="qobuz-search-input" type="search" placeholder="Search the Qobuz catalogue…"
-                 autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-          <button id="qobuz-search-clear" class="hidden" type="button" aria-label="Clear search">×</button>
-        </div>
-        <div id="qobuz-tabs" role="tablist" aria-label="Qobuz sections">
-          <button class="qobuz-tab is-active" type="button" role="tab" data-qtab="new-releases">New Releases</button>
-          <button class="qobuz-tab" type="button" role="tab" data-qtab="best-sellers">Best Sellers</button>
-          <button class="qobuz-tab" type="button" role="tab" data-qtab="most-streamed">Most Streamed</button>
-          <button class="qobuz-tab" type="button" role="tab" data-qtab="press-awards">Press Awards</button>
-          <button class="qobuz-tab" type="button" role="tab" data-qtab="editor-picks">Editor's Picks</button>
-        </div>
-      </div>
-      <div id="qobuz-nr-status" class="settings-token-status"></div>
-      <div id="qobuz-artist-head" class="hidden"></div>
-      <div id="qobuz-artists" class="hidden"></div>
-      <div id="qobuz-nr-list" class="qobuz-nr-list"></div>
-      <button id="qobuz-load-more" class="hidden" type="button">Load more</button>
-      <div id="qobuz-nr-detail" class="qobuz-nr-detail hidden"></div>
-    </div>
-  </div>
-
-  <!-- Tidal browser overlay — same structure/classes as the Qobuz overlay
-       (shared qobuz-* CLASSES drive the styling; only ids differ). Driven by
-       the same initServiceBrowser factory in app.js. -->
-  <div id="tidal-overlay" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-label="Tidal">
-    <div class="settings-backdrop" data-tidal-close></div>
-    <div class="settings-sheet qobuz-sheet">
-      <div class="qobuz-pin">
-        <div class="settings-grip"></div>
-        <div class="settings-head">
-          <h2>Tidal</h2>
-          <button id="tidal-overlay-close" class="icon-btn" type="button" aria-label="Close" data-tidal-close>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
-        </div>
-        <div class="qobuz-search-row">
-          <input id="tidal-search-input" type="search" placeholder="Search the Tidal catalogue…"
-                 autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-          <button id="tidal-search-clear" class="hidden" type="button" aria-label="Clear search">×</button>
-        </div>
-        <div id="tidal-tabs" role="tablist" aria-label="Tidal sections">
-          <button class="qobuz-tab is-active" type="button" role="tab" data-qtab="new-releases">New Releases</button>
-          <button class="qobuz-tab" type="button" role="tab" data-qtab="top">Top Albums</button>
-          <button class="qobuz-tab" type="button" role="tab" data-qtab="rising">Rising</button>
-          <button class="qobuz-tab" type="button" role="tab" data-qtab="recommended">Recommended</button>
-        </div>
-      </div>
-      <div id="tidal-nr-status" class="settings-token-status"></div>
-      <div id="tidal-artist-head" class="hidden"></div>
-      <div id="tidal-artists" class="hidden"></div>
-      <div id="tidal-nr-list" class="qobuz-nr-list"></div>
-      <button id="tidal-load-more" class="hidden" type="button">Load more</button>
-      <div id="tidal-nr-detail" class="qobuz-nr-detail hidden"></div>
-    </div>
-  </div>
+  <!-- The Qobuz and Tidal browser overlays stood here. -->
 
   <!-- Pitchfork magazine overlay — reuses the settings-sheet / qobuz-pin / qobuz-tab
        chrome; the magazine grid + detail use dedicated pf-* classes. Driven by
@@ -948,22 +827,6 @@ sudo systemctl stop musicd-remote && sudo systemctl disable musicd-remote</pre>
             <span class="settings-nav-txt">
               <span class="settings-nav-title">Artwork &amp; metadata</span>
               <span class="settings-nav-desc">Discogs &amp; FanArt.tv keys</span>
-            </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
-
-          <!-- Not in the lite build. Both logins go through unofficial APIs that
-               the services' terms forbid, and Roon already streams Qobuz and
-               TIDAL through its own account — so a login here bought catalogue
-               browsing only, at that cost. Connect failed because there is no
-               client behind it. -->
-          <button class="settings-nav-item hidden" type="button" data-pane="streaming">
-            <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            </span>
-            <span class="settings-nav-txt">
-              <span class="settings-nav-title">Streaming accounts</span>
-              <span class="settings-nav-desc">Qobuz &amp; Tidal</span>
             </span>
             <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
@@ -1061,11 +924,20 @@ sudo systemctl stop musicd-remote && sudo systemctl disable musicd-remote</pre>
 
         <div class="settings-divider"></div>
 
+        <!-- The two radios, together, because they answer the same question:
+             what plays when this zone's queue runs out. Only one can be on. -->
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Random album radio <button class="settings-info-btn" data-info="When this zone's queue ends and Roon Radio is off, keep playing whole random albums — a never-ending random album radio." aria-label="Info">ⓘ</button></span>
+            <span class="settings-label">Random album radio <button class="settings-info-btn" data-info="When this zone's queue ends, keep playing whole random albums — a never-ending random album radio. Turning this on turns Roon Radio off for the zone." aria-label="Info">ⓘ</button></span>
             <label class="switch">
               <input type="checkbox" id="radio-toggle" aria-label="Random album radio">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Roon Radio <button class="settings-info-btn" data-info="Roon's own keep-playing-forever feature: when the queue ends it keeps going with similar tracks. Turning this on turns Random album radio off for the zone — both fill the same queue, so only one can run." aria-label="Info">ⓘ</button></span>
+            <label class="switch">
+              <input type="checkbox" id="roon-radio-toggle" aria-label="Roon Radio">
               <span class="switch-track"><span class="switch-thumb"></span></span>
             </label>
           </div>
@@ -1185,44 +1057,6 @@ sudo systemctl stop musicd-remote && sudo systemctl disable musicd-remote</pre>
       </div>
 
       <!-- Streaming accounts -->
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="streaming">
-        <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
-          </button>
-          <h2>Streaming accounts</h2>
-        </div>
-
-        <div class="settings-block">
-          <div class="settings-row">
-            <span class="settings-label">Qobuz account <button class="settings-info-btn" data-info="Connects to Qobuz via the unofficial API (the Lyrion/LMS plugin's app id). Used only to browse and search the Qobuz catalogue and add albums to your Qobuz favourites/library — no streaming or downloading (Roon streams). Against Qobuz's Terms of Service and may break at any time. Your password is sent to Qobuz once to obtain a token; only the token is stored, never the plaintext password." aria-label="Info">ⓘ</button></span>
-          </div>
-          <div class="settings-token-row">
-            <input id="qobuz-username-input" type="email" class="settings-token-input" placeholder="Qobuz email…" autocomplete="off" spellcheck="false">
-          </div>
-          <div class="settings-token-row">
-            <input id="qobuz-password-input" type="password" class="settings-token-input" placeholder="Qobuz password…" autocomplete="off" spellcheck="false">
-            <button id="qobuz-connect" class="settings-update-btn" type="button">Connect</button>
-          </div>
-          <div id="qobuz-status" class="settings-token-status"></div>
-          <button id="qobuz-disconnect" class="settings-update-btn hidden" type="button">Disconnect</button>
-          <div class="settings-token-status" style="opacity:.6;font-size:11px;margin-top:6px;">Unofficial Qobuz API — against Qobuz ToS, may break, use at your own risk.</div>
-        </div>
-
-        <div class="settings-divider"></div>
-
-        <div class="settings-block">
-          <div class="settings-row">
-            <span class="settings-label">Tidal account <button class="settings-info-btn" data-info="Connects to Tidal via the unofficial API (the Lyrion/LMS Tidal plugin's client id). Used only to browse and search the Tidal catalogue and manage your Tidal favourites/library — no streaming or downloading (Roon streams). Against Tidal's Terms of Service and may break at any time. Login happens on Tidal's own device-authorization page — your password is never entered here; only tokens are stored." aria-label="Info">ⓘ</button></span>
-          </div>
-          <button id="tidal-connect" class="settings-update-btn" type="button">Connect Tidal…</button>
-          <div id="tidal-auth-pending" class="tidal-auth-pending hidden"></div>
-          <div id="tidal-status" class="settings-token-status"></div>
-          <button id="tidal-disconnect" class="settings-update-btn hidden" type="button">Disconnect</button>
-          <div class="settings-token-status" style="opacity:.6;font-size:11px;margin-top:6px;">Unofficial Tidal API — against Tidal ToS, may break, use at your own risk.</div>
-        </div>
-      </div>
-
       <!-- Wall display -->
       <div class="settings-view settings-pane hidden" data-view="pane" data-pane="display">
         <div class="settings-pane-head">
@@ -1331,7 +1165,7 @@ sudo systemctl stop musicd-remote && sudo systemctl disable musicd-remote</pre>
 
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Add picks automatically <button class="settings-info-btn" data-info="Favourites the day's picks in your Qobuz or TIDAL library as soon as they are chosen, so Roon imports them overnight and they are ready to play by morning. Turn this off and each pick becomes Add / Not for me instead." aria-label="Info">ⓘ</button></span>
+            <span class="settings-label">Add picks automatically <button class="settings-info-btn" data-info="Favourited the day&#39;s picks in a connected streaming library so Roon would import them overnight. This build has no streaming account, so nothing is added for you — picks are shown, and each one is yours to go and find." aria-label="Info">ⓘ</button></span>
             <label class="switch">
               <input type="checkbox" id="picks-autoadd" aria-label="Add picks automatically">
               <span class="switch-track"><span class="switch-thumb"></span></span>

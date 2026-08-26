@@ -51,9 +51,9 @@ class RemoteApi(
         /** Roon rejects a play of more albums than this in one go. */
         const val PLAY_MULTI_MAX = 400
 
-        /** Said to anyone who reaches a streaming login this build does not have. */
+        /** Said to anything still asking for a streaming route. */
         const val STREAMING_UNAVAILABLE =
-            "%s isn't in the lite build. Roon streams it through its own account anyway."
+            "%s isn't in this build. Roon streams it through its own account anyway."
     }
 
     /** Zones with a multi-album fill in flight. */
@@ -194,7 +194,7 @@ class RemoteApi(
             "/api/shortcut/play-random" -> shortcutPlay(request, unheardOnly = false)
             "/api/shortcut/play-unheard" -> shortcutPlay(request, unheardOnly = true)
 
-            else -> notInLite(path, post)
+            else -> notInLite(path)
         }
     }
 
@@ -422,7 +422,18 @@ class RemoteApi(
         }
         if (patch.length() == 0) return Json.error(400, "nothing to change")
         roon.changeSettings(id, patch)
-        return Json.ok()
+
+        // Roon Radio and Random Album Radio both answer the question "what
+        // plays when the queue runs out", so both on means two things racing to
+        // fill the same queue. Roon Radio wins because the user just asked for
+        // it; ours stands down and the client says so rather than leaving a
+        // switch lit that is no longer doing anything.
+        var stoodDown = false
+        if (patch.optBoolean("auto_radio", false) && app.radio.isEnabled(id)) {
+            app.radio.setEnabled(id, false)
+            stoodDown = true
+        }
+        return Json.ok(JSONObject().put("random_album_radio_stands_down", stoodDown))
     }
 
     private fun muteAll(request: Request): Response {
@@ -1043,7 +1054,20 @@ class RemoteApi(
                 ?: return Json.error(400, "zone is required")
             val enabled = body.optBoolean("enabled", false)
             app.radio.setEnabled(zone, enabled)
-            return Json.ok(JSONObject().put("enabled", enabled))
+
+            // The other half of the same exclusion (see zoneSettings). Enabling
+            // ours turns Roon's own radio off for the zone, so whichever the
+            // user reaches for last is the one that runs.
+            var roonRadioOff = false
+            if (enabled && roon.zones().firstOrNull { it.zoneId == zone }?.settings?.autoRadio == true) {
+                runCatching {
+                    roon.changeSettings(zone, JSONObject().put("auto_radio", false))
+                    roonRadioOff = true
+                }
+            }
+            return Json.ok(
+                JSONObject().put("enabled", enabled).put("roon_radio_off", roonRadioOff)
+            )
         }
         val zone = request.str("zone")
         return Json.obj(
@@ -1135,7 +1159,12 @@ class RemoteApi(
             .put("enabled", settings.smartPicksEnabled())
             .put("hour", settings.smartPicksHour())
             .put("auto_add", settings.smartPicksAutoAdd())
-            .put("service_ready", index.isBuilt)
+            // False, and not because the index is missing. `service_ready`
+            // means "there is a streaming account to add a pick TO", and this
+            // build has none — so the settings note and the picks banner both
+            // say picks are shown rather than added. Reporting the index here
+            // instead promised an Add button that had nothing behind it.
+            .put("service_ready", false)
     )
 
     private fun saveSmartPicks(request: Request): Response {
@@ -1319,7 +1348,7 @@ class RemoteApi(
      * shape gets a 501 that says what is missing and why, which is more use than
      * a bare 404.
      */
-    private fun notInLite(path: String, isPost: Boolean = false): Response = when {
+    private fun notInLite(path: String): Response = when {
         // Labels, and everything the label index feeds.
         path.startsWith("/api/labels") || path == "/api/label-albums" ->
             Json.error(501, Settings.LABELS_UNAVAILABLE)
@@ -1328,23 +1357,20 @@ class RemoteApi(
         path == "/api/home/label-of-the-week" -> Json.obj(JSONObject().put("label", JSONObject.NULL))
         path == "/api/settings/label-folder-depth" -> Json.obj(JSONObject().put("depth", 0))
 
-        // Streaming services.
+        // Qobuz and TIDAL are gone from this build entirely — the browsers,
+        // the logins and the routes. Both went through unofficial APIs the two
+        // services' own terms forbid, and both bought catalogue browsing only:
+        // Roon streams from either service through its own account regardless,
+        // so their absence changes nothing about playback.
         //
-        // Both logins in the original go through unofficial APIs that the two
-        // services' terms forbid, and they buy catalogue browsing only — Roon
-        // streams Qobuz and TIDAL through its own account either way. So there
-        // is no client here, and the Streaming accounts pane is hidden.
-        //
-        // A GET still answers "not connected", which is the shape the status
-        // reader wants. A POST used to answer with that same body, and the page
-        // reads `ok` — so a login attempt reported the unhelpful "Qobuz connect
-        // failed". It now says what is actually true.
+        // These paths answer 501 rather than 404 because a stale cached page
+        // asking for them deserves the reason, not "no such endpoint".
         path.startsWith("/api/qobuz") || path.startsWith("/api/settings/qobuz") ->
-            if (isPost) Json.error(501, STREAMING_UNAVAILABLE.format("Qobuz"))
-            else Json.obj(JSONObject().put("connected", false).put("albums", JSONArray()))
+            Json.error(501, STREAMING_UNAVAILABLE.format("Qobuz"))
         path.startsWith("/api/tidal") || path.startsWith("/api/settings/tidal") ->
-            if (isPost) Json.error(501, STREAMING_UNAVAILABLE.format("TIDAL"))
-            else Json.obj(JSONObject().put("connected", false).put("albums", JSONArray()))
+            Json.error(501, STREAMING_UNAVAILABLE.format("TIDAL"))
+
+        // Pitchfork is the only external source here, and it has its own route.
         path == "/api/search/external" ->
             Json.obj(JSONObject().put("albums", JSONArray()).put("artists", JSONArray()))
 
