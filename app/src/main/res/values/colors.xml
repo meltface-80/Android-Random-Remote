@@ -7,4 +7,5 @@
          keeps that ground so the launcher shape crops into black, not into a
          near-black that reads as a printing error next to it. -->
     <color name="icon_background">#FF000000</color>
+    <color name="dial_icon_background">#FF101418</color>
 </resources>

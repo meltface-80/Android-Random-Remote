@@ -3,6 +3,7 @@ package com.musicd.lite
 import com.musicd.lite.meta.ImageCache
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -220,5 +221,69 @@ class ImageCacheTest {
         assertEquals(100, cache.get("http://core/img/a", "a|512")!!.bytes.size)
         assertEquals(100, cache.get("http://core/img/a", "a|512")!!.bytes.size)
         assertEquals("the memory tier still absorbed the second read", 1, fetcher.calls.get())
+    }
+
+    @Test
+    fun theDiskTierStaysWithinItsBudget() {
+        // The leak this guards: art is cached per rendering, so a large library
+        // browsed at two sizes is two files per album and nothing ever deleted
+        // them. Enough distinct images to cross the sweep threshold several
+        // times over must leave the directory bounded, not proportional to how
+        // much was browsed.
+        val dir = temp.newFolder("art")
+        val oneMb = 1024 * 1024
+        val fetcher = CountingFetcher { art(oneMb) }
+        val cache = ImageCache(
+            fetcher,
+            diskDir = dir,
+            // Small enough that the memory tier cannot be what bounds this.
+            memoryBudgetBytes = 4L * oneMb,
+            diskBudgetBytes = 16L * oneMb
+        )
+
+        repeat(64) { i -> assertNotNull(cache.get("http://core/img/$i", "img$i|512")) }
+
+        val onDisk = cache.diskFootprint()
+        assertTrue(
+            "64MB fetched left ${onDisk / oneMb}MB on disk against a 16MB budget",
+            onDisk <= 24L * oneMb
+        )
+        assertTrue("the sweep emptied the tier instead of trimming it", onDisk > 0)
+    }
+
+    @Test
+    fun theSweepDeletesTheLeastRecentlyUsedArt() {
+        val dir = temp.newFolder("art")
+        val oneMb = 1024 * 1024
+        val fetcher = CountingFetcher { art(oneMb) }
+        val cache = ImageCache(
+            fetcher, diskDir = dir,
+            // One byte: the memory tier evicts everything, so every read after
+            // the first has to come off disk. This test is about the disk tier.
+            memoryBudgetBytes = 1L, diskBudgetBytes = 4L * oneMb
+        )
+
+        repeat(6) { i -> cache.get("http://core/img/$i", "img$i|512") }
+        assertEquals(6L * oneMb, cache.diskFootprint())
+
+        // One sleep, longer than the coarsest last-modified resolution any
+        // filesystem here has, so that "touched after this point" is a fact
+        // rather than a race. Nothing below depends on the ordering *within*
+        // either group.
+        Thread.sleep(1100)
+
+        // Four of the six get used again; 0 and 1 do not.
+        val beforeTouches = fetcher.calls.get()
+        (2..5).forEach { i -> assertNotNull(cache.get("http://core/img/$i", "img$i|512")) }
+        assertEquals("those four were served from disk", beforeTouches, fetcher.calls.get())
+
+        cache.pruneDisk()
+
+        assertEquals("swept down to the 4MB budget", 4L * oneMb, cache.diskFootprint())
+        val before = fetcher.calls.get()
+        assertNotNull(cache.get("http://core/img/5", "img5|512"))
+        assertEquals("recently used art was kept", before, fetcher.calls.get())
+        assertNotNull(cache.get("http://core/img/0", "img0|512"))
+        assertEquals("least recently used art was swept", before + 1, fetcher.calls.get())
     }
 }

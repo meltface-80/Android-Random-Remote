@@ -611,6 +611,88 @@ class RemoteApiTest {
         assertTrue(json("/api/radio?zone=z1").getBoolean("enabled"))
     }
 
+    /**
+     * The long poll: hold the request open until Roon says something.
+     *
+     * Roon pushes zone changes to this app instantly and the page used to ask
+     * anyway, 2,400 times an hour. These three tests pin the three things that
+     * have to hold for waiting to replace asking — that it blocks, that a real
+     * change wakes it at once, and that the revision it hands back is safe to
+     * wait on.
+     */
+    @Test
+    fun aWaitingRequestBlocksUntilItsTimeout() {
+        val revision = json("/api/zone-state?zone=z1").getLong("revision")
+        val started = System.currentTimeMillis()
+        json("/api/zone-state?zone=z1&wait_for=$revision&timeout=400")
+        val waited = System.currentTimeMillis() - started
+        assertTrue("returned after ${waited}ms — it did not wait at all", waited >= 350)
+    }
+
+    @Test
+    fun aChangeWakesAWaitingRequestImmediately() {
+        val revision = json("/api/zone-state?zone=z1").getLong("revision")
+        // Stand in for Roon pushing a zone change while the request is open.
+        val pusher = Thread {
+            Thread.sleep(120)
+            core.bumpZones()
+        }.apply { start() }
+
+        val started = System.currentTimeMillis()
+        val body = json("/api/zone-state?zone=z1&wait_for=$revision&timeout=5000")
+        val waited = System.currentTimeMillis() - started
+        pusher.join()
+
+        assertTrue("waited ${waited}ms — it slept through the change", waited < 2000)
+        assertTrue("the revision must move, or the client re-waits on a stale one",
+            body.getLong("revision") > revision)
+    }
+
+    @Test
+    fun theRevisionIsNeverNewerThanTheDataItArrivedWith() {
+        // Read before the snapshot, deliberately: a revision NEWER than the
+        // zone it came with would have the client wait on a change it was
+        // already handed a number for, and sleep through it. Older is safe —
+        // the next wait returns at once.
+        core.bumpZones()
+        val body = json("/api/zone-state?zone=z1")
+        assertTrue(body.getLong("revision") <= core.zoneRevision)
+    }
+
+    @Test
+    fun zoneStateStillAnswersImmediatelyWithoutAWait() {
+        val started = System.currentTimeMillis()
+        val body = json("/api/zone-state?zone=z1")
+        assertTrue(System.currentTimeMillis() - started < 1000)
+        assertEquals("Study", body.getJSONObject("zone").getString("display_name"))
+    }
+
+    /**
+     * `size` is the parameter the page sends, and it was being ignored.
+     *
+     * Every art URL the front-end builds uses it — 80 for a queue thumbnail,
+     * 800 for the album view, 1000 for a share card. This read only width/w, so
+     * all of them were served at the 512 default: a queue row fetched forty
+     * times the pixels it drew, cached them, and decoded them.
+     */
+    @Test
+    fun artIsFetchedAtTheSizeThePageAsksFor() {
+        get("/api/image/img-Mezzanine?size=80")
+        assertTrue(
+            core.calls.toString(),
+            core.calls.any { it == "image:img-Mezzanine:80x80" }
+        )
+    }
+
+    @Test
+    fun artFallsBackToTheOldParametersAndThenToADefault() {
+        get("/api/image/img-Mezzanine?width=300")
+        assertTrue(core.calls.any { it == "image:img-Mezzanine:300x300" })
+
+        get("/api/image/img-Mezzanine")
+        assertTrue(core.calls.any { it == "image:img-Mezzanine:512x512" })
+    }
+
     @Test
     fun zoneSettingsRejectAnUnknownLoopMode() {
         assertEquals(400, post("/api/zone-settings", """{"zone_or_output_id":"z1","loop":"next"}""").first)

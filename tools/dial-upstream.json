@@ -1,0 +1,143 @@
+{
+  "_comment": [
+    "Where the dial comes from, and exactly which commit of it is in this tree.",
+    "tools/sync-dial.py regenerates every file listed here from this commit, so",
+    "the port is reproducible rather than a copy somebody made once. CI re-runs",
+    "it and fails on any difference, which is what stops the ported files being",
+    "hand-edited and silently diverging from upstream."
+  ],
+  "repo": "https://github.com/meltface-80/dial-for-Roon",
+  "commit": "0b5839863f659f9a7e21911bf65de80661d43399",
+  "package": "com.musicd.lite.android.dial",
+  "files": [
+    {
+      "from": "app/src/main/java/com/roondial/ui/DialView.kt",
+      "to": "app/src/main/java/com/musicd/lite/android/dial/DialView.kt"
+    },
+    {
+      "from": "app/src/main/java/com/roondial/widget/WidgetGeometry.kt",
+      "to": "app/src/main/java/com/musicd/lite/android/dial/WidgetGeometry.kt"
+    },
+    {
+      "from": "app/src/main/java/com/roondial/widget/WidgetDial.kt",
+      "to": "app/src/main/java/com/musicd/lite/android/dial/WidgetDial.kt"
+    },
+    {
+      "from": "app/src/main/java/com/roondial/widget/WidgetSnapshot.kt",
+      "to": "app/src/main/java/com/musicd/lite/android/dial/WidgetSnapshot.kt"
+    },
+    {
+      "from": "app/src/main/java/com/roondial/widget/WidgetArtwork.kt",
+      "to": "app/src/main/java/com/musicd/lite/android/dial/WidgetArtwork.kt"
+    },
+    {
+      "from": "app/src/test/java/com/roondial/DialViewTest.kt",
+      "to": "app/src/test/java/com/musicd/lite/android/dial/DialViewTest.kt"
+    },
+    {
+      "from": "app/src/test/java/com/roondial/WidgetGeometryTest.kt",
+      "to": "app/src/test/java/com/musicd/lite/android/dial/WidgetGeometryTest.kt"
+    },
+    {
+      "from": "app/src/main/res/layout/widget_dial.xml",
+      "to": "app/src/main/res/layout/widget_dial.xml"
+    },
+    {
+      "from": "app/src/main/res/xml/roon_widget_info.xml",
+      "to": "app/src/main/res/xml/widget_dial_info.xml"
+    },
+    {
+      "from": "app/src/main/res/drawable/widget_background.xml",
+      "to": "app/src/main/res/drawable/dial_widget_background.xml"
+    },
+    {
+      "from": "app/src/main/res/drawable/ic_launcher_foreground.xml",
+      "to": "app/src/main/res/drawable/ic_dial_foreground.xml"
+    }
+  ],
+  "_rewrites_comment": [
+    "Applied in order to every synced file. Each is a plain string replacement,",
+    "declared here rather than buried in the script so the whole difference",
+    "between upstream and this tree is one readable list. If a sync ever needs a",
+    "rewrite that is not a plain substitution, that is the signal the file has",
+    "stopped being portable and wants adapting by hand instead."
+  ],
+  "rewrites": [
+    [
+      "package com.roondial.ui",
+      "package com.musicd.lite.android.dial"
+    ],
+    [
+      "package com.roondial.widget",
+      "package com.musicd.lite.android.dial"
+    ],
+    [
+      "package com.roondial",
+      "package com.musicd.lite.android.dial"
+    ],
+    [
+      "import com.roondial.roon.Zone\n",
+      "import com.musicd.lite.roon.Zone\n"
+    ],
+    [
+      "import com.roondial.roon.ZoneStore\n",
+      "import com.musicd.lite.roon.ZoneStore\n"
+    ],
+    [
+      "import com.roondial.ui.DialView\n",
+      ""
+    ],
+    [
+      "import com.roondial.widget.WidgetGeometry\n",
+      ""
+    ],
+    [
+      "import com.roondial.widget.WidgetDial\n",
+      ""
+    ],
+    [
+      "import com.roondial.widget.WidgetSnapshot\n",
+      ""
+    ],
+    [
+      "import com.roondial.widget.WidgetArtwork\n",
+      ""
+    ],
+    [
+      "import com.roondial.R\n",
+      "import com.musicd.lite.android.R\n"
+    ],
+    [
+      "@drawable/widget_background",
+      "@drawable/dial_widget_background"
+    ],
+    [
+      "com.roondial",
+      "com.musicd.lite.android.dial"
+    ]
+  ],
+  "_needs_comment": [
+    "Resources the synced files reference that this app must define itself.",
+    "Checked after every sync: a new upstream reference that nothing here",
+    "provides fails the sync loudly rather than at aapt time or, worse, at",
+    "runtime."
+  ],
+  "needs": {
+    "strings": [
+      "widget_artwork",
+      "widget_description"
+    ],
+    "ids": [
+      "widget_root",
+      "widget_dial",
+      "widget_controls",
+      "widget_open",
+      "widget_previous",
+      "widget_play_pause",
+      "widget_next",
+      "widget_voice",
+      "widget_volume_up",
+      "widget_volume_down"
+    ]
+  }
+}

@@ -44,6 +44,82 @@
             </intent-filter>
         </activity>
 
+        <!--
+          The dial, as its own launcher icon.
+
+          One install, two icons. Dial for Roon used to be a separate app,
+          which meant a second Roon extension to approve and a second pairing
+          to keep for what is one person controlling one room. Here it is a
+          second face on the extension that is already running: enable one
+          thing in Roon, get both.
+
+          taskAffinity is its own, so the dial and the main app are separate
+          entries in Recents rather than one stack where Back from the dial
+          lands in a WebView the user never opened.
+        -->
+        <activity
+            android:name=".dial.DialActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|uiMode"
+            android:exported="true"
+            android:icon="@mipmap/ic_dial"
+            android:label="@string/dial_name"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.musicd.lite.dial"
+            android:theme="@style/AppTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          A random album from the notification shade: pull down, tap, a record
+          starts. The app's most-used action without opening the app.
+        -->
+        <service
+            android:name=".RandomAlbumTile"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_random"
+            android:label="@string/tile_random_album"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!--
+          Now playing on the home screen. Redrawn when Roon's zone feed moves
+          rather than on a timer — see widget_now_playing_info.xml.
+        -->
+        <receiver
+            android:name=".NowPlayingWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_now_playing_info" />
+        </receiver>
+
+        <!--
+          The dial as a widget: the same DialView, drawn to an image, with tap
+          targets laid over the controls it drew. Exported because its volume
+          buttons arrive as broadcasts from the launcher.
+        -->
+        <receiver
+            android:name=".DialWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.musicd.lite.dial.VOLUME_UP" />
+                <action android:name="com.musicd.lite.dial.VOLUME_DOWN" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_dial_info" />
+        </receiver>
+
         <!-- The share card leaves the app as a content:// URI: an image cannot
              be put on the clipboard or into a share sheet as raw bytes. -->
         <provider

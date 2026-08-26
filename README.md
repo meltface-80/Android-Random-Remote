@@ -60,7 +60,7 @@ API testable on a JVM with no emulator — see [Verification](#verification).
 
 ## Install
 
-**Download: [musicd-remote-lite-0.1.14.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.1.14.apk)**
+**Download: [musicd-remote-lite-0.3.0.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.3.0.apk)**
 
 Sideload it on Android 8.0 (API 26) or newer. The file in
 [`dist/`](dist/) is published by CI from the source in this repository, so it is
@@ -135,6 +135,28 @@ original's screens unchanged:
 
 Release years come from MusicBrainz and the write-ups from Wikipedia. Both are
 free and need no key.
+
+### Outside the app
+
+These exist only because it is an app rather than a page in a browser, which is
+the whole reason for the port:
+
+- **Lock screen and hardware buttons.** A media session carries the artwork,
+  the track and transport controls onto the lock screen and into the shade —
+  and, the part that is not cosmetic, it is what Android routes media keys to.
+  Headset and Bluetooth buttons, steering-wheel controls and Assistant all
+  speak the same interface, so one integration reaches all of them.
+- **A home-screen widget.** Now playing, with previous / play-pause / next, and
+  the cover as a one-tap random album. It has no timer of its own: it is
+  redrawn when Roon's zone feed actually moves.
+- **A Quick Settings tile.** Pull down the shade, tap, and a record starts in
+  the zone you were last using — no launcher, no cold start, no WebView. The
+  app's most-used action, without the app.
+
+Nothing here plays audio; Roon does. The session reports the state of whichever
+zone you are watching, which is also why the foreground service is *not*
+declared as a media-playback service: the app makes no sound, and saying
+otherwise to win scheduling latitude would be a lie to the platform.
 
 ## What's not here
 
@@ -254,7 +276,10 @@ emulator in the loop.
 - **Album art caching**, counted by how often the Core is actually asked: the
   memory tier absorbing a re-read, the disk tier surviving a restart, a
   truncated file being ignored rather than served as a blank image, and the
-  memory budget still holding after two hundred rounds of eviction.
+  memory budget still holding after two hundred rounds of eviction. Both
+  budgets are tested by fetching past them: 64MB of art through a 16MB disk
+  tier has to leave 16MB behind, and the art swept has to be the art least
+  recently *used*, not merely the oldest on the disk.
 
 - **The API, end to end over a real socket.** 29 tests drive the shipping HTTP
   server and router — the JSON the unmodified front-end reads, `409` on a moved

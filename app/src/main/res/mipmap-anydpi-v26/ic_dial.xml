@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The dial's own icon, carried over with it from Dial for Roon so the second
+  launcher entry looks like the thing it opens rather than a duplicate of this
+  app's duck.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/dial_icon_background" />
+    <foreground android:drawable="@drawable/ic_dial_foreground" />
+    <monochrome android:drawable="@drawable/ic_dial_foreground" />
+</adaptive-icon>
