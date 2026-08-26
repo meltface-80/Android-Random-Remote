@@ -133,12 +133,31 @@ class RemoteService : Service() {
         runCatching {
             nowPlaying = NowPlayingSession(this, lite) { refreshNotification() }
                 .takeIf { it.start() }
-            if (nowPlaying != null) startZoneWatch(lite)
-            NowPlayingWidget.refresh(this)
+            if (nowPlaying == null) AndroidLog.w(TAG, "running without a media session")
         }.onFailure { AndroidLog.w(TAG, "media session unavailable", it) }
+
+        // Deliberately NOT conditional on the session. Gating it was a mistake:
+        // the notification and the widget both need this feed whether or not a
+        // media session could be built, so one failure in the session took the
+        // widget down with it and the widget looked like a separate bug.
+        startZoneWatch(lite)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A widget or notification button may be what restarted a killed
+        // service, and a start delivered as startForegroundService must be
+        // answered with startForeground within seconds or the system kills the
+        // process. Re-asserting it is cheap and idempotent when already up.
+        runCatching {
+            val status = app?.roon?.status
+            startForeground(
+                NOTIFICATION_ID,
+                notification(
+                    status?.let { statusTitle(it) } ?: "MusicD Remote Lite",
+                    status?.detail ?: ""
+                )
+            )
+        }
         when (intent?.action) {
             ACTION_PLAY_PAUSE -> transport("playpause")
             ACTION_NEXT -> transport("next")
@@ -174,13 +193,7 @@ class RemoteService : Service() {
     }
 
     /** The zone the session and the notification are about. */
-    private fun currentZone() = app?.let { lite ->
-        runCatching {
-            lite.roon.zone(lite.settings.lastZone())
-                ?: lite.roon.zones().firstOrNull { it.isPlaying }
-                ?: lite.roon.zones().firstOrNull()
-        }.getOrNull()
-    }
+    private fun currentZone() = app?.activeZone()
 
     private fun refreshNotification() {
         runCatching {
@@ -211,14 +224,13 @@ class RemoteService : Service() {
             session.command(command)
             return
         }
-        runCatching {
-            val lite = app ?: return
-            val zoneId = lite.settings.lastZone()
-                ?: lite.roon.zones().firstOrNull { it.isPlaying }?.zoneId
-                ?: lite.roon.zones().firstOrNull()?.zoneId
-                ?: return
-            lite.roon.control(zoneId, command)
-        }.onFailure { AndroidLog.w(TAG, "transport $command failed", it) }
+        // No session, so no executor behind it — and this runs on the main
+        // thread, where roon.control would block on a network round trip.
+        val lite = app ?: return
+        Thread({
+            runCatching { lite.activeZone()?.zoneId?.let { lite.roon.control(it, command) } }
+                .onFailure { AndroidLog.w(TAG, "transport $command failed", it) }
+        }, "transport-fallback").apply { isDaemon = true }.start()
     }
 
     /** Walks Roon's browse tree, so never on the main thread. */

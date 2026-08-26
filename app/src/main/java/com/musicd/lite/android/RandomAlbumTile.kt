@@ -37,9 +37,8 @@ class RandomAlbumTile : TileService() {
                 subtitleIfSupported(
                     when {
                         running == null -> "Not running"
-                        running.roon.isPaired -> running.settings.lastZone()
-                            ?.let { id -> running.roon.zone(id)?.displayName }
-                            ?: "Random album"
+                        running.roon.isPaired ->
+                            running.activeZone()?.displayName ?: "Random album"
                         else -> "Not paired"
                     }
                 )

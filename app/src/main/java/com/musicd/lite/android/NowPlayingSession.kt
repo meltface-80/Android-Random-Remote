@@ -9,9 +9,12 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.musicd.lite.MusicdLite
 import com.musicd.lite.roon.Zone
+import java.util.concurrent.Executors
 
 /**
  * What makes this behave like a music app rather than a web page in an app.
@@ -63,6 +66,20 @@ class NowPlayingSession(
 
     private var session: MediaSession? = null
 
+    /**
+     * Transport commands run here, never on the caller's thread.
+     *
+     * A media-button callback arrives on the main thread and
+     * <code>roon.control</code> blocks until the Core answers, so calling it
+     * inline froze the UI thread for a network round trip — the kind of thing
+     * that shows up as a button that "does nothing" and, often enough, as an
+     * ANR. Single-threaded so two fast taps reach Roon in the order they were
+     * made rather than racing.
+     */
+    private val commands = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "transport").apply { isDaemon = true }
+    }
+
     /** The zone this session currently speaks for, so art is not re-fetched. */
     private var lastArtKey: String? = null
     private var lastArt: Bitmap? = null
@@ -74,7 +91,27 @@ class NowPlayingSession(
         if (session != null) return true
         return try {
             session = MediaSession(context, "MusicDRemoteLite").apply {
-                setCallback(Callbacks())
+                // The handler is not optional, and leaving it out is what broke
+                // this. setCallback(callback) with no handler does
+                // `new Handler()` internally, which throws on any thread that
+                // has not called Looper.prepare() — and this is built on the
+                // startup thread, which has no looper. The session then failed
+                // to construct on every launch: no lock screen controls, and
+                // because the zone watcher was gated on the session existing,
+                // no widget updates either. One missing argument, three
+                // symptoms, and a catch block that turned it into a debug line
+                // nobody read.
+                setCallback(Callbacks(), Handler(Looper.getMainLooper()))
+                // A session with no playback state is not shown by the system
+                // media controls at all, and the first real state does not
+                // arrive until the zone feed next moves — which, on a paused
+                // Core, could be never.
+                setPlaybackState(
+                    PlaybackState.Builder()
+                        .setActions(ACTIONS)
+                        .setState(PlaybackState.STATE_STOPPED, 0L, 0f)
+                        .build()
+                )
                 isActive = true
             }
             true
@@ -86,6 +123,7 @@ class NowPlayingSession(
     }
 
     fun stop() {
+        runCatching { commands.shutdownNow() }
         runCatching {
             session?.isActive = false
             session?.release()
@@ -187,6 +225,10 @@ class NowPlayingSession(
                         // Which controls survive the collapsed notification.
                         .setShowActionsInCompactView(0, 1, 2)
                 )
+                // Without this a secure lock screen hides the content as
+                // "sensitive" — which for a notification whose entire purpose
+                // is to be readable from the lock screen defeats the object.
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .apply { lastArt?.let { setLargeIcon(it) } }
         } catch (e: Exception) {
             Log.w(TAG, "could not decorate the notification", e)
@@ -202,7 +244,9 @@ class NowPlayingSession(
     )
 
     private fun action(title: String, icon: Int, intentAction: String): Notification.Action {
-        val pending = PendingIntent.getService(
+        // Foreground start for the same reason the widget uses one: if the
+        // service has been killed, a plain start from the shade is refused.
+        val pending = PendingIntent.getForegroundService(
             context,
             intentAction.hashCode(),
             Intent(context, RemoteService::class.java).setAction(intentAction),
@@ -223,12 +267,13 @@ class NowPlayingSession(
      */
     fun command(command: String) {
         runCatching {
-            val zoneId = app.settings.lastZone()
-                ?: app.roon.zones().firstOrNull { it.isPlaying }?.zoneId
-                ?: app.roon.zones().firstOrNull()?.zoneId
-                ?: return
-            app.roon.control(zoneId, command)
-        }.onFailure { Log.w(TAG, "transport command $command failed", it) }
+            commands.execute {
+                runCatching {
+                    val zoneId = app.activeZone()?.zoneId ?: return@runCatching
+                    app.roon.control(zoneId, command)
+                }.onFailure { Log.w(TAG, "transport command $command failed", it) }
+            }
+        }.onFailure { Log.w(TAG, "could not queue $command", it) }
     }
 
     private inner class Callbacks : MediaSession.Callback() {

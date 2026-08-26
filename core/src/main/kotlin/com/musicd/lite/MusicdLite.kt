@@ -368,6 +368,24 @@ class MusicdLite(
     }
 
     /**
+     * The zone everything outside the web UI is about: the notification, the
+     * media session, the widget and the tile.
+     *
+     * The saved zone is only used if it still exists. That check is the whole
+     * point of this method: zone ids are not stable across a Core restart, a
+     * regrouping or a rename, so a remembered id goes stale silently, and Roon
+     * accepts a transport command for an unknown zone by quietly doing nothing.
+     * Three callers resolved this themselves and only one of them validated —
+     * so on a stale id the buttons stopped working with no error anywhere.
+     */
+    fun activeZone(): Zone? = runCatching {
+        val zones = roon.zones()
+        settings.lastZone()?.let { id -> zones.firstOrNull { it.zoneId == id } }
+            ?: zones.firstOrNull { it.isPlaying }
+            ?: zones.firstOrNull()
+    }.getOrNull()
+
+    /**
      * Put a random album on, in one call.
      *
      * The home screen widget, the Quick Settings tile and the shortcut
@@ -386,8 +404,7 @@ class MusicdLite(
         unheardOnly: Boolean = false
     ): Result<AlbumRecord> {
         val zone = zoneId
-            ?: settings.lastZone()?.takeIf { id -> roon.zones().any { it.zoneId == id } }
-            ?: roon.zones().firstOrNull()?.zoneId
+            ?: activeZone()?.zoneId
             ?: return Result.failure(IllegalStateException("No zones available"))
         val pool = if (unheardOnly) view.unplayed(6).ifEmpty { index.albums } else index.albums
         val album = view.sample(pool, 1).firstOrNull()

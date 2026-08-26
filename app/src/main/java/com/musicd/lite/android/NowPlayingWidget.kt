@@ -10,6 +10,7 @@ import android.graphics.BitmapFactory
 import android.util.Log
 import android.widget.RemoteViews
 import com.musicd.lite.MusicdLite
+import java.util.concurrent.Executors
 
 /**
  * Now playing on the home screen, with transport and one tap for a random
@@ -35,19 +36,38 @@ class NowPlayingWidget : AppWidgetProvider() {
         private const val ART_PX = 256
 
         /**
+         * Drawing happens here, never on the caller's thread.
+         *
+         * Filling in the cover can miss both cache tiers and go to the Core,
+         * and both callers of this arrive on the main thread — the service's
+         * notification refresh and the launcher's onUpdate broadcast. On the
+         * main thread that network read throws NetworkOnMainThreadException,
+         * which the guard below swallowed, so the widget silently fell back to
+         * the app icon every single time. That is why it showed a duck instead
+         * of a sleeve.
+         */
+        private val painter = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "widget-draw").apply { isDaemon = true }
+        }
+
+        /**
          * Redraws every placed widget. Called by the service when the zone
          * feed moves, which is the only time the contents can have changed.
          */
         fun refresh(context: Context) {
+            val app = context.applicationContext
             runCatching {
-                val manager = AppWidgetManager.getInstance(context)
-                val ids = manager.getAppWidgetIds(
-                    ComponentName(context, NowPlayingWidget::class.java)
-                )
-                if (ids.isEmpty()) return          // none placed: nothing to draw
-                val views = build(context)
-                manager.updateAppWidget(ids, views)
-            }.onFailure { Log.d(TAG, "widget refresh skipped: ${it.message}") }
+                painter.execute {
+                    runCatching {
+                        val manager = AppWidgetManager.getInstance(app)
+                        val ids = manager.getAppWidgetIds(
+                            ComponentName(app, NowPlayingWidget::class.java)
+                        )
+                        if (ids.isEmpty()) return@runCatching   // none placed
+                        manager.updateAppWidget(ids, build(app))
+                    }.onFailure { Log.w(TAG, "widget refresh failed", it) }
+                }
+            }.onFailure { Log.d(TAG, "widget refresh not queued: ${it.message}") }
         }
 
         private fun build(context: Context): RemoteViews {
@@ -81,6 +101,7 @@ class NowPlayingWidget : AppWidgetProvider() {
             }
 
             views.setOnClickPendingIntent(R.id.widget_art, service(context, ACTION_RANDOM))
+
             views.setOnClickPendingIntent(
                 R.id.widget_previous, service(context, RemoteService.ACTION_PREVIOUS)
             )
@@ -103,15 +124,20 @@ class NowPlayingWidget : AppWidgetProvider() {
             return views
         }
 
-        private fun currentZone(app: MusicdLite?) = runCatching {
-            app ?: return@runCatching null
-            app.roon.zone(app.settings.lastZone())
-                ?: app.roon.zones().firstOrNull { it.isPlaying }
-                ?: app.roon.zones().firstOrNull()
-        }.getOrNull()
+        private fun currentZone(app: MusicdLite?) = app?.activeZone()
 
+        /**
+         * A foreground-service start, not a plain one.
+         *
+         * If the service has been killed, plain startService from a widget tap
+         * is refused outright on Android 12 and up, because the app counts as
+         * background. Tapping a widget is one of the actions that earns a
+         * short exemption for a foreground start, so this way the buttons still
+         * work on a cold app — the service comes back, re-pairs, and the tap
+         * after that lands.
+         */
         private fun service(context: Context, action: String): PendingIntent =
-            PendingIntent.getService(
+            PendingIntent.getForegroundService(
                 context,
                 action.hashCode(),
                 Intent(context, RemoteService::class.java).setAction(action),
@@ -126,8 +152,15 @@ class NowPlayingWidget : AppWidgetProvider() {
     ) {
         // Also the first draw after the widget is placed, when the service may
         // not be running yet — build() handles a null app by saying so.
-        runCatching { manager.updateAppWidget(appWidgetIds, build(context)) }
-            .onFailure { Log.w(TAG, "could not draw the widget", it) }
+        // Off this thread too: onUpdate is a broadcast on the main thread, and
+        // build() may fetch a cover.
+        val app = context.applicationContext
+        runCatching {
+            painter.execute {
+                runCatching { manager.updateAppWidget(appWidgetIds, build(app)) }
+                    .onFailure { Log.w(TAG, "could not draw the widget", it) }
+            }
+        }
     }
 
     override fun onEnabled(context: Context) {
