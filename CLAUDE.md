@@ -53,10 +53,37 @@ sed -i 's/include(":app")//' settings.gradle.kts
 # then RESTORE BOTH FILES — never commit the stripped versions
 ```
 
+## The dial is not this project's code
+
+`app/src/main/java/com/musicd/lite/android/dial/` and the dial's resources are
+ported from meltface-80/dial-for-Roon by `tools/sync-dial.py`, from the commit
+pinned in `tools/dial-upstream.json`. The difference is a declared list of
+string substitutions and nothing else.
+
+**Never edit a synced file here.** The next sync would undo it silently, so CI
+runs `--check` and fails if one has been touched. Fix it upstream and re-pin,
+or take the file out of the manifest and adapt it by hand — either is fine, but
+a file cannot be both synced and locally patched.
+
+`DialActivity.kt` and `DialWidget.kt` are ours, and are where the dial meets
+this app's Roon client. When upstream grows a new callback or expects a new
+resource, that is where to answer it.
+
+```bash
+tools/sync-dial.py --latest                  # has upstream moved?
+tools/sync-dial.py --write --commit <sha>    # bring it in
+tools/sync-dial.py --check                   # what CI runs
+```
+
 ## The honesty rule about Android code
 
-CI compiles `:app`. **That is the only automated check that touches any Android
-code.** There are no instrumentation tests and no device here.
+CI compiles `:app` and runs `:app:testDebugUnitTest`. Robolectric with native
+graphics runs the real Skia pipeline on the JVM, so a custom View can be
+measured, drawn and driven with real MotionEvents with no device — that is how
+the dial is tested, and new view code should be tested the same way.
+
+Everything else in `app/src/main/java/` still has nothing but the compiler.
+There are no instrumentation tests and no device here.
 
 So for anything in `app/src/main/java/`, state plainly what was verified and
 what was not. "Compiles and the core tests pass" is an honest claim. "Fixed" is

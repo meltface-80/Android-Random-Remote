@@ -1,0 +1,48 @@
+name: Dial upstream
+
+# The dial is developed in meltface-80/dial-for-Roon. This asks, once a week,
+# whether it has moved since the commit pinned in tools/dial-upstream.json —
+# so an upstream release turns up here as a notification rather than being
+# noticed months later.
+#
+# It deliberately does not sync anything by itself. Pulling a new dial changes
+# what the app draws and how its widget behaves, and that is a change somebody
+# should look at and test, not one that lands on main because a timer fired.
+
+on:
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Has the dial moved?
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare the pinned commit with upstream HEAD
+        run: |
+          if python3 tools/sync-dial.py --latest; then
+            echo "### The dial is up to date" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### Dial for Roon has moved"
+              echo
+              echo 'To bring it in:'
+              echo
+              echo '```'
+              echo 'tools/sync-dial.py --write --commit <sha>'
+              echo './gradlew :core:test :app:testDebugUnitTest'
+              echo '```'
+              echo
+              echo 'Then read the diff. The synced files are ported verbatim, so'
+              echo 'anything the dial has grown — a new callback on DialView, a'
+              echo 'resource it now expects — has to be answered in DialActivity'
+              echo 'or DialWidget, which are ours.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

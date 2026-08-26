@@ -9,6 +9,7 @@ import com.musicd.lite.library.AlbumRecord
 import com.musicd.lite.library.Albums
 import com.musicd.lite.library.LibraryView
 import com.musicd.lite.library.Normalize
+import com.musicd.lite.library.Search
 import com.musicd.lite.meta.ImageCache
 import com.musicd.lite.meta.Metadata
 import com.musicd.lite.meta.Pitchfork
@@ -431,6 +432,39 @@ class MusicdLite(
         runCatching { settings.saveLastZone(chosen.zoneId) }
         chosen
     }.getOrNull()
+
+    /**
+     * Plays whatever best matches [query], for the dial's microphone.
+     *
+     * The search is the app's own index — the same fuzzy, out-of-order,
+     * typo-tolerant matcher the search sheet uses — which suits dictation
+     * better than an exact match would: a recogniser that hears "dark side of
+     * the moon" as "dark side of them oon" still lands on the record.
+     *
+     * Only the library is searched. Nothing is sent anywhere: the recognition
+     * happens on the phone and the matching happens against a snapshot in this
+     * process.
+     */
+    fun playSpoken(query: String, zoneId: String? = null): Result<AlbumRecord> {
+        if (query.isBlank()) {
+            return Result.failure(IllegalArgumentException("Nothing heard"))
+        }
+        if (index.albums.isEmpty()) {
+            return Result.failure(IllegalStateException("The library index is still building"))
+        }
+        val hit = Search.albums(index.albums, query, 1).firstOrNull()
+            ?: return Result.failure(NoSuchElementException("No match for \u201c$query\u201d"))
+        val zone = zoneId
+            ?: activeZone()?.zoneId
+            ?: return Result.failure(IllegalStateException("No zones available"))
+        return runCatching {
+            albums.open(
+                hit.album.offset, zone, "play_now", null,
+                Albums.Expect(hit.album.title, hit.album.subtitle)
+            )
+            hit.album
+        }
+    }
 
     /**
      * Put a random album on, in one call.

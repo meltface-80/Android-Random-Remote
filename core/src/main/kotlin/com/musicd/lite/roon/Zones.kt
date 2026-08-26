@@ -22,6 +22,33 @@ data class Volume(
 ) {
     val isIncremental: Boolean get() = type == "incremental"
 
+    /**
+     * The highest value a control should be able to reach.
+     *
+     * Roon's soft limit is a ceiling the user set on the device precisely so a
+     * remote cannot go past it, so a dial that swept to [max] would drive the
+     * volume somewhere its owner had already said it must not go.
+     */
+    val effectiveMax: Double get() = softLimit?.coerceAtMost(max) ?: max
+
+    /** Where the value sits between [min] and [effectiveMax], as 0f..1f. */
+    val fraction: Float
+        get() {
+            if (isIncremental) return 0f
+            val span = effectiveMax - min
+            if (span <= 0.0) return 0f
+            return ((value - min) / span).coerceIn(0.0, 1.0).toFloat()
+        }
+
+    /** How the value reads to a person, in whatever unit the device counts in. */
+    fun format(): String = when {
+        isMuted -> "muted"
+        type == "db" -> String.format("%.1f dB", value)
+        type == "incremental" -> "+/-"
+        value == Math.floor(value) -> value.toInt().toString()
+        else -> String.format("%.1f", value)
+    }
+
     fun toJson(): JSONObject = JSONObject()
         .put("value", value)
         .put("min", min)

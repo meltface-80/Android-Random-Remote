@@ -51,6 +51,14 @@ jobs:
           git clone --depth 1 https://github.com/RoonLabs/node-roon-api-transport /tmp/node-roon-api-transport
           node tools/verify-wire.js /tmp/node-roon-api /tmp/node-roon-api-transport
 
+      # The dial is not this project's code: it is developed in
+      # meltface-80/dial-for-Roon and ported here by a declared list of string
+      # substitutions. This regenerates the ported files from the pinned commit
+      # and fails on any difference, which is what stops someone patching one
+      # of them locally — the next sync would silently undo it.
+      - name: Check the ported dial matches upstream
+        run: python3 tools/sync-dial.py --check
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
@@ -109,6 +117,23 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/musicd-release.jks"
           echo "path=$RUNNER_TEMP/musicd-release.jks" >> "$GITHUB_OUTPUT"
           echo "have_key=true" >> "$GITHUB_OUTPUT"
+
+      # Until the dial arrived, the only automated check on anything in :app
+      # was that it compiled, and three releases went out with bugs one run
+      # would have caught. Robolectric with native graphics runs the real Skia
+      # pipeline on the JVM, so the dial is measured, drawn and driven with
+      # real MotionEvents here — no device, no emulator.
+      - name: Run the Android unit tests
+        timeout-minutes: 20
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Upload the rendered dial previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dial-previews
+          path: app/build/preview
+          if-no-files-found: ignore
 
       - name: Assemble the release APK
         timeout-minutes: 25

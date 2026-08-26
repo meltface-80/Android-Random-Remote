@@ -208,6 +208,7 @@ class RemoteService : Service() {
         // The widget shows the same thing, so it is redrawn from the same
         // trigger rather than waking on a timer of its own.
         runCatching { NowPlayingWidget.refresh(this) }
+        runCatching { DialWidget.refresh(this) }
     }
 
     /**

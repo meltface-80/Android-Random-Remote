@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MusicD Remote Lite</string>
-    <string name="widget_description">Now playing, with transport. Tap the cover for a random album.</string>
+    <string name="dial_name">Dial for Roon</string>
     <string name="tile_random_album">Random album</string>
+
+    <!-- The plain bar widget. -->
+    <string name="widget_bar_description">Now playing, with transport. Tap the cover for a random album.</string>
+
+    <!--
+      The dial widget. These two names are fixed by the layout synced from
+      Dial for Roon, so they are what they are; see tools/dial-upstream.json.
+    -->
+    <string name="widget_artwork">Album artwork</string>
+    <string name="widget_description">The dial: album art in a volume ring, with transport and volume.</string>
 </resources>

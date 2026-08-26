@@ -16,8 +16,8 @@ android {
         // Bumping versionName is what publishes a new APK into dist/ and
         // repoints the README at it — see the workflow. versionCode must rise
         // with it or Android refuses to install over the previous build.
-        versionCode = 19
-        versionName = "0.2.3"
+        versionCode = 20
+        versionName = "0.3.0"
     }
 
     buildFeatures {
@@ -61,6 +61,21 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    /**
+     * Android code can be tested here after all.
+     *
+     * Until now the only automated check on anything in this module was that
+     * it compiled, and three releases shipped bugs that one run would have
+     * caught. Robolectric with native graphics runs the real Skia pipeline on
+     * the JVM, so a custom View can be measured, drawn and driven with real
+     * MotionEvents in CI, with no device and no emulator. Brought over from
+     * Dial for Roon along with the dial itself.
+     */
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
+    }
+
     packaging {
         resources.excludes += setOf(
             "META-INF/*.kotlin_module",
@@ -86,4 +101,9 @@ dependencies {
     // FileProvider only. Handing an image to the clipboard or a share sheet
     // means handing over a content:// URI, and that needs a provider.
     implementation("androidx.core:core:1.13.1")
+
+    testImplementation("junit:junit:4.13.2")
+    // The real org.json, ahead of android.jar's stub which throws on every call.
+    testImplementation("org.json:json:20240303")
+    testImplementation("org.robolectric:robolectric:4.16.1")
 }

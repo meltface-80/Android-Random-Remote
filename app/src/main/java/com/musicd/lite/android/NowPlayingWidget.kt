@@ -114,16 +114,16 @@ class NowPlayingWidget : AppWidgetProvider() {
                 R.id.widget_playpause, if (playing) "Pause" else "Play"
             )
 
-            views.setOnClickPendingIntent(R.id.widget_art, service(context, ACTION_RANDOM))
+            views.setOnClickPendingIntent(R.id.widget_art, serviceIntent(context, ACTION_RANDOM))
 
             views.setOnClickPendingIntent(
-                R.id.widget_previous, service(context, RemoteService.ACTION_PREVIOUS)
+                R.id.widget_previous, serviceIntent(context, RemoteService.ACTION_PREVIOUS)
             )
             views.setOnClickPendingIntent(
-                R.id.widget_playpause, service(context, RemoteService.ACTION_PLAY_PAUSE)
+                R.id.widget_playpause, serviceIntent(context, RemoteService.ACTION_PLAY_PAUSE)
             )
             views.setOnClickPendingIntent(
-                R.id.widget_next, service(context, RemoteService.ACTION_NEXT)
+                R.id.widget_next, serviceIntent(context, RemoteService.ACTION_NEXT)
             )
             // The text opens the app, so the widget is also a launcher.
             views.setOnClickPendingIntent(
@@ -150,7 +150,7 @@ class NowPlayingWidget : AppWidgetProvider() {
          * work on a cold app — the service comes back, re-pairs, and the tap
          * after that lands.
          */
-        private fun service(context: Context, action: String): PendingIntent =
+        fun serviceIntent(context: Context, action: String): PendingIntent =
             PendingIntent.getForegroundService(
                 context,
                 action.hashCode(),
