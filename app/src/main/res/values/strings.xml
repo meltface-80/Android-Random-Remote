@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MusicD Remote Lite</string>
+    <string name="widget_description">Now playing, with transport. Tap the cover for a random album.</string>
+    <string name="tile_random_album">Random album</string>
 </resources>

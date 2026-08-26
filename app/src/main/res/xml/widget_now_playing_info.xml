@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  updatePeriodMillis is 0 on purpose. The platform's own widget refresh is
+  capped at once every 30 minutes and would wake the app on a timer to ask
+  whether anything changed — which is the polling this release removed. The
+  service redraws the widget when Roon's zone feed actually moves instead.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_now_playing"
+    android:previewImage="@mipmap/ic_launcher"
+    android:previewLayout="@layout/widget_now_playing"
+    android:resizeMode="horizontal"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_description" />

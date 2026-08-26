@@ -928,15 +928,15 @@ class RemoteApi(
         return Json.ok(JSONObject().put("album", Json.album(album)).put("invoked", r.invoked ?: JSONObject.NULL))
     }
 
-    private fun shortcutPlay(request: Request, unheardOnly: Boolean): Response {
-        val zone = request.str("zone") ?: roon.zones().firstOrNull()?.zoneId
-        ?: return Json.error(503, "No zones available")
-        val pool = if (unheardOnly) view.unplayed(6).ifEmpty { index.albums } else index.albums
-        val album = view.sample(pool, 1).firstOrNull()
-            ?: return Json.error(503, "The library index is still building")
-        app.albums.open(album.offset, zone, "play_now", null, Albums.Expect(album.title, album.subtitle))
-        return Json.ok(JSONObject().put("album", Json.album(album)))
-    }
+    /**
+     * One tap, one album. Shared with the widget and the Quick Settings tile,
+     * which reach the same action without going through HTTP at all.
+     */
+    private fun shortcutPlay(request: Request, unheardOnly: Boolean): Response =
+        app.playRandomAlbum(request.str("zone"), unheardOnly).fold(
+            onSuccess = { Json.ok(JSONObject().put("album", Json.album(it))) },
+            onFailure = { Json.error(503, it.message ?: "Could not start an album") }
+        )
 
     // --------------------------------------------------------------- search
 

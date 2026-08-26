@@ -367,6 +367,37 @@ class MusicdLite(
         }
     }
 
+    /**
+     * Put a random album on, in one call.
+     *
+     * The home screen widget, the Quick Settings tile and the shortcut
+     * endpoints all want exactly this and none of them should have to know how
+     * it is done. It lives here rather than in the HTTP layer because two of
+     * those three callers are Android surfaces that never go near HTTP — a
+     * widget tapped on the launcher should not have to talk to a socket inside
+     * its own process.
+     *
+     * @param zoneId the zone to play in; the last zone the app watched, then
+     *               any zone, when null.
+     * @return what started playing, or null with a reason.
+     */
+    fun playRandomAlbum(
+        zoneId: String? = null,
+        unheardOnly: Boolean = false
+    ): Result<AlbumRecord> {
+        val zone = zoneId
+            ?: settings.lastZone()?.takeIf { id -> roon.zones().any { it.zoneId == id } }
+            ?: roon.zones().firstOrNull()?.zoneId
+            ?: return Result.failure(IllegalStateException("No zones available"))
+        val pool = if (unheardOnly) view.unplayed(6).ifEmpty { index.albums } else index.albums
+        val album = view.sample(pool, 1).firstOrNull()
+            ?: return Result.failure(IllegalStateException("The library index is still building"))
+        return runCatching {
+            albums.open(album.offset, zone, "play_now", null, Albums.Expect(album.title, album.subtitle))
+            album
+        }
+    }
+
     /** Run [body] off the request thread — used by the rescan endpoints. */
     fun background(body: () -> Unit) {
         runCatching { jobs.execute { runCatching(body) } }

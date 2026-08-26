@@ -134,14 +134,16 @@ class RemoteService : Service() {
             nowPlaying = NowPlayingSession(this, lite) { refreshNotification() }
                 .takeIf { it.start() }
             if (nowPlaying != null) startZoneWatch(lite)
+            NowPlayingWidget.refresh(this)
         }.onFailure { AndroidLog.w(TAG, "media session unavailable", it) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_PLAY_PAUSE -> nowPlaying?.command("playpause")
-            ACTION_NEXT -> nowPlaying?.command("next")
-            ACTION_PREVIOUS -> nowPlaying?.command("previous")
+            ACTION_PLAY_PAUSE -> transport("playpause")
+            ACTION_NEXT -> transport("next")
+            ACTION_PREVIOUS -> transport("previous")
+            NowPlayingWidget.ACTION_RANDOM -> playRandomInBackground()
         }
         // Restarted by the system after being killed: come back up and re-pair.
         return START_STICKY
@@ -190,6 +192,42 @@ class RemoteService : Service() {
                 status?.detail ?: ""
             )
         }
+        // The widget shows the same thing, so it is redrawn from the same
+        // trigger rather than waking on a timer of its own.
+        runCatching { NowPlayingWidget.refresh(this) }
+    }
+
+    /**
+     * The widget's and the notification's transport buttons.
+     *
+     * Routed through the media session when there is one so there is a single
+     * definition of "which zone does this affect", and straight to Roon when
+     * there is not — the buttons should work on a device where the session
+     * could not be built.
+     */
+    private fun transport(command: String) {
+        val session = nowPlaying
+        if (session != null) {
+            session.command(command)
+            return
+        }
+        runCatching {
+            val lite = app ?: return
+            val zoneId = lite.settings.lastZone()
+                ?: lite.roon.zones().firstOrNull { it.isPlaying }?.zoneId
+                ?: lite.roon.zones().firstOrNull()?.zoneId
+                ?: return
+            lite.roon.control(zoneId, command)
+        }.onFailure { AndroidLog.w(TAG, "transport $command failed", it) }
+    }
+
+    /** Walks Roon's browse tree, so never on the main thread. */
+    private fun playRandomInBackground() {
+        val lite = app ?: return
+        Thread({
+            runCatching { lite.playRandomAlbum() }
+                .onFailure { AndroidLog.w(TAG, "widget random album failed", it) }
+        }, "widget-play").apply { isDaemon = true }.start()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
