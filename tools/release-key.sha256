@@ -10,9 +10,13 @@ b55d714c40b8ad96aa515d289d56cf3a40d0c28d60194e86076f73111eea1fad  # RSA-4096
 #
 # TWO entries, for one transition. Both are keys generated for this repository:
 # the RSA one first, then a smaller EC one so the value that has to be pasted
-# into a repository secret was a quarter the length. Whichever ended up in
-# MUSICD_KEYSTORE_BASE64 is the real one, and either is accepted so that a
-# paste of the wrong copy is not a failed build.
+# into a repository secret was a quarter the length.
+#
+# The EC one is the LIVE key — 0.1.9 was published signed with it, so that is
+# what is in MUSICD_KEYSTORE_BASE64 and what every future release must match.
+# The RSA line is kept only so that re-pasting the earlier copy of the setup
+# instructions is not a failed build. It can go once there is no stale copy of
+# those instructions in circulation.
 #
 # What this check exists to catch is the build minting a NEW key on every run —
 # which is what was happening — and a two-entry list catches that exactly as
