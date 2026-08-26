@@ -1,4 +1,12 @@
+<div align="center">
+
+<img width="1536" height="1024" alt="MusicD" src="https://github.com/user-attachments/assets/fc1dd26e-db7f-4e27-8f66-b0ab74db89e3" />
+
+</div>
+
 # MusicD Remote Lite (Android)
+
+**📱 Download & install guide: [meltface-80.github.io/Android-Random-Remote](https://meltface-80.github.io/Android-Random-Remote/)**
 
 A native Android APK of [MusicD Remote for Roon](https://github.com/meltface-80/MusicD-Remote),
 with the same interface and no server behind it. It registers itself as a Roon
@@ -52,7 +60,7 @@ API testable on a JVM with no emulator — see [Verification](#verification).
 
 ## Install
 
-**Download: [musicd-remote-lite-0.1.11.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.1.11.apk)**
+**Download: [musicd-remote-lite-0.1.12.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.1.12.apk)**
 
 Sideload it on Android 8.0 (API 26) or newer. The file in
 [`dist/`](dist/) is published by CI from the source in this repository, so it is

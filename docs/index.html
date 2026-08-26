@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MusicD Remote Lite for Android — download &amp; install</title>
+<meta name="description" content="MusicD Remote Lite — a native Android APK that pairs with your Roon Core directly. No Docker, no Node, no server. Download and sideload.">
+<link rel="icon" href="favicon.ico">
+<style>
+  :root {
+    --bg:        #1b1d1f;   /* charcoal */
+    --bg-deep:   #141618;
+    --panel:     #232628;
+    --panel-2:   #2a2d30;
+    --line:      #35393d;
+    --text:      #e8e6e3;
+    --muted:     #a8a49e;
+    --copper:    #c47f4a;   /* subtle copper accent */
+    --copper-hi: #d99a66;
+    --copper-dim:#8a5a35;
+    --good:      #7fb47f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--copper-hi); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+
+  /* ---------- top nav ---------- */
+  nav.topnav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(20,22,24,.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav.topnav .wrap {
+    display: flex; align-items: center; gap: 18px;
+    height: 52px; overflow-x: auto; white-space: nowrap;
+  }
+  nav.topnav a {
+    color: var(--muted); font-size: 14px; font-weight: 500;
+  }
+  nav.topnav a:hover { color: var(--copper-hi); text-decoration: none; }
+  nav.topnav .brand { color: var(--text); font-weight: 700; letter-spacing: .02em; }
+  nav.topnav .brand span { color: var(--copper); }
+  nav.topnav .gh { margin-left: auto; }
+
+  /* ---------- hero ---------- */
+  header.hero {
+    text-align: center;
+    padding: 48px 20px 40px;
+    background:
+      radial-gradient(ellipse 70% 55% at 50% -10%, rgba(196,127,74,.14), transparent 65%),
+      var(--bg-deep);
+    border-bottom: 1px solid var(--line);
+  }
+  header.hero img.logo {
+    max-width: min(560px, 88vw);
+    width: 100%; height: auto;
+    border-radius: 14px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.45);
+  }
+  header.hero .wordmark { display: none; font-size: 44px; font-weight: 800; letter-spacing: .03em; }
+  header.hero .wordmark span { color: var(--copper); }
+  header.hero.noimg img.logo { display: none; }
+  header.hero.noimg .wordmark { display: block; }
+  header.hero h1 { font-size: 30px; margin-top: 26px; font-weight: 700; }
+  header.hero p.tag { color: var(--muted); max-width: 640px; margin: 10px auto 0; font-size: 16px; }
+  .badges { margin-top: 18px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .badge {
+    display: inline-block; font-size: 12.5px; font-weight: 600;
+    padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--copper-dim); color: var(--copper-hi);
+    background: rgba(196,127,74,.08);
+  }
+  .badge.plain { border-color: var(--line); color: var(--muted); background: transparent; }
+
+  /* ---------- sections ---------- */
+  section { padding: 52px 0 8px; scroll-margin-top: 56px; }
+  section > .wrap > h2 {
+    font-size: 24px; font-weight: 700; margin-bottom: 6px;
+    padding-left: 14px; border-left: 3px solid var(--copper);
+  }
+  section > .wrap > p.lead { color: var(--muted); margin-bottom: 26px; max-width: 720px; }
+
+  /* ---------- feature grid ---------- */
+  .grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 18px 16px;
+  }
+  .card h3 { font-size: 15.5px; font-weight: 650; margin-bottom: 6px; }
+  .card h3 .em { margin-right: 8px; }
+  .card p { font-size: 13.5px; color: var(--muted); }
+
+
+  /* ---------- download (replaces the Docker configurator) ---------- */
+  .dl {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 24px; text-align: center;
+  }
+  .dl a.get {
+    display: inline-block; font-size: 16px; font-weight: 700;
+    padding: 14px 30px; border-radius: 999px;
+    color: var(--bg-deep); background: var(--copper);
+    border: 1px solid var(--copper-hi);
+  }
+  .dl a.get:hover { background: var(--copper-hi); text-decoration: none; }
+  .dl .filename { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 12px; }
+  .dl .sub { font-size: 13.5px; color: var(--muted); margin-top: 14px; }
+  .dl .fp {
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line);
+    word-break: break-all;
+  }
+  .dl .fp b { color: var(--copper-hi); font-family: var(--sans); }
+
+  /* ---------- env table ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { background: var(--panel-2); color: var(--copper-hi); font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { font-family: var(--mono); white-space: nowrap; }
+  td { color: var(--muted); }
+  td:first-child { color: var(--text); }
+
+  /* ---------- first run ---------- */
+  .firstrun {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px;
+  }
+  .firstrun ol { padding-left: 20px; font-size: 14px; display: grid; gap: 9px; color: var(--muted); }
+  .firstrun ol li::marker { color: var(--copper); font-weight: 700; }
+  .firstrun ol li b { color: var(--text); }
+
+  /* ---------- small screens (phones, portrait) ---------- */
+  @media (max-width: 600px) {
+    header.hero { padding: 32px 16px 30px; }
+    header.hero h1 { font-size: 24px; margin-top: 20px; }
+    header.hero .wordmark { font-size: 34px; }
+    section { padding: 40px 0 6px; }
+    section > .wrap > h2 { font-size: 21px; }
+    .cfg-body { padding: 16px; gap: 18px; }
+    .codebox pre { font-size: 12px; padding: 14px; padding-top: 40px; }
+    th, td { padding: 9px 10px; }
+  }
+
+  footer {
+    margin-top: 64px; padding: 28px 20px 40px;
+    border-top: 1px solid var(--line);
+    text-align: center; font-size: 13px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="wrap">
+    <a class="brand" href="#top">Music<span>D</span> Remote Lite</a>
+    <a href="#download">Download</a>
+    <a href="#install">Install</a>
+    <a href="#features">Features</a>
+    <a href="#lite">What's different</a>
+    <a href="#updates">Updates</a>
+    <a class="gh" href="https://github.com/meltface-80/Android-Random-Remote">GitHub&nbsp;&rarr;</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <img class="logo" src="https://github.com/user-attachments/assets/fc1dd26e-db7f-4e27-8f66-b0ab74db89e3"
+       alt="MusicD logo" onerror="this.closest('.hero').classList.add('noimg')">
+  <div class="wordmark">Music<span>D</span></div>
+  <h1>MusicD Remote Lite <span style="color:var(--copper)">for Android</span></h1>
+  <p class="tag"><a href="https://github.com/meltface-80/MusicD-Remote">MusicD Remote</a> as a
+     native Android app. It pairs with your Roon Core directly over the network — there is no
+     Docker container, no Node process and no server to keep running. Install the APK and it is
+     the whole thing.</p>
+  <div class="badges">
+    <span class="badge" id="ver-badge">v0.1.12</span>
+    <span class="badge plain">Android 8.0+</span>
+    <span class="badge plain">MIT licence</span>
+    <span class="badge plain">Pairs with your Roon Core over the network</span>
+  </div>
+</header>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Download</h2>
+    <p class="lead">Built and published by CI from the source in this repository — the commit that
+       adds each APK names the commit it was built from, so the binary is always traceable to the
+       code beside it.</p>
+    <div class="dl">
+      <a class="get" id="dl-link"
+         href="https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.1.12.apk">Download the APK</a>
+      <div class="filename" id="dl-name">musicd-remote-lite-0.1.12.apk</div>
+      <p class="sub">Android 8.0 (API 26) or newer. Your browser will warn you about downloading an
+         APK, and Android will ask permission to install from this source — both are normal for an
+         app that does not come from the Play Store.</p>
+      <div class="fp">
+        <b>Signing certificate (SHA-256)</b><br>
+        9212864c843359caf42038bb3f35d66dddaa80a321807697781108392cbd3ad3
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install</h2>
+    <p class="lead">Three steps, once.</p>
+    <div class="firstrun">
+      <ol>
+        <li><b>Download and open the APK.</b> Allow your browser to install unknown apps if
+            Android asks — you can turn that back off afterwards.</li>
+        <li><b>Open the app</b> on the same Wi-Fi as your Roon Core. It finds the Core itself;
+            there is no address to type in.</li>
+        <li><b>Approve it in Roon:</b> <b>Settings &rarr; Extensions</b> &rarr; Enable
+            <em>MusicD Remote Lite (Android)</em>. The pairing token is stored per Core, so this
+            happens only the first time.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Features</h2>
+    <p class="lead">Everything goes through Roon's official extension API. The app never touches
+       your library files and never streams audio itself — Roon plays, this decides what.</p>
+    <div class="grid">
+      <div class="card"><h3><span class="em">🎲</span>Random album browsing</h3>
+        <p>Your library in a fresh order every time, so the records you forgot you owned surface
+           instead of the same twenty.</p></div>
+      <div class="card"><h3><span class="em">📻</span>Random Album Radio</h3>
+        <p>When a zone's queue runs dry, another whole album starts. Per zone, and mutually
+           exclusive with Roon's own radio.</p></div>
+      <div class="card"><h3><span class="em">🔎</span>Instant library search</h3>
+        <p>Albums and artists, matched as you type against a snapshot held in the app — no round
+           trip to the Core for every keystroke.</p></div>
+      <div class="card"><h3><span class="em">✨</span>Smart Picks</h3>
+        <p>A handful of albums a day you have not played in six months. Drawn from your own
+           library, so every one is a tap from playing.</p></div>
+      <div class="card"><h3><span class="em">📝</span>Reviews &amp; biographies</h3>
+        <p>Album blurbs and artist biographies from Wikipedia, with Pitchfork scores and Best New
+           Music where they exist.</p></div>
+      <div class="card"><h3><span class="em">🎛️</span>Full transport control</h3>
+        <p>Zones, grouping, volume, queue and playback — the same controls the desktop remote has,
+           on a phone.</p></div>
+      <div class="card"><h3><span class="em">🖼️</span>Wall display</h3>
+        <p>Point a spare tablet at the display screen for big artwork and now-playing detail.</p></div>
+      <div class="card"><h3><span class="em">📤</span>Share cards</h3>
+        <p>Turn what is playing into a card you can send to anyone, straight from the Android
+           share sheet.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="lite">
+  <div class="wrap">
+    <h2>What's different from the full version</h2>
+    <p class="lead">Lite is a deliberate subset. These are the parts left out and why — none of
+       them are coming back by accident.</p>
+    <div class="tablewrap">
+      <table>
+        <tr><th>Feature</th><th>Why not</th></tr>
+        <tr><td>Record labels</td>
+            <td>Built by reading tags off a mounted music directory and then querying five outside
+                services. A phone is not the machine holding the files.</td></tr>
+        <tr><td>Qobuz &amp; TIDAL</td>
+            <td>Both logins drive unofficial APIs those services' terms forbid, and they only add
+                catalogue browsing — Roon streams from either through its own account regardless.</td></tr>
+        <tr><td>Playlists &amp; sharing</td>
+            <td>Not ported yet.</td></tr>
+        <tr><td>Local / hi-res badges</td>
+            <td>Read from the files themselves during a scan, which needs that same music
+                directory.</td></tr>
+        <tr><td>Queue editing</td>
+            <td>Not a lite limitation: Roon's extension API exposes no way to remove, reorder or
+                clear queue items. Playing from a chosen track is the one queue action it allows,
+                and that works.</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="updates">
+  <div class="wrap">
+    <h2>Updates</h2>
+    <div class="firstrun">
+      <ol>
+        <li><b>From inside the app.</b> <b>Settings &rarr; Check for updates</b> downloads the new
+            APK, verifies its checksum and hands it to Android to install.</li>
+        <li><b>Or download again</b> from this page — a newer APK installs straight over the
+            older one.</li>
+      </ol>
+      <p style="font-size:13px;color:var(--muted);margin-top:14px">
+        Every release is signed with the same key, which is what lets an update install over what
+        you already have. Builds before 0.1.9 carried throwaway keys and have to be uninstalled
+        once before moving to a current one.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>MusicD Remote Lite for Android · MIT licence · © 2026 Lewis Menzies (Music Duck / MusicD) ·
+     <a href="https://github.com/meltface-80/Android-Random-Remote">github.com/meltface-80/Android-Random-Remote</a><br>
+     Built from <a href="https://github.com/meltface-80/MusicD-Remote">MusicD Remote</a>.
+     Roon is a trademark of Roon Labs LLC. This is an independent extension, not affiliated with
+     Roon Labs.</p>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  // The published version, read from the manifest CI writes beside the APK, so
+  // this page cannot drift from what is actually downloadable. On any failure
+  // the values baked in at build time stand — a stale-but-real link beats a
+  // broken one.
+  var RAW = "https://raw.githubusercontent.com/meltface-80/Android-Random-Remote/main/dist/latest.json";
+  fetch(RAW, { cache: "no-store" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) {
+      if (!j || !j.version || !j.url) return;
+      var name = j.url.split("/").pop();
+      document.getElementById("dl-link").href = j.url;
+      document.getElementById("dl-name").textContent = name;
+      document.getElementById("ver-badge").textContent = "v" + j.version;
+    })
+    .catch(function () { /* offline, or the manifest moved — the baked-in link stands */ });
+})();
+</script>
+
+</body>
+</html>
