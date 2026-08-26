@@ -8927,8 +8927,82 @@
     });
   }
 
-  // The wall display's controls are gone with the feature: it served a page
-  // to other devices, and this server is loopback-only.
+  // The wall display's controls are gone with the feature: it served a page to
+  // OTHER devices, and this app's server is bound to loopback.
+
+  const lfdInput  = document.getElementById("label-folder-depth-input");
+  const lfdSave   = document.getElementById("label-folder-depth-save");
+  const lfdStatus = document.getElementById("label-folder-depth-status");
+
+  async function loadLabelFolderDepth() {
+    try {
+      const r = await fetch("/api/settings/label-folder-depth");
+      const j = await r.json();
+      if (lfdInput && document.activeElement !== lfdInput) lfdInput.value = j.depth || 0;
+      if (lfdStatus) lfdStatus.textContent = j.depth ? ("Using folder depth " + j.depth) : "Off — using file label tags";
+    } catch (_) { /* display-only status — stale on failure is fine */ }
+  }
+
+  if (lfdSave) {
+    lfdSave.addEventListener("click", async () => {
+      const depth = parseInt(lfdInput ? lfdInput.value : "0", 10) || 0;
+      lfdSave.disabled = true;
+      try {
+        const r = await fetch("/api/settings/label-folder-depth", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ depth })
+        });
+        const j = await r.json();
+        if (j.ok) {
+          showToast(j.rescanning ? "Saved — re-scanning labels…" : "Saved", "ok");
+          loadLabelFolderDepth();
+        } else {
+          showToast(j.error || "Failed to save", "error");
+        }
+      } catch (e) {
+        showToast("Failed: " + e.message, "error");
+      } finally {
+        lfdSave.disabled = false;
+      }
+    });
+  }
+
+  // The Qobuz and Tidal account controls are not in this build — see the
+  // note where the service browser used to live. Nothing loads their status
+  // and nothing gates a top-bar button on it, because neither button exists.
+
+  // Settings is a two-level view: a category home list and one pane per
+  // category. Only one .settings-view is visible at a time. The controls and
+  // their IDs are unchanged — they just live inside panes now — so all the
+  // load*/save* wiring above still resolves against the same elements.
+  const sheet = overlay.querySelector(".settings-sheet");
+  const views = sheet ? sheet.querySelectorAll(".settings-view") : [];
+  const showView = (name) => {
+    let matched = false;
+    views.forEach(v => {
+      const isHome = v.getAttribute("data-view") === "home";
+      const key    = isHome ? "home" : v.getAttribute("data-pane");
+      const on     = key === name;
+      v.classList.toggle("hidden", !on);
+      if (on) matched = true;
+    });
+    // Fall back to home if an unknown pane was requested.
+    if (!matched) views.forEach(v => v.classList.toggle("hidden", v.getAttribute("data-view") !== "home"));
+    // Each level starts scrolled to the top, like a pushed page.
+    if (sheet) sheet.scrollTop = 0;
+  };
+  const atHome = () => {
+    const home = sheet && sheet.querySelector('.settings-view[data-view="home"]');
+    return !home || !home.classList.contains("hidden");
+  };
+
+  if (sheet) {
+    sheet.addEventListener("click", (e) => {
+      const nav = e.target.closest(".settings-nav-item");
+      if (nav) { showView(nav.getAttribute("data-pane")); return; }
+      if (e.target.closest("[data-settings-back]")) { showView("home"); return; }
+    });
+  }
 
   // ----- Theme picker -----
   // A single-select list plus Apply, rather than the old instant toggle. The
