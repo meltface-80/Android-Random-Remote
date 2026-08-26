@@ -76,6 +76,10 @@ fingerprint pinned in [`tools/release-key.sha256`](tools/release-key.sha256) —
 a wrong key now fails the build instead of failing on someone's phone months
 later.
 
+Without those secrets the build still compiles and every check still runs;
+it just produces an APK marked `-UNSIGNED` and publishes nothing. A missing
+secret is not a broken build and CI does not report it as one.
+
 `tools/apk-cert.py` prints the certificate of any APK, which is how the
 original fault was diagnosed:
 

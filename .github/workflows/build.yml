@@ -78,18 +78,27 @@ jobs:
       # result over the copy already on the phone — the debug key this used
       # is generated per machine, so every runner produced a different
       # certificate and every "update" was refused.
+      # A missing secret is NOT a broken build, and must not be reported as
+      # one. Without the key the APK still compiles and every check still
+      # runs — the only thing that cannot happen is PUBLISHING, because an
+      # unsigned APK installs nowhere. So this records whether the key is
+      # available and the publish step requires it; the job stays green and
+      # starts publishing by itself once the secret exists.
       - name: Restore the signing key
         id: signing
         env:
           KEYSTORE_BASE64: ${{ secrets.MUSICD_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::MUSICD_KEYSTORE_BASE64 is not set. Releases must be"
-            echo "::error::signed with a stable key or they cannot install as updates."
-            exit 1
+            echo "have_key=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::MUSICD_KEYSTORE_BASE64 is not set, so this build is" \
+                 "unsigned and will not be published to dist/. Everything else ran." \
+                 "See the Signing section of the README."
+            exit 0
           fi
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/musicd-release.jks"
           echo "path=$RUNNER_TEMP/musicd-release.jks" >> "$GITHUB_OUTPUT"
+          echo "have_key=true" >> "$GITHUB_OUTPUT"
 
       - name: Assemble the release APK
         timeout-minutes: 25
@@ -100,18 +109,29 @@ jobs:
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
       # An unsigned APK installs nowhere, and one signed with the wrong key
-      # installs but never updates. Neither may reach dist/.
+      # installs but never updates. Neither may reach dist/, and the wrong-key
+      # case is invisible until someone tries to update — so it is checked here
+      # rather than discovered on a phone.
       - name: Check the APK is signed with the release key
+        if: steps.signing.outputs.have_key == 'true'
         run: |
           apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           python3 tools/apk-cert.py "$apk" --expect-file tools/release-key.sha256
 
+      # An unsigned build is named as such. Someone downloading a CI artifact
+      # should not get a file that looks like a release and cannot install.
       - name: Name the artifact after the version
         id: name
+        env:
+          HAVE_KEY: ${{ steps.signing.outputs.have_key }}
         run: |
           apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           version=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          out="musicd-remote-lite-${version}.apk"
+          if [ "$HAVE_KEY" = "true" ]; then
+            out="musicd-remote-lite-${version}.apk"
+          else
+            out="musicd-remote-lite-${version}-UNSIGNED.apk"
+          fi
           cp "$apk" "$out"
           echo "apk=$out" >> "$GITHUB_OUTPUT"
 
@@ -131,8 +151,13 @@ jobs:
       #
       # This pushes with GITHUB_TOKEN, and GitHub deliberately does not fire
       # workflows for pushes made with it — so this cannot start a build loop.
+      #
+      # Requires the signing key: publishing an unsigned APK would put a file
+      # in dist/ that the README links to and nobody can install.
       - name: Publish the APK into dist/
-        if: github.event_name == 'push' && github.ref_type == 'branch'
+        if: >-
+          github.event_name == 'push' && github.ref_type == 'branch'
+          && steps.signing.outputs.have_key == 'true'
         env:
           APK: ${{ steps.name.outputs.apk }}
         run: |
@@ -167,7 +192,9 @@ jobs:
           git push origin "HEAD:$GITHUB_REF_NAME"
 
       - name: Attach the APK to a tagged release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: >-
+          startsWith(github.ref, 'refs/tags/v')
+          && steps.signing.outputs.have_key == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.name.outputs.apk }}
