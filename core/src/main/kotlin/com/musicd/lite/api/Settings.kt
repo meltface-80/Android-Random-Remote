@@ -34,7 +34,6 @@ class Settings(private val store: Store) {
         val HOME_ROW_IDS = listOf("unplayed", "history", "picks", "random", "library", "genres")
 
         const val KEY_HOME_ROWS = "home_rows"
-        const val KEY_DISPLAY = "display"
         const val KEY_SMART_PICKS = "smart_picks"
         const val KEY_RADIO_ZONES = "radio_zones"
         const val KEY_DISCOGS_TOKEN = "discogs_token"
@@ -96,18 +95,6 @@ class Settings(private val store: Store) {
     fun homeRowUnavailable(id: String): String? = when {
         id == "picks" && !smartPicksEnabled() -> "Smart Picks is off in Settings"
         else -> null
-    }
-
-    // --------------------------------------------------------------- display
-
-    fun displayEnabled(): Boolean = doc(KEY_DISPLAY).optBoolean("enabled", false)
-    fun displaySeconds(): Int = doc(KEY_DISPLAY).optInt("seconds", 20).coerceIn(5, 60)
-
-    fun saveDisplay(enabled: Boolean?, seconds: Int?) {
-        val d = doc(KEY_DISPLAY)
-        if (enabled != null) d.put("enabled", enabled)
-        if (seconds != null && seconds in 5..60) d.put("seconds", seconds)
-        save(KEY_DISPLAY, d)
     }
 
     // ----------------------------------------------------------- smart picks

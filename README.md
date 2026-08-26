@@ -129,7 +129,6 @@ original's screens unchanged:
 - **Random Album Radio** — when a zone's queue runs dry, another album goes on.
 - **Play history** — kept locally, and what "unheard" and "rediscover" are built
   from. This is the feature that gets better the longer the app is installed.
-- **The wall display** — the `/display` page, for a tablet in a listening room.
 - **Pitchfork** — the Latest and Best New Music listings, with scores, covers
   and links out to pitchfork.com. No review text is served, here or upstream:
   the writing is Pitchfork's and the app links to it.
@@ -139,19 +138,41 @@ free and need no key.
 
 ## What's not here
 
-The interface still has one entry for each of these; the app answers "this
-feature is off" in the shape the front-end already understands, so those screens
-show their own empty state instead of an error.
+Most of these are removed from the interface rather than left as controls that
+cannot work. Where a screen does remain, the app answers "this feature is off"
+in the shape the front-end already understands, so it shows its own empty state
+instead of an error.
 
 | Not in this build | Why |
 |---|---|
-| **Record labels** — Label of the Week, the label explorer, label logos, merges | The label index starts from tags read off a **mounted music directory**, then queries iTunes, MusicBrainz, TheAudioDB, Discogs and FanArt.tv. The phone is not the machine holding the files and Roon's extension API exposes no paths, so that first step has no input here yet — see [Reading your music folder](#reading-your-music-folder). This is the "lite" in the name. |
-| **Qobuz and TIDAL** browsing, favourites, external search | Both need an account login, and TIDAL needs an OAuth device flow. Deferred, not ruled out. |
+| **Record labels** — Label of the Week, the label explorer, label logos, merges | The label index starts from tags read off a **mounted music directory**, then queries iTunes, MusicBrainz, TheAudioDB, Discogs and FanArt.tv. The phone is not the machine holding the files and Roon's extension API exposes no paths, so that first step has no input here — see [Reading your music folder](#reading-your-music-folder). This is the "lite" in the name. |
+| **Qobuz and TIDAL** browsing, favourites, external search | Both logins drive unofficial APIs those services' own terms forbid, and they buy catalogue browsing only: Roon streams from either through its own account regardless. Removed rather than deferred. |
+| **The wall display** — the `/display` page | It served a page to OTHER devices, and this app's HTTP server is bound to loopback. See [Why there is no wall display](#why-there-is-no-wall-display). |
 | Quality badges (sample rate / bit depth) and source badges | Read from file tags on the mounted music directory. Same missing input as labels. |
-| Playlists, smart playlists, share cards, import | Self-contained features, not yet ported. Their screens list nothing rather than failing. |
-| In-app self-update | A Docker-era feature. An APK updates by being installed. |
+| Playlists, smart playlists, import | Self-contained features, not yet ported. |
+| **Queue editing** — remove, reorder, clear | Not a lite limitation. Roon's extension API has no verb for it: `play_from_here` is the only queue mutation it exposes, and that works. |
 
-Nothing on that list is a protocol limitation. Labels aside, they are scope.
+Apart from queue editing, nothing on that list is a protocol limitation.
+
+### Why there is no wall display
+
+Upstream, `/display` is a page the server hands to a tablet or TV in another
+room. That works because the server is a machine on the network that other
+devices can reach.
+
+This app's server is bound to `127.0.0.1`, so nothing off the phone can reach
+it — which is also why it needs no authentication. Making the wall display work
+would mean binding to the network, and then any device on the Wi-Fi could
+control playback on every Roon zone in the house, with nothing in front of it.
+Authentication would have to come first, and that is a feature in itself.
+
+The battery cost is the second reason. The display polls continuously, so the
+phone would have to hold its CPU and Wi-Fi awake indefinitely to serve a screen
+in another room. A phone is a poor always-on server, and the Docker build never
+asked one to be.
+
+Use MusicD Remote proper for a wall display: it runs on a machine that is
+already awake.
 
 ### Reading your music folder
 

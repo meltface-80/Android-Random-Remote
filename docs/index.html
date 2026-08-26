@@ -266,8 +266,6 @@
       <div class="card"><h3><span class="em">🎛️</span>Full transport control</h3>
         <p>Zones, grouping, volume, queue and playback — the same controls the desktop remote has,
            on a phone.</p></div>
-      <div class="card"><h3><span class="em">🖼️</span>Wall display</h3>
-        <p>Point a spare tablet at the display screen for big artwork and now-playing detail.</p></div>
       <div class="card"><h3><span class="em">📤</span>Share cards</h3>
         <p>Turn what is playing into a card you can send to anyone, straight from the Android
            share sheet.</p></div>
@@ -294,6 +292,12 @@
         <tr><td>Local / hi-res badges</td>
             <td>Read from the files themselves during a scan, which needs that same music
                 directory.</td></tr>
+        <tr><td>Wall display</td>
+            <td>The <code>/display</code> page is served to <em>other</em> devices, and this app's
+                server is bound to loopback so nothing off the phone can reach it. Opening that up
+                would put an unauthenticated control API on your network, and a phone would have to
+                stay awake serving it. Use MusicD Remote proper for a wall display — it runs on a
+                machine that is already on.</td></tr>
         <tr><td>Queue editing</td>
             <td>Not a lite limitation: Roon's extension API exposes no way to remove, reorder or
                 clear queue items. Playing from a chosen track is the one queue action it allows,
