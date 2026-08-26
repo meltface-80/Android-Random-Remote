@@ -8075,15 +8075,67 @@
 
   // Now-playing scrubber: show the dragged time live, seek on release.
   if (npSeek) {
-    npSeek.addEventListener("input", () => {
+    // A seek has to be DRAGGED, not tapped.
+    //
+    // A range input commits on a bare tap: touch it anywhere and the value
+    // jumps to that x and fires change. On a 14px strip running the full width
+    // of the screen, directly under the album title button, that turns a
+    // slightly-low tap into a jump to wherever along the track your finger
+    // happened to be — which is why the distance varied and was sometimes
+    // large. The press did something confident and wrong, and the position it
+    // chose had nothing to do with anything you meant.
+    //
+    // Requiring travel makes a brush a no-op instead. It is the same rule the
+    // widget's transport row now follows: a near-miss must do nothing, because
+    // for a control like this "nothing" is always recoverable and "something"
+    // may not be. Deliberate seeking is a drag anyway — nobody scrubs by
+    // tapping a fourteen-pixel bar — and the keyboard path is untouched, since
+    // it produces no pointer gesture to inspect.
+    const SEEK_SLOP_PX = 10;
+    let seekGesture = null;      // {x, dragged} while a finger is down
+    let seekFinished = null;     // true/false once it lifts; consumed by change
+
+    npSeek.addEventListener("pointerdown", (e) => {
+      seekGesture = { x: e.clientX, dragged: false };
+      // Hold the 4Hz painter for the whole gesture so it cannot fight the thumb.
       userIsDraggingSeek = true;
+    });
+    npSeek.addEventListener("pointermove", (e) => {
+      if (!seekGesture) return;
+      if (Math.abs(e.clientX - seekGesture.x) > SEEK_SLOP_PX) seekGesture.dragged = true;
+    });
+    const endSeekGesture = () => {
+      if (!seekGesture) return;
+      seekFinished = seekGesture.dragged;
+      seekGesture = null;
+    };
+    npSeek.addEventListener("pointerup", endSeekGesture);
+    npSeek.addEventListener("pointercancel", endSeekGesture);
+
+    npSeek.addEventListener("input", () => {
       npCur.textContent = fmtTime(parseFloat(npSeek.value));
       paintSeek(parseFloat(npSeek.value));
       paintBarProgress();
     });
+
     npSeek.addEventListener("change", () => {
-      const target = parseFloat(npSeek.value);
+      const byPointer = seekFinished !== null;
+      const dragged = seekFinished === true;
+      seekFinished = null;
       userIsDraggingSeek = false;
+
+      if (byPointer && !dragged) {
+        // A tap. Put the thumb back where the music actually is and send
+        // nothing at all.
+        const back = npNow();
+        npSeek.value = back;
+        npCur.textContent = fmtTime(back);
+        paintSeek(back);
+        paintBarProgress();
+        return;
+      }
+
+      const target = parseFloat(npSeek.value);
       seek(target);         // sets the base + hold synchronously, then posts
       paintSeek(target);
       paintBarProgress();   // the thumb and the mini bar's line must land together

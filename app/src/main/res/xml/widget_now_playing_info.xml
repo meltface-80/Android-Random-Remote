@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
+  minHeight is 64dp to leave room for a 48dp transport row. It was 40dp — the
+  exact height the buttons were squeezed to — and squeezing a transport control
+  below the platform's minimum target is how a tap aimed at play skips a track
+  instead.
+
   updatePeriodMillis is 0 on purpose. The platform's own widget refresh is
   capped at once every 30 minutes and would wake the app on a timer to ask
   whether anything changed — which is the polling this release removed. The
@@ -7,7 +12,7 @@
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="250dp"
-    android:minHeight="40dp"
+    android:minHeight="64dp"
     android:targetCellWidth="4"
     android:targetCellHeight="1"
     android:updatePeriodMillis="0"

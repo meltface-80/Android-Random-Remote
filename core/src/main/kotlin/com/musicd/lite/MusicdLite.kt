@@ -10,6 +10,7 @@ import com.musicd.lite.library.Albums
 import com.musicd.lite.library.LibraryView
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
+import com.musicd.lite.library.UserPlaylists
 import com.musicd.lite.meta.ImageCache
 import com.musicd.lite.meta.Metadata
 import com.musicd.lite.meta.Pitchfork
@@ -134,6 +135,9 @@ class MusicdLite(
         )
     }
     val radio = Radio(this)
+
+    /** Playlists you make yourself. Kept here; Roon cannot store them. */
+    val userPlaylists = UserPlaylists(store)
 
     private val jobs: ScheduledExecutorService =
         Executors.newScheduledThreadPool(2) { r ->

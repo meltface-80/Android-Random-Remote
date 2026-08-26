@@ -10,7 +10,7 @@
     android:layout_height="match_parent"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:padding="10dp"
+    android:padding="8dp"
     android:background="@drawable/widget_background">
 
     <!-- The cover doubles as the random-album button: the app's most-used
@@ -54,26 +54,54 @@
             android:text="Tap the duck for a random album" />
     </LinearLayout>
 
+    <!--
+      48dp targets with a gap between them, and the gap matters more than the
+      size does.
+
+      These were three 40dp buttons touching each other. 40dp is under the
+      platform minimum of 48dp, and with no gap the boundary between play/pause
+      and next sat 20dp — about 3mm — from the centre of a target smaller than
+      a fingertip. Aim at play, land on next, and the record skips: the press
+      does something confident and wrong, with nothing to suggest it was not
+      what you asked for.
+
+      The gap is what turns that into a miss instead. A tap that lands between
+      two buttons now does nothing at all, which is always the better failure
+      for a transport control — you press again, rather than hunting for the
+      track you were listening to.
+
+      The dial widget hit this in its own way and left the same note: its tap
+      cells were sized off a fixed grid, "tapping the microphone skipped a
+      track instead".
+    -->
     <ImageButton
         android:id="@+id/widget_previous"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="4dp"
+        android:padding="12dp"
+        android:scaleType="fitCenter"
         android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="Previous"
         android:src="@android:drawable/ic_media_previous" />
 
     <ImageButton
         android:id="@+id/widget_playpause"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="4dp"
+        android:padding="11dp"
+        android:scaleType="fitCenter"
         android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="Play or pause"
         android:src="@android:drawable/ic_media_play" />
 
     <ImageButton
         android:id="@+id/widget_next"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:padding="12dp"
+        android:scaleType="fitCenter"
         android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="Next"
         android:src="@android:drawable/ic_media_next" />

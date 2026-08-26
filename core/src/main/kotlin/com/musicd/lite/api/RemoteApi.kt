@@ -9,6 +9,7 @@ import com.musicd.lite.http.Request
 import com.musicd.lite.http.Response
 import com.musicd.lite.library.AlbumRecord
 import com.musicd.lite.library.Albums
+import com.musicd.lite.library.UserPlaylists
 import com.musicd.lite.library.LibraryView
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
@@ -50,6 +51,16 @@ class RemoteApi(
 
         /** Roon rejects a play of more albums than this in one go. */
         const val PLAY_MULTI_MAX = 400
+
+        /**
+         * How many albums one "add to playlist" may open.
+         *
+         * Each costs a browse walk on the Core to read its tracklist — the
+         * track route needs none, because the page already has the tracks on
+         * screen. Twenty is a generous multi-select and a bounded number of
+         * round trips.
+         */
+        const val ADD_ALBUMS_MAX = 20
 
         /** Distinguishes a blocked ARTIST from the album keys once stored. */
         const val BLOCKED_ARTIST_PREFIX = "artist:"
@@ -196,6 +207,14 @@ class RemoteApi(
             "/api/smart-picks/rebuild" -> requirePost(post) { Json.ok() }
 
             "/api/settings/home-rows" -> if (post) saveHomeRows(request) else homeRows()
+
+            "/api/user-playlists" ->
+                if (post) saveUserPlaylist(request) else userPlaylistList()
+            "/api/user-playlist" -> userPlaylistOne(request)
+            "/api/user-playlists/delete" -> requirePost(post) { deleteUserPlaylist(request) }
+            "/api/user-playlists/add" -> requirePost(post) { addTracksToPlaylist(request) }
+            "/api/user-playlists/add-albums" ->
+                requirePost(post) { addAlbumsToPlaylist(request) }
             "/api/settings/smart-picks" -> if (post) saveSmartPicks(request) else smartPickSettings()
             "/api/settings/labels" -> labelsSetting(post)
             "/api/settings/discogs-token" ->
@@ -1511,6 +1530,187 @@ class RemoteApi(
         return Json.ok(JSONObject().put("status", updater.apply { r -> app.background { r.run() } }))
     }
 
+    // ------------------------------------------------------ your own playlists
+
+    private fun userPlaylistList(): Response = Json.obj(
+        JSONObject().put(
+            "playlists",
+            Json.arrayOf(app.userPlaylists.all().map { it.summaryJson() })
+        )
+    )
+
+    private fun userPlaylistOne(request: Request): Response {
+        val id = request.str("id") ?: return Json.error(400, "id is required")
+        val p = app.userPlaylists.byId(id) ?: return Json.error(404, "No such playlist")
+        return Json.obj(p.fullJson())
+    }
+
+    /** Creates one, or renames an existing one when the body names an id. */
+    private fun saveUserPlaylist(request: Request): Response {
+        val body = Json.body(request)
+        return app.userPlaylists.save(
+            body.str("id").takeIf { it.isNotEmpty() },
+            body.str("name")
+        ).fold(
+            onSuccess = { list ->
+                Json.ok(
+                    JSONObject()
+                        .put("playlists", Json.arrayOf(list.map { it.summaryJson() }))
+                )
+            },
+            onFailure = { Json.error(errorStatus(it), it.message ?: "Couldn't save") }
+        )
+    }
+
+    private fun deleteUserPlaylist(request: Request): Response {
+        val id = Json.body(request).str("id")
+        if (id.isEmpty()) return Json.error(400, "id is required")
+        return app.userPlaylists.delete(id).fold(
+            onSuccess = { list ->
+                Json.ok(
+                    JSONObject()
+                        .put("playlists", Json.arrayOf(list.map { it.summaryJson() }))
+                )
+            },
+            onFailure = { Json.error(errorStatus(it), it.message ?: "Couldn't delete") }
+        )
+    }
+
+    /**
+     * Appends tracks the page already has in hand — from a tracklist on screen,
+     * so no Roon call is needed to find out what they are.
+     */
+    private fun addTracksToPlaylist(request: Request): Response {
+        val body = Json.body(request)
+        val arr = body.optJSONArray("tracks") ?: return Json.error(400, "tracks required")
+        if (arr.length() == 0) return Json.error(400, "tracks required")
+        if (arr.length() > UserPlaylists.MAX_ADD_AT_ONCE) {
+            return Json.error(400, "Too many at once — ${UserPlaylists.MAX_ADD_AT_ONCE} maximum")
+        }
+        val incoming = (0 until arr.length()).mapNotNull {
+            UserPlaylists.Track.parse(arr.optJSONObject(it))
+        }
+        val target = app.userPlaylists.resolveTarget(
+            body.str("id").takeIf { it.isNotEmpty() },
+            body.str("name").takeIf { it.isNotEmpty() }
+        ).getOrElse { return Json.error(errorStatus(it), it.message ?: "Couldn't add") }
+
+        return app.userPlaylists.addTracks(target.id, incoming).fold(
+            onSuccess = { (p, r) ->
+                Json.ok(
+                    JSONObject()
+                        .put("id", p.id).put("name", p.name)
+                        .put("track_total", p.tracks.size)
+                        .put("added", r.added)
+                        // Rows the page sent that could not be stored, PLUS any
+                        // that did not fit — the page reports one number.
+                        .put("skipped", r.skipped + (arr.length() - incoming.size))
+                        .put("full", r.full)
+                )
+            },
+            onFailure = { Json.error(errorStatus(it), it.message ?: "Couldn't add") }
+        )
+    }
+
+    /**
+     * Appends whole albums, which costs Roon calls that the track route does
+     * not: a stored entry names specific tracks, and only the Core knows what
+     * is on a record. Each album is opened to read its tracklist.
+     *
+     * Bounded and reported per album, because a partial success here is normal
+     * — one album may have moved since the grid was drawn — and reporting the
+     * whole call as failed would be a worse lie than naming the one that missed.
+     */
+    private fun addAlbumsToPlaylist(request: Request): Response {
+        val body = Json.body(request)
+        val arr = body.optJSONArray("albums") ?: return Json.error(400, "albums required")
+        if (arr.length() == 0) return Json.error(400, "albums required")
+        if (arr.length() > ADD_ALBUMS_MAX) {
+            return Json.error(400, "Too many albums at once — $ADD_ALBUMS_MAX maximum")
+        }
+        val target = app.userPlaylists.resolveTarget(
+            body.str("id").takeIf { it.isNotEmpty() },
+            body.str("name").takeIf { it.isNotEmpty() }
+        ).getOrElse { return Json.error(errorStatus(it), it.message ?: "Couldn't add") }
+
+        // The page reads a COUNT of albums read and a LIST OF NAMES that could
+        // not be — checked against app.js rather than invented here, which is
+        // where eleven wire bugs in this project came from. A count of failures
+        // would be useless: knowing WHICH record Roon would not open is the
+        // only way to do anything about it.
+        val failed = JSONArray()
+        var albumsRead = 0
+        var addedTotal = 0
+        var skippedTotal = 0
+        var full = false
+        for (i in 0 until arr.length()) {
+            val a = arr.optJSONObject(i) ?: continue
+            val offset = a.optInt("offset", -1)
+            val title = a.str("title")
+            if (offset < 0) {
+                failed.put(title.ifEmpty { "an album" })
+                continue
+            }
+            // Once it is full there is nothing to be gained by opening the
+            // rest, and each one is a browse walk.
+            if (full) {
+                failed.put(title.ifEmpty { "an album" })
+                continue
+            }
+            val opened = runCatching {
+                app.albums.open(
+                    offset, null, null, null,
+                    Albums.Expect(title.takeIf { it.isNotEmpty() }, a.str("subtitle").takeIf { it.isNotEmpty() })
+                )
+            }.getOrElse {
+                failed.put(title.ifEmpty { "an album" })
+                continue
+            }
+            val tracks = opened.tracks.mapIndexedNotNull { idx, t ->
+                UserPlaylists.Track.parse(
+                    JSONObject()
+                        .put("title", t.title)
+                        .put("subtitle", t.subtitle)
+                        .put("album_title", opened.title)
+                        .put("album_subtitle", opened.subtitle)
+                        .put("album_offset", offset)
+                        .put("track_index", idx)
+                        .put("image_key", opened.imageKey ?: JSONObject.NULL)
+                )
+            }
+            val r = app.userPlaylists.addTracks(target.id, tracks)
+                .getOrElse {
+                    return Json.error(errorStatus(it), it.message ?: "Couldn't add")
+                }
+            addedTotal += r.second.added
+            skippedTotal += r.second.skipped
+            if (r.second.full) full = true
+            // Read means it contributed. An album opened successfully that
+            // turned out to have nothing storable on it has not been read in
+            // any sense the message means.
+            if (r.second.added > 0) albumsRead++
+            else failed.put(opened.title.ifEmpty { title.ifEmpty { "an album" } })
+        }
+
+        val p = app.userPlaylists.byId(target.id)
+        return Json.ok(
+            JSONObject()
+                .put("id", target.id).put("name", target.name)
+                .put("track_total", p?.tracks?.size ?: 0)
+                .put("added", addedTotal)
+                .put("skipped", skippedTotal)
+                .put("full", full)
+                .put("albums_read", albumsRead)
+                .put("albums_failed", failed)
+        )
+    }
+
+    /** A refusal's shape decides its status; the message is the model's. */
+    private fun errorStatus(e: Throwable): Int = when (e) {
+        is NoSuchElementException -> 404
+        else -> 400
+    }
+
     // ----------------------------------------------------- not in this build
 
     /**
@@ -1563,9 +1763,8 @@ class RemoteApi(
         // Playlists, sharing and saved lists are not in this build yet. Empty
         // collections keep their screens at "nothing here" rather than an error.
         path == "/api/playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
-        path == "/api/user-playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
         path == "/api/smart-playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
-        path.startsWith("/api/playlist") || path.startsWith("/api/user-playlist") ||
+        path.startsWith("/api/playlist") ||
             path.startsWith("/api/smart-playlist") || path.startsWith("/api/share") ->
             Json.error(501, "Playlists and sharing aren't in the lite build yet.")
 
