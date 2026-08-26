@@ -1,4 +1,12 @@
+<div align="center">
+
+<img width="1536" height="1024" alt="MusicD" src="https://github.com/user-attachments/assets/fc1dd26e-db7f-4e27-8f66-b0ab74db89e3" />
+
+</div>
+
 # MusicD Remote Lite (Android)
+
+**📱 Download & install guide: [meltface-80.github.io/Android-Random-Remote](https://meltface-80.github.io/Android-Random-Remote/)**
 
 A native Android APK of [MusicD Remote for Roon](https://github.com/meltface-80/MusicD-Remote),
 with the same interface and no server behind it. It registers itself as a Roon

@@ -197,7 +197,14 @@ jobs:
           # too, and a label that disagrees with what it downloads is worse
           # than no label.
           sed -i -E "s#musicd-remote-lite-[0-9][0-9A-Za-z._-]*\.apk#$APK#g" README.md
-          git add "dist/$APK" dist/latest.json README.md
+          # The Pages site reads dist/latest.json at load time, but its baked-in
+          # link and version are what a visitor sees if that fetch fails. Keep
+          # them current here for the same reason the README's link is: a
+          # fallback nobody maintains eventually points at a version that no
+          # longer exists.
+          sed -i -E "s#musicd-remote-lite-[0-9][0-9A-Za-z._-]*\.apk#$APK#g" docs/index.html
+          sed -i -E "s#>v[0-9]+\.[0-9]+\.[0-9]+</span>#>v${version}</span>#" docs/index.html
+          git add "dist/$APK" dist/latest.json README.md docs/index.html
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Publish $APK" -m "Built from ${GITHUB_SHA}."
