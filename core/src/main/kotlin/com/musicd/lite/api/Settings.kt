@@ -1,6 +1,7 @@
 package com.musicd.lite.api
 
 import com.musicd.lite.str
+import com.musicd.lite.strOrNull
 import com.musicd.lite.store.Store
 import org.json.JSONArray
 import org.json.JSONObject
@@ -95,6 +96,22 @@ class Settings(private val store: Store) {
     fun homeRowUnavailable(id: String): String? = when {
         id == "picks" && !smartPicksEnabled() -> "Smart Picks is off in Settings"
         else -> null
+    }
+
+    // ------------------------------------------------------------- last zone
+
+    /**
+     * The zone the user is currently looking at.
+     *
+     * Nothing needed this while the only client was the page, which keeps its
+     * own selection. The notification and the media session are outside the
+     * page and have to be told which zone they are about.
+     */
+    fun lastZone(): String? = doc(KEY_LAST_ZONE).strOrNull("zone")
+
+    fun saveLastZone(zoneId: String) {
+        if (zoneId.isBlank() || zoneId == lastZone()) return
+        save(KEY_LAST_ZONE, JSONObject().put("zone", zoneId))
     }
 
     // ----------------------------------------------------------- smart picks

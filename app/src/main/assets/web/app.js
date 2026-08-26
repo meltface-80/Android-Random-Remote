@@ -7539,13 +7539,21 @@
     } catch (e) {} // corrupt localStorage — transport bar stays hidden, no action needed
   }
 
-  async function fetchState() {
+  // The revision the server last answered with. Handing it back asks the
+  // server to hold the request open until that number moves, instead of
+  // answering "nothing changed" forty times a minute.
+  let zoneRevision = null;
+
+  async function fetchState(opts) {
     const zid = selectedZoneId();
     if (!zid) return;  // zone not selected yet — leave bar as-is
     try {
-      const r = await fetch("/api/zone-state?zone=" + encodeURIComponent(zid), { cache: "no-store" });
+      let url = "/api/zone-state?zone=" + encodeURIComponent(zid);
+      if (opts && opts.wait && zoneRevision !== null) url += "&wait_for=" + zoneRevision;
+      const r = await fetch(url, { cache: "no-store", signal: opts && opts.signal });
       if (!r.ok) return;  // server/network error — keep current state
       const j = await r.json();
+      if (typeof j.revision === "number") zoneRevision = j.revision;
       renderZone(j.zone);
       saveTransportState(j.zone);
     } catch (e) {
@@ -8300,14 +8308,54 @@
   if (npStepMinus) npStepMinus.addEventListener("click", (e) => { e.stopPropagation(); stepVolume(-1); });
   if (npStepPlus)  npStepPlus .addEventListener("click", (e) => { e.stopPropagation(); stepVolume(+1); });
 
-  // Polling: 1.5s when visible/playing, slower when not
+  // Waiting, not polling.
+  //
+  // Roon pushes zone changes to this app the moment they happen. This used to
+  // ask over HTTP every 1.5 seconds regardless — 2,400 requests an hour to be
+  // told nothing had changed, and up to 1.5s of lag on every play, pause and
+  // skip. Now each request carries the revision last seen and the server holds
+  // it open until that number moves, so the answer arrives when Roon speaks.
+  //
+  // The progress bar is unaffected: seek positions deliberately do not wake a
+  // waiting request (they would arrive once a second and undo the whole point),
+  // the page interpolates between updates as it always has, and the server's
+  // 20-second cap resynchronises it long before drift is visible.
+  let pollAbort = null;
+  let pollBackoff = 0;
+
+  async function pollLoop() {
+    while (pollTimer) {
+      pollAbort = new AbortController();
+      const before = Date.now();
+      try {
+        await fetchState({ wait: true, signal: pollAbort.signal });
+        pollBackoff = 0;
+      } catch (e) {
+        if (!pollTimer) return;                 // stopped while in flight
+        // A failed request must not spin: back off to a second, then four.
+        pollBackoff = Math.min(pollBackoff ? pollBackoff * 2 : 1000, 4000);
+      }
+      if (!pollTimer) return;
+      // A server that answers instantly and repeatedly — an older build with
+      // no wait support, or a zone changing constantly — would become a hot
+      // loop without this floor.
+      const elapsed = Date.now() - before;
+      const pause = pollBackoff || (elapsed < 250 ? 250 : 0);
+      if (pause) await new Promise(r => setTimeout(r, pause));
+    }
+  }
+
   function startPolling() {
     if (pollTimer) return;
-    fetchState();
-    pollTimer = setInterval(fetchState, 1500);
+    pollTimer = true;          // a flag now, not a timer id: the loop owns its own pacing
+    fetchState();              // paint immediately from the current state
+    pollLoop();
   }
   function stopPolling() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (!pollTimer) return;
+    pollTimer = false;
+    // Hang up rather than leave a 20-second request open on a backgrounded page.
+    if (pollAbort) { try { pollAbort.abort(); } catch (e) {} pollAbort = null; }
   }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { stopPolling(); return; }

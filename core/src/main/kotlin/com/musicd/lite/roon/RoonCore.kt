@@ -120,6 +120,11 @@ class RoonCore(
         listeners.add(listener)
     }
 
+    override val zoneRevision: Long get() = zoneStore.version
+
+    override fun awaitZoneChange(since: Long, timeoutMs: Long): Long =
+        zoneStore.awaitChange(since, timeoutMs)
+
     override fun zones(): List<Zone> = zoneStore.all()
     override fun zone(id: String?): Zone? = zoneStore.byId(id)
 

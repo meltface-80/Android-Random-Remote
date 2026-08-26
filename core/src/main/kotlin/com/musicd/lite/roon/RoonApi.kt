@@ -47,6 +47,20 @@ interface RoonApi {
     fun outputs(): List<Output>
     fun queue(zoneId: String, count: Int = 100, timeoutMs: Long = 5_000): List<QueueItem>
 
+    /**
+     * A counter that moves when the zone feed changes materially.
+     *
+     * Roon pushes zone changes to this app the instant they happen, but the
+     * front-end used to ask over HTTP every 1.5 seconds regardless. These two
+     * let it wait instead: hold the revision it last saw, ask to be told when
+     * that number moves, and get an answer the moment Roon says something —
+     * or when the wait times out, whichever comes first.
+     */
+    val zoneRevision: Long
+
+    /** Blocks until [zoneRevision] passes [since], or [timeoutMs] elapses. */
+    fun awaitZoneChange(since: Long, timeoutMs: Long): Long
+
     fun control(zoneOrOutputId: String, command: String)
     fun seek(zoneOrOutputId: String, how: String, seconds: Int)
     fun changeVolume(outputId: String, how: String, value: Double)

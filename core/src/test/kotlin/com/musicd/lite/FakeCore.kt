@@ -67,6 +67,31 @@ class FakeCore(
 
     override val tree = BrowseTree(this)
 
+    /**
+     * The real waiting mechanism, not a stub — a fake that returned instantly
+     * would let a long poll that never blocks pass its own test.
+     */
+    private val zoneLock = Object()
+    private var zoneRev = 0L
+
+    override val zoneRevision: Long get() = synchronized(zoneLock) { zoneRev }
+
+    override fun awaitZoneChange(since: Long, timeoutMs: Long): Long = synchronized(zoneLock) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (zoneRev <= since) {
+            val left = deadline - System.currentTimeMillis()
+            if (left <= 0) break
+            (zoneLock as Object).wait(left)
+        }
+        zoneRev
+    }
+
+    /** What a test calls to stand in for Roon pushing a change. */
+    fun bumpZones() = synchronized(zoneLock) {
+        zoneRev++
+        (zoneLock as Object).notifyAll()
+    }
+
     override fun zones(): List<Zone> = zonesList
     override fun zone(id: String?): Zone? = zonesList.firstOrNull { it.zoneId == id }
     override fun outputs(): List<Output> = outputsList
@@ -120,8 +145,14 @@ class FakeCore(
         calls += "pauseall"
     }
 
-    override fun imageUrl(imageKey: String, width: Int, height: Int, scale: String): String? =
-        if (!paired) null else "http://fake-core:9330/api/image/$imageKey?w=$width&h=$height&s=$scale"
+    override fun imageUrl(imageKey: String, width: Int, height: Int, scale: String): String? {
+        // Recorded so a test can see the size actually asked of the Core. The
+        // fetch that follows cannot succeed against a fake host, but the size
+        // is decided before it and that is the part worth pinning.
+        calls += "image:$imageKey:${width}x$height"
+        return if (!paired) null
+        else "http://fake-core:9330/api/image/$imageKey?w=$width&h=$height&s=$scale"
+    }
 
     // ------------------------------------------------------------ BrowseApi
 

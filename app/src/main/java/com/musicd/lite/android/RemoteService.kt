@@ -39,6 +39,15 @@ class RemoteService : Service() {
         private const val NOTIFICATION_ID = 1
 
         /**
+         * Transport actions the notification's own buttons send back here.
+         * A media button pressed on a headset reaches the session directly;
+         * these are for the buttons drawn in the shade.
+         */
+        const val ACTION_PLAY_PAUSE = "com.musicd.lite.PLAY_PAUSE"
+        const val ACTION_NEXT = "com.musicd.lite.NEXT"
+        const val ACTION_PREVIOUS = "com.musicd.lite.PREVIOUS"
+
+        /**
          * The running instance, so the Activity can find the local server's
          * port. A bound service would be the tidier shape, but the Activity
          * needs this before it can render anything at all, and binding is
@@ -56,6 +65,11 @@ class RemoteService : Service() {
 
     private var multicastLock: WifiManager.MulticastLock? = null
     private var store: Store? = null
+    private var nowPlaying: NowPlayingSession? = null
+
+    /** Stops the zone watcher when the service goes away. */
+    @Volatile
+    private var watching = false
 
     override fun onCreate() {
         super.onCreate()
@@ -112,17 +126,79 @@ class RemoteService : Service() {
         lite.start()
         app = lite
         AndroidLog.i(TAG, "serving the UI on ${lite.rootUrl}")
+
+        // The media session is a bonus, never a dependency: if it cannot be
+        // built the app still serves the UI and stays paired with Roon, which
+        // is its actual job.
+        runCatching {
+            nowPlaying = NowPlayingSession(this, lite) { refreshNotification() }
+                .takeIf { it.start() }
+            if (nowPlaying != null) startZoneWatch(lite)
+        }.onFailure { AndroidLog.w(TAG, "media session unavailable", it) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_PLAY_PAUSE -> nowPlaying?.command("playpause")
+            ACTION_NEXT -> nowPlaying?.command("next")
+            ACTION_PREVIOUS -> nowPlaying?.command("previous")
+        }
         // Restarted by the system after being killed: come back up and re-pair.
         return START_STICKY
+    }
+
+    /**
+     * Follows the zone the user is watching and keeps the session on it.
+     *
+     * This rides the same waiting primitive the front-end now uses: block until
+     * Roon says something, act, block again. A timer would have to pick between
+     * being slow and being wasteful; this is neither.
+     */
+    private fun startZoneWatch(lite: MusicdLite) {
+        watching = true
+        Thread({
+            var seen = -1L
+            while (watching) {
+                try {
+                    seen = lite.roon.awaitZoneChange(seen, 20_000)
+                    if (!watching) return@Thread
+                    refreshNotification()
+                } catch (e: Exception) {
+                    AndroidLog.d(TAG, "zone watch hiccup: ${e.message}")
+                    Thread.sleep(2_000)
+                }
+            }
+        }, "zone-watch").apply { isDaemon = true }.start()
+    }
+
+    /** The zone the session and the notification are about. */
+    private fun currentZone() = app?.let { lite ->
+        runCatching {
+            lite.roon.zone(lite.settings.lastZone())
+                ?: lite.roon.zones().firstOrNull { it.isPlaying }
+                ?: lite.roon.zones().firstOrNull()
+        }.getOrNull()
+    }
+
+    private fun refreshNotification() {
+        runCatching {
+            val zone = currentZone()
+            nowPlaying?.update(zone)
+            val status = app?.roon?.status
+            notify(
+                status?.let { statusTitle(it) } ?: "MusicD Remote Lite",
+                status?.detail ?: ""
+            )
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         instance = null
+        watching = false
+        runCatching { nowPlaying?.stop() }
+        nowPlaying = null
         app?.stop()
         app = null
         runCatching { store?.close() }
@@ -138,17 +214,26 @@ class RemoteService : Service() {
      * extension in Roon, and that instruction has to be somewhere they will see
      * it even if the app is in the background.
      */
+    /** Shared by the status listener and the zone watcher. */
+    private fun statusTitle(status: RoonStatus): String = when (status.stage) {
+        RoonStage.PAIRED -> status.coreName ?: "Paired with Roon"
+        RoonStage.AWAITING_APPROVAL -> "Waiting for approval in Roon"
+        RoonStage.DISCOVERING -> "Looking for a Roon Core"
+        RoonStage.CONNECTING -> "Connecting…"
+        RoonStage.ERROR -> "Not connected"
+        RoonStage.IDLE -> "Idle"
+    }
+
     private inner class StatusWatcher : RoonApi.Listener {
         override fun onStatusChanged(status: RoonStatus) {
-            val title = when (status.stage) {
-                RoonStage.PAIRED -> status.coreName ?: "Paired with Roon"
-                RoonStage.AWAITING_APPROVAL -> "Waiting for approval in Roon"
-                RoonStage.DISCOVERING -> "Looking for a Roon Core"
-                RoonStage.CONNECTING -> "Connecting…"
-                RoonStage.ERROR -> "Not connected"
-                RoonStage.IDLE -> "Idle"
+            // Pairing news replaces the whole notification; while paired the
+            // zone watcher owns it, so the now-playing detail is not thrown
+            // away every time the Core reports the same state again.
+            if (status.stage == RoonStage.PAIRED && nowPlaying != null) {
+                refreshNotification()
+            } else {
+                notify(statusTitle(status), status.detail ?: "")
             }
-            notify(title, status.detail ?: "")
         }
     }
 
@@ -169,14 +254,24 @@ class RemoteService : Service() {
                 .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE
         )
-        return Notification.Builder(this, CHANNEL_ID)
+        val builder = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(open)
             .setOngoing(true)
-            .build()
+
+        // With a media session and a paired Core, this becomes the now-playing
+        // notification: artwork, the track, and transport that works from the
+        // lock screen. Without either it stays the plain status line it was.
+        val session = nowPlaying
+        val zone = if (session == null) null else currentZone()
+        if (session != null && zone != null) {
+            session.actions().forEach { builder.addAction(it) }
+            return session.decorate(builder, zone).build()
+        }
+        return builder.build()
     }
 
     private fun notify(title: String, text: String) {

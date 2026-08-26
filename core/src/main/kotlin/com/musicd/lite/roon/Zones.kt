@@ -247,9 +247,51 @@ data class Zone(
  * clobber anything else.
  */
 class ZoneStore {
+    /**
+     * Guards [zones] and [revision], and is what a waiter blocks on.
+     *
+     * This feed is written by the MOO socket thread and read by every HTTP
+     * worker, which was an unguarded LinkedHashMap across threads. The lock
+     * was needed anyway; the waiting is what it was added for.
+     */
+    private val lock = Object()
     private val zones = LinkedHashMap<String, Zone>()
+    private var revision = 0L
 
-    fun applySubscribed(body: JSONObject) {
+    /**
+     * Bumped when something MATERIAL changes — a zone appears, disappears,
+     * starts, stops, or moves to another track.
+     *
+     * Deliberately NOT bumped by a seek-position update. Roon sends one of
+     * those roughly every second for every playing zone, so waking a waiting
+     * client on them would turn a long poll straight back into a 1 Hz poll.
+     * The page interpolates the progress bar between updates and resynchronises
+     * whenever a wait times out, which is far more often than the drift matters.
+     */
+    val version: Long get() = synchronized(lock) { revision }
+
+    /**
+     * Blocks until [version] moves past [since], then returns it. Returns the
+     * current version immediately if it has already moved, and after
+     * [timeoutMs] if nothing happens.
+     */
+    fun awaitChange(since: Long, timeoutMs: Long): Long = synchronized(lock) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (revision <= since) {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) break
+            // A spurious wakeup returns to the loop condition, not out of it.
+            (lock as Object).wait(remaining)
+        }
+        revision
+    }
+
+    private fun bump() {
+        revision++
+        (lock as Object).notifyAll()
+    }
+
+    fun applySubscribed(body: JSONObject) = synchronized(lock) {
         zones.clear()
         body.optJSONArray("zones")?.let { arr ->
             for (i in 0 until arr.length()) {
@@ -257,23 +299,28 @@ class ZoneStore {
                 zones[z.zoneId] = z
             }
         }
+        bump()
     }
 
-    fun applyChanged(body: JSONObject) {
+    fun applyChanged(body: JSONObject) = synchronized(lock) {
+        var material = false
         body.optJSONArray("zones_removed")?.let { arr ->
             for (i in 0 until arr.length()) zones.remove(arr.getString(i))
+            if (arr.length() > 0) material = true
         }
         body.optJSONArray("zones_added")?.let { arr ->
             for (i in 0 until arr.length()) {
                 val z = Zone.parse(arr.getJSONObject(i))
                 zones[z.zoneId] = z
             }
+            if (arr.length() > 0) material = true
         }
         body.optJSONArray("zones_changed")?.let { arr ->
             for (i in 0 until arr.length()) {
                 val z = Zone.parse(arr.getJSONObject(i))
                 zones[z.zoneId] = z
             }
+            if (arr.length() > 0) material = true
         }
         body.optJSONArray("zones_seek_changed")?.let { arr ->
             for (i in 0 until arr.length()) {
@@ -284,14 +331,22 @@ class ZoneStore {
                 val pos = e.optInt("seek_position", -1).takeIf { it >= 0 } ?: continue
                 zones[zoneId] = existing.copy(nowPlaying = np.copy(seekPosition = pos))
             }
+            // No bump: see [version]. A ticking clock is not news.
         }
+        if (material) bump()
     }
 
-    fun clear() = zones.clear()
+    fun clear() = synchronized(lock) {
+        zones.clear()
+        bump()
+    }
 
-    fun all(): List<Zone> = zones.values.sortedBy { it.displayName.lowercase() }
+    fun all(): List<Zone> = synchronized(lock) {
+        zones.values.sortedBy { it.displayName.lowercase() }
+    }
 
-    fun byId(id: String?): Zone? = if (id == null) null else zones[id]
+    fun byId(id: String?): Zone? =
+        if (id == null) null else synchronized(lock) { zones[id] }
 }
 
 /**

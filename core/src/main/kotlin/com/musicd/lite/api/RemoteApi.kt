@@ -54,6 +54,15 @@ class RemoteApi(
         /** Distinguishes a blocked ARTIST from the album keys once stored. */
         const val BLOCKED_ARTIST_PREFIX = "artist:"
 
+        /**
+         * How long a zone-state request may wait for news. Comfortably inside
+         * the HTTP read timeout, so a quiet system answers rather than hangs
+         * up, and short enough that an interpolated progress bar resynchronises
+         * before anyone could notice it drifting.
+         */
+        const val ZONE_WAIT_MS = 20_000
+        const val ZONE_WAIT_MAX_MS = 25_000
+
         /** Said to anything still asking for a streaming route. */
         const val STREAMING_UNAVAILABLE =
             "%s isn't in this build. Roon streams it through its own account anyway."
@@ -270,9 +279,43 @@ class RemoteApi(
         return Json.obj(JSONObject().put("outputs", Json.arrayOf(list)))
     }
 
+    /**
+     * Zone state, optionally waited for rather than asked for.
+     *
+     * With no `wait_for` this answers immediately, as it always has. With one,
+     * it blocks until the zone feed moves past that revision — so the page can
+     * hold a request open and be answered the instant Roon says something,
+     * instead of asking forty times a minute to be told nothing changed.
+     *
+     * The wait is capped well under the socket's own read timeout, so a quiet
+     * system returns a normal response rather than dropping the connection. The
+     * cap doubles as a resynchronisation: seek positions deliberately do not
+     * wake a waiter, and this is what stops the page's interpolated progress
+     * bar drifting for longer than that.
+     */
     private fun zoneState(request: Request): Response {
         if (!roon.isPaired) return Json.error(503, "Not paired with a Roon Core")
+
+        val waitFor = request.str("wait_for")?.toLongOrNull()
+        if (waitFor != null) {
+            val timeout = (request.int("timeout") ?: ZONE_WAIT_MS).coerceIn(0, ZONE_WAIT_MAX_MS)
+            runCatching { roon.awaitZoneChange(waitFor, timeout.toLong()) }
+        }
+
+        // Read BEFORE snapshotting the zone, and this order is the whole
+        // correctness of the scheme. A change landing between the two reads
+        // then leaves the client holding a revision OLDER than its data, so its
+        // next wait returns at once and it catches up. Reading it afterwards
+        // would hand back a revision NEWER than the data — and the client would
+        // wait on a change it had already been given a number for, and sleep
+        // through it.
+        val revision = roon.zoneRevision
         val zone = roon.zone(request.str("zone"))
+        // Remember what the page is watching. The notification and the media
+        // session live outside the page and have no other way to know which
+        // zone the user means. saveLastZone ignores an unchanged value, so this
+        // does not write on every request.
+        zone?.let { runCatching { settings.saveLastZone(it.zoneId) } }
             ?: return Json.obj(JSONObject().put("zone", JSONObject.NULL))
         val np = zone.nowPlaying
 
@@ -294,7 +337,12 @@ class RemoteApi(
             .put("seek_position", np.seekPosition ?: JSONObject.NULL)
 
         return Json.obj(
-            JSONObject().put(
+            JSONObject()
+            // What to wait on next. Read AFTER the zone is snapshotted, so a
+            // change landing mid-request is never lost: the client would wait
+            // on a revision it has not actually seen and sleep through it.
+            .put("revision", revision)
+            .put(
                 "zone",
                 JSONObject()
                     .put("zone_id", zone.zoneId)
@@ -1419,8 +1467,14 @@ class RemoteApi(
     private fun image(request: Request, rawKey: String): Response {
         val key = rawKey.substringBefore('?')
         if (key.isEmpty()) return Json.error(400, "image key is required")
-        val width = (request.int("width") ?: request.int("w") ?: 512).coerceIn(32, 2048)
-        val height = (request.int("height") ?: request.int("h") ?: width).coerceIn(32, 2048)
+        // `size` is what the page actually sends — every art URL it builds uses
+        // it, for square art, from an 80px queue thumbnail to a 1000px share
+        // card. Reading only width/w meant all of them were served at the 512
+        // default: a queue row was fetching forty times the pixels it drew,
+        // then holding them in the cache and decoding them in the WebView.
+        val size = request.int("size")
+        val width = (size ?: request.int("width") ?: request.int("w") ?: 512).coerceIn(32, 2048)
+        val height = (size ?: request.int("height") ?: request.int("h") ?: width).coerceIn(32, 2048)
         val scale = request.str("scale")?.takeIf { it in setOf("fit", "fill", "stretch") } ?: "fit"
 
         val url = roon.imageUrl(key, width, height, scale)
