@@ -460,10 +460,13 @@
            top of the panel so each album tints its own detail view (decorative
            only — hidden from AT, never intercepts taps). -->
       <img id="modal-ambient" class="modal-ambient hidden" alt="" aria-hidden="true">
-      <button class="modal-close icon-btn" data-close aria-label="Close">
+      <!-- A back chevron rather than an ×: this panel is somewhere you came
+           FROM the grid, so leaving it goes back rather than dismissing
+           something. It still closes the modal — data-close is unchanged. -->
+      <button class="modal-close icon-btn" data-close aria-label="Back" title="Back">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M18 6 6 18M6 6l12 12"/>
+          <polyline points="15 18 9 12 15 6"/>
         </svg>
       </button>
       <!-- Now-playing mode only (CSS-gated): top-left Home button — the ×

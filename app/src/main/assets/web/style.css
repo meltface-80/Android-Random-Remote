@@ -1067,10 +1067,10 @@ main {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Modal share button (top-right, beside the close)                   */
+/*  Modal share button (top-left; Back holds the top-right corner)     */
 /* ------------------------------------------------------------------ */
 .modal-share {
-  position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 60px; z-index: 2;
+  position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; z-index: 2;
 }
 /* ------------------------------------------------------------------ */
 /*  Mini transport (sticky now-playing bar)                            */
@@ -1428,11 +1428,13 @@ main {
 }
 .modal.np-mode .modal-tabs { margin-top: 0; }
 
-/* Corner buttons in np-mode: no × — the top-left Home button leaves the
-   screen (to Home), and Share moves into the ×'s top-right spot. */
+/* Corner buttons in np-mode: no Back — the top-left Home button leaves the
+   screen (to Home), so Share gives up the left corner and takes the right one.
+   `left: auto` is load-bearing: without it Share keeps the left offset it has
+   everywhere else and lands on top of Home. */
 .modal-home { display: none; }
 .modal.np-mode .modal-close { display: none; }
-.modal.np-mode .modal-share { right: 12px; }
+.modal.np-mode .modal-share { left: auto; right: 12px; }
 .modal.np-mode .modal-home {
   display: inline-flex;
   position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; z-index: 2;
