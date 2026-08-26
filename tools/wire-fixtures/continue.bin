@@ -1,6 +1,0 @@
-MOO/1 CONTINUE Changed
-Request-Id: 12
-Content-Length: 54
-Content-Type: application/json
-
-{"zones_changed":[{"zone_id":"16","state":"playing"}]}

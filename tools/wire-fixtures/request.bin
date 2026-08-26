@@ -1,6 +1,0 @@
-MOO/1 REQUEST com.roonlabs.transport:2/change_volume
-Request-Id: 7
-Content-Length: 52
-Content-Type: application/json
-
-{"output_id":"1701","how":"relative_step","value":1}
