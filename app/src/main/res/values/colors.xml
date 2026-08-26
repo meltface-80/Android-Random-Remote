@@ -3,5 +3,8 @@
     <!-- The front-end's own background, so the window never flashes a
          different colour behind the page while it loads. -->
     <color name="app_background">#FF0E1012</color>
-    <color name="icon_background">#FF101418</color>
+    <!-- The duck is white line art drawn on black; the adaptive icon
+         keeps that ground so the launcher shape crops into black, not into a
+         near-black that reads as a printing error next to it. -->
+    <color name="icon_background">#FF000000</color>
 </resources>
