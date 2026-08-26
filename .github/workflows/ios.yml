@@ -1,0 +1,128 @@
+name: iOS
+
+# Builds the sideloadable app. Separate from the Android workflow because it
+# needs a macOS runner: Apple's toolchain does not exist anywhere else, which is
+# also why none of this can be checked before it is pushed.
+#
+# The .ipa is unsigned on purpose. AltStore, SideStore and Sideloadly all strip
+# whatever signature is present and re-sign with your own Apple ID, so a
+# signature here would be thrown away — and pretending to have a certificate
+# would mean holding one in CI secrets for no gain.
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - "app/src/main/assets/web/**"
+      - "tools/wire-fixtures/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - "app/src/main/assets/web/**"
+      - "tools/wire-fixtures/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Unsigned .ipa
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # The .xcodeproj is generated rather than committed: a pbxproj is UUIDs
+      # all the way down, so it neither reviews nor merges. ios/project.yml is
+      # the real project file.
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen xcbeautify
+          cd ios && xcodegen generate
+
+      # Whatever this runner image actually has. Naming a device model here is
+      # how an iOS workflow breaks months later for no reason anyone changed.
+      - name: Pick a simulator
+        id: sim
+        run: |
+          NAME=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; \
+                print(next(x['name'] for k in sorted(d, reverse=True) for x in d[k] \
+                if 'iPhone' in x['name']))")
+          echo "Using $NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      # The Swift MOO implementation is held to tools/wire-fixtures, the same
+      # committed frames the Kotlin client asserts against and verify-wire.js
+      # feeds to RoonLabs' own moo.js. Three implementations, one set of bytes.
+      - name: Test
+        run: |
+          set -o pipefail
+          cd ios
+          xcodebuild test \
+            -project MusicDRemote.xcodeproj \
+            -scheme MusicDRemote \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Build for a device
+        run: |
+          set -o pipefail
+          cd ios
+          xcodebuild archive \
+            -project MusicDRemote.xcodeproj \
+            -scheme MusicDRemote \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/MusicDRemote.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            | xcbeautify --renderer github-actions
+
+      # An .ipa is a zip with the .app inside a Payload directory. There is no
+      # xcodebuild step that makes an unsigned one — export requires a signing
+      # identity — so it is assembled by hand, which is all the export would
+      # have done.
+      - name: Package the .ipa
+        id: package
+        run: |
+          cd ios
+          APP="build/MusicDRemote.xcarchive/Products/Applications/MusicDRemote.app"
+          test -d "$APP" || { echo "no .app in the archive"; exit 1; }
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
+          rm -rf build/Payload && mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          (cd build && zip -qry "musicd-remote-$VERSION.ipa" Payload)
+          echo "ipa=musicd-remote-$VERSION.ipa" >> "$GITHUB_OUTPUT"
+          ls -lh "build/musicd-remote-$VERSION.ipa"
+
+      # Confirms what actually shipped rather than that a file exists: the
+      # binary is arm64 for a device (not a simulator build, which installs on
+      # nothing), and the front-end really is inside the bundle.
+      - name: Check the bundle
+        run: |
+          cd ios
+          APP="build/MusicDRemote.xcarchive/Products/Applications/MusicDRemote.app"
+          echo "--- architectures"
+          lipo -info "$APP/MusicDRemote"
+          lipo -info "$APP/MusicDRemote" | grep -q arm64 || { echo "not an arm64 device build"; exit 1; }
+          echo "--- the bundled front-end"
+          test -f "$APP/web/index.html" || { echo "index.html is not in the bundle"; exit 1; }
+          test -f "$APP/web/app.js" || { echo "app.js is not in the bundle"; exit 1; }
+          du -sh "$APP/web"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.ipa }}
+          path: ios/build/${{ steps.package.outputs.ipa }}
+          if-no-files-found: error

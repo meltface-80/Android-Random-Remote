@@ -4,6 +4,7 @@ import com.musicd.lite.roon.Moo
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -14,10 +15,43 @@ import java.io.File
  * are also written to build/moo-samples so `tools/verify-wire.js` can feed them
  * to node-roon-api's own moo.js — the framing is then checked against Roon's
  * reference implementation rather than against one reading of it.
+ *
+ * They are additionally checked against the committed bytes in
+ * tools/wire-fixtures. That directory is the shared contract between three
+ * implementations of this protocol: this one, RoonLabs' own moo.js, and the
+ * Swift client in ios/. A second implementation of a wire format is normally a
+ * slow drift into disagreement; holding all of them to the same committed
+ * bytes is what makes it safe to have one.
  */
 class MooTest {
 
     private val samples = File("build/moo-samples").apply { mkdirs() }
+
+    /** Where the shared, committed fixtures live, from :core's project dir. */
+    private val fixtures = File("../tools/wire-fixtures")
+
+    /**
+     * Fails when [bytes] is not exactly what is committed.
+     *
+     * Deliberately not "write it if it is missing": a fixture that regenerates
+     * itself records whatever the code currently does, which is the opposite of
+     * a contract. Changing one is a deliberate act, and the diff should show it.
+     */
+    private fun matchesFixture(name: String, bytes: ByteArray) {
+        val file = File(fixtures, name)
+        assertTrue(
+            "tools/wire-fixtures/$name is missing. It is committed on purpose — " +
+                "see the class comment; regenerate it deliberately, do not let a test do it.",
+            file.isFile
+        )
+        assertEquals(
+            "$name no longer matches the committed frame. Every implementation of " +
+                "MOO in this repo is held to these bytes, so changing them changes " +
+                "the contract for all of them.",
+            file.readBytes().toString(Charsets.UTF_8),
+            bytes.toString(Charsets.UTF_8)
+        )
+    }
 
     @Test
     fun encodesRequestWithBody() {
@@ -26,6 +60,7 @@ class MooTest {
             Moo.VERB_REQUEST, "com.roonlabs.transport:2/change_volume", 7, body.toByteArray()
         )
         File(samples, "request.bin").writeBytes(bytes)
+        matchesFixture("request.bin", bytes)
 
         assertEquals(
             "MOO/1 REQUEST com.roonlabs.transport:2/change_volume\n" +
@@ -42,6 +77,7 @@ class MooTest {
     fun encodesResponseWithoutBody() {
         val bytes = Moo.encode(Moo.VERB_COMPLETE, "Success", 3)
         File(samples, "complete.bin").writeBytes(bytes)
+        matchesFixture("complete.bin", bytes)
         assertEquals("MOO/1 COMPLETE Success\nRequest-Id: 3\n\n", bytes.toString(Charsets.UTF_8))
     }
 
@@ -66,6 +102,7 @@ class MooTest {
             "Content-Type: application/json\n" +
             "\n" + body
         File(samples, "continue.bin").writeBytes(raw.toByteArray())
+        matchesFixture("continue.bin", raw.toByteArray())
 
         val msg = Moo.parse(raw.toByteArray())!!
         assertEquals(Moo.VERB_CONTINUE, msg.verb)
