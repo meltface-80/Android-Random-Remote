@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Exactly one directory is shareable: the share-card scratch folder inside the
-  app's own cache, which holds the single card being shared right now and is
-  emptied before each write. Nothing else in the app is reachable through the
-  provider.
+  Two directories are reachable through the provider, both scratch folders
+  inside the app's own storage, both holding exactly one file at a time:
+
+    shares/  the share card being shared right now, emptied before each write.
+    updates/ the downloaded APK being handed to the system installer.
+
+  Nothing else in the app is reachable. The update folder has to be exposed
+  because the installer is a different process and needs a content:// URI it
+  has been granted read access to — a file:// path would be refused outright.
 -->
 <paths>
     <cache-path name="shares" path="shared/" />
+    <cache-path name="updates" path="updates/" />
 </paths>

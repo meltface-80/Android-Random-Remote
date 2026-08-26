@@ -267,6 +267,25 @@ class RemoteApiTest {
         )
     }
 
+    /**
+     * The artist view reads `bio.text`. This sent `description`, so its
+     * `if (!b || !b.text) return` dropped every biography without a trace —
+     * no error, no empty state, just no bio on any artist page ever.
+     *
+     * The album bio next door really does use `description`. Two names for the
+     * same idea in one UI is the page's inconsistency, not something to
+     * reconcile here: each caller gets the shape it reads.
+     */
+    @Test
+    fun theArtistBioIsSentUnderTheKeyTheViewReads() {
+        val body = json("/api/artist-bio?artist=Portishead&album=Dummy")
+        if (body.isNull("bio")) return          // no network in this environment
+        val bio = body.getJSONObject("bio")
+        assertTrue("the view reads bio.text", bio.has("text"))
+        assertTrue("the view draws bio.image when present", bio.has("image"))
+        assertTrue(bio.has("source"))
+    }
+
     @Test
     fun playingAnAlbumReachesRoon() {
         val (code, text) = post(

@@ -176,6 +176,20 @@ jobs:
           git rm -q --ignore-unmatch 'dist/musicd-remote-lite-*.apk'
           mkdir -p dist
           cp "$APK" "dist/$APK"
+          # What the app polls to find out an update exists. Written here, from
+          # the same job that produced the APK, so the two can never disagree
+          # about which version is published.
+          version=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          sha=$(sha256sum "$APK" | cut -d' ' -f1)
+          cat > dist/latest.json <<JSON
+          {
+            "version": "$version",
+            "url": "https://github.com/${GITHUB_REPOSITORY}/raw/main/dist/$APK",
+            "sha256": "$sha",
+            "notes": "Built from ${GITHUB_SHA}."
+          }
+          JSON
+          sed -i 's/^          //' dist/latest.json
           # The README's download link is rewritten here rather than by hand,
           # because a link that has to be remembered is a link that eventually
           # points at a version that no longer exists.
@@ -183,7 +197,7 @@ jobs:
           # too, and a label that disagrees with what it downloads is worse
           # than no label.
           sed -i -E "s#musicd-remote-lite-[0-9][0-9A-Za-z._-]*\.apk#$APK#g" README.md
-          git add "dist/$APK" README.md
+          git add "dist/$APK" dist/latest.json README.md
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Publish $APK" -m "Built from ${GITHUB_SHA}."
