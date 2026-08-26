@@ -35,6 +35,16 @@ jobs:
         timeout-minutes: 15
         run: ./gradlew :core:test --no-daemon --stacktrace
 
+      # The bundled front-end is JavaScript with no build step, so nothing else
+      # would notice a call to something that no longer exists. Twice now,
+      # removing a feature has left one behind — the second time it took the
+      # settings navigation with it and Settings stopped opening. Both files
+      # parsed cleanly; `node --check` cannot see this and no-undef can.
+      - name: Lint the bundled front-end for undefined references
+        run: |
+          npm install --no-save --silent eslint
+          npx eslint --config tools/eslint.config.mjs app/src/main/assets/web/*.js
+
       - name: Check the wire format against node-roon-api
         run: |
           git clone --depth 1 https://github.com/RoonLabs/node-roon-api /tmp/node-roon-api
