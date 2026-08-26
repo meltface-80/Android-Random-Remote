@@ -893,17 +893,44 @@ class RemoteApi(
 
     // --------------------------------------------------------------- search
 
+    /**
+     * Library search, in the shape the search sheet reads.
+     *
+     * The album hits are `results`. This returned them as `albums`, which
+     * nothing reads — so the sheet's album section was permanently empty (the
+     * artist chips still appeared, because `artists` happened to match, which
+     * is what made it look like search half-worked), and tapping the album name
+     * on the now-playing screen — which searches for the album to open it —
+     * always ended at "Album not yet indexed".
+     *
+     * `building` and `progress` matter just as much: while the first index is
+     * being walked the sheet shows "Building index… n%" and retries. Without
+     * them it silently reported no matches for a library it had not read yet.
+     */
     private fun search(request: Request): Response {
         val q = request.str("q") ?: ""
         val limit = (request.int("limit") ?: 40).coerceIn(1, 200)
+        val base = JSONObject().put("query", q).put("indexed", index.albums.size)
+
+        if (index.isBuilding && !index.isBuilt) {
+            return Json.obj(
+                base.put("building", true).put("progress", index.progress)
+                    .put("results", JSONArray()).put("artists", JSONArray())
+                    .put("labels", JSONArray())
+            )
+        }
         if (q.isBlank()) {
-            return Json.obj(JSONObject().put("albums", JSONArray()).put("artists", JSONArray()).put("labels", JSONArray()))
+            return Json.obj(
+                base.put("count", 0).put("results", JSONArray())
+                    .put("artists", JSONArray()).put("labels", JSONArray())
+            )
         }
         val hits = Search.albums(index.albums, q, limit)
         val artists = Search.artists(index.albums, q)
         return Json.obj(
-            JSONObject()
-                .put("albums", Json.arrayOf(hits.map { Json.album(it.album, JSONObject().put("score", it.score)) }))
+            base
+                .put("count", hits.size)
+                .put("results", Json.arrayOf(hits.map { Json.album(it.album, JSONObject().put("score", it.score)) }))
                 .put(
                     "artists",
                     Json.arrayOf(artists.map {
@@ -913,7 +940,6 @@ class RemoteApi(
                 // Labels are not in this build; an empty array keeps the search
                 // sheet's label section collapsed rather than erroring.
                 .put("labels", JSONArray())
-                .put("ready", index.isBuilt)
         )
     }
 
@@ -1126,22 +1152,74 @@ class RemoteApi(
     /**
      * A short list of albums the user probably has not heard lately, refreshed
      * daily and stable within the day, minus anything they have blocked.
+     *
+     * The list is `picks`, and each entry is a PICK — not an album row. This
+     * sent `albums` full of album objects, so the Home row and the Smart Picks
+     * screen both read `j.picks` as empty and showed their "nothing yet" state
+     * on a library that had plenty to offer.
+     *
+     * Upstream picks come from outside the library and may or may not be in
+     * Roon; here they are drawn FROM the library, so every one has an offset
+     * and is playable. That is why `service` and `album_id` are empty and
+     * `added` is null: there is no streaming account to add anything to, and
+     * null (not false) is what tells the card to leave the button alone rather
+     * than claim the album is not added.
      */
     private fun smartPicks(request: Request): Response {
+        val day = java.time.LocalDate.now().toString()
+        val base = JSONObject()
+            .put("day", day)
+            .put("auto_add", settings.smartPicksAutoAdd())
+            .put("hour", settings.smartPicksHour())
+            // No streaming account to favourite a pick into — see the note on
+            // the settings endpoint.
+            .put("service_ready", false)
+
         if (!settings.smartPicksEnabled()) {
-            return Json.obj(JSONObject().put("albums", JSONArray()).put("enabled", false))
+            return Json.obj(
+                base.put("enabled", false).put("building", false).put("picks", JSONArray())
+            )
         }
+        // Nothing to choose from yet: say "building" so the screen waits and
+        // retries instead of reporting that there is nothing to suggest.
+        if (!index.isBuilt) {
+            return Json.obj(
+                base.put("enabled", true).put("building", true).put("picks", JSONArray())
+            )
+        }
+
         val count = (request.int("count") ?: 12).coerceIn(1, 48)
         val blocked = store.blockedPicks()
         val pool = view.unplayed(6).filter { it.key !in blocked }
         // Seeded by the day so the row does not reshuffle on every Home visit.
-        val seed = LibraryView.fnv1a(java.time.LocalDate.now().toString())
+        val seed = LibraryView.fnv1a(day)
         val picks = pool.sortedBy { LibraryView.seededRank(it.key, seed) }.take(count)
         return Json.obj(
-            JSONObject()
-                .put("albums", Json.albums(picks))
+            base
                 .put("enabled", true)
+                .put("building", false)
                 .put("total", pool.size)
+                .put(
+                    "picks",
+                    Json.arrayOf(
+                        picks.map { album ->
+                            JSONObject()
+                                .put("kind", "unplayed")
+                                .put("artist", album.subtitle)
+                                .put("album", album.title)
+                                .put("album_id", "")
+                                .put("service", "")
+                                .put("image", "")
+                                .put("reason", "Not played in the last six months")
+                                .put("genre", "")
+                                .put("added", JSONObject.NULL)
+                                .put("offset", album.offset)
+                                .put("library_title", album.title)
+                                .put("library_subtitle", album.subtitle)
+                                .put("image_key", album.imageKey ?: JSONObject.NULL)
+                        }
+                    )
+                )
         )
     }
 

@@ -286,6 +286,44 @@ class RemoteApiTest {
         assertTrue(bio.has("source"))
     }
 
+    /**
+     * The Home row and the Smart Picks screen both read `j.picks`, and each
+     * entry has to be a PICK. This sent `albums` full of album rows, so both
+     * screens read an empty list and showed their "nothing to suggest yet"
+     * state on a library with plenty in it.
+     */
+    @Test
+    fun smartPicksAreSentAsPicksTheCardCanRender() {
+        val body = json("/api/smart-picks")
+        assertTrue("the screen reads j.picks", body.has("picks"))
+        val picks = body.getJSONArray("picks")
+        assertTrue("the library has unplayed albums to offer", picks.length() > 0)
+
+        val pick = picks.getJSONObject(0)
+        // Every field the card touches, because a missing one renders as
+        // "undefined" rather than failing.
+        for (field in listOf(
+            "artist", "album", "reason", "offset",
+            "library_title", "library_subtitle", "image_key", "added"
+        )) {
+            assertTrue("pick is missing $field", pick.has(field))
+        }
+        // Picks here come FROM the library, so each one is playable.
+        assertTrue(pick.get("offset") is Int)
+        // null, not false: there is no service to ask whether it was added, and
+        // false would have the card claim it is not in a library that has it.
+        assertTrue(pick.isNull("added"))
+        assertFalse("no streaming account to add a pick to", body.getBoolean("service_ready"))
+    }
+
+    @Test
+    fun smartPicksSwitchedOffAnswersInTheSameShape() {
+        assertEquals(200, post("/api/settings/smart-picks", """{"enabled":false}""").first)
+        val body = json("/api/smart-picks")
+        assertFalse(body.getBoolean("enabled"))
+        assertEquals(0, body.getJSONArray("picks").length())
+    }
+
     @Test
     fun playingAnAlbumReachesRoon() {
         val (code, text) = post(
@@ -410,15 +448,51 @@ class RemoteApiTest {
         assertEquals(listOf("queue:track:1:2@z1"), core.invoked)
     }
 
+    /**
+     * The album hits are `results`, and that name is the whole feature.
+     *
+     * They were sent as `albums`, which nothing reads, so the search sheet's
+     * album section was always empty and tapping the album name on the
+     * now-playing screen — which searches to find the album to open — always
+     * ended at "Album not yet indexed". The artist chips came through the whole
+     * time, which is what made it look like search merely found nothing.
+     */
     @Test
     fun searchAnswersFromTheSnapshot() {
         val body = json("/api/search?q=portishead")
-        val albums = body.getJSONArray("albums")
-        assertEquals(2, albums.length())
-        assertTrue(albums.getJSONObject(0).has("score"))
+        val results = body.getJSONArray("results")
+        assertEquals(2, results.length())
+        assertTrue(results.getJSONObject(0).has("score"))
+        assertTrue("the sheet reads `results`", body.has("results"))
+        assertEquals(2, body.getInt("count"))
+        assertEquals("portishead", body.getString("query"))
         assertEquals("Portishead", body.getJSONArray("artists").getJSONObject(0).getString("name"))
         // Labels are not in this build; an empty array keeps the sheet's label
         // section collapsed rather than erroring.
+        assertEquals(0, body.getJSONArray("labels").length())
+    }
+
+    /**
+     * The now-playing screen's album link searches for the album by title and
+     * opens the match. This is the exact call it makes.
+     */
+    @Test
+    fun theNowPlayingAlbumLinkCanFindItsAlbum() {
+        val body = json("/api/search?q=Mezzanine&limit=20")
+        val results = body.getJSONArray("results")
+        val match = (0 until results.length()).map { results.getJSONObject(it) }
+            .firstOrNull { it.getString("title").equals("Mezzanine", ignoreCase = true) }
+        assertNotNull("the link has nothing to open without this", match)
+        // It opens on the offset, so a hit with no offset is no use.
+        assertTrue(match!!.has("offset"))
+        assertEquals("Massive Attack", match.getString("subtitle"))
+    }
+
+    @Test
+    fun anEmptyQueryStillAnswersInTheSheetsShape() {
+        val body = json("/api/search?q=")
+        assertEquals(0, body.getJSONArray("results").length())
+        assertEquals(0, body.getJSONArray("artists").length())
         assertEquals(0, body.getJSONArray("labels").length())
     }
 
