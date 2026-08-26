@@ -316,6 +316,46 @@ class RemoteApiTest {
         assertFalse("no streaming account to add a pick to", body.getBoolean("service_ready"))
     }
 
+    /**
+     * "Not for me" posts {artist} and promises "Won't suggest <artist> again".
+     * This handler asked for `title`, which is never sent, so every tap came
+     * back "title is required".
+     */
+    @Test
+    fun notForMeBlocksTheArtistItWasToldAbout() {
+        val before = json("/api/smart-picks").getJSONArray("picks")
+        val target = before.getJSONObject(0).getString("artist")
+
+        val (code, text) = post("/api/smart-picks/block", """{"artist":"$target"}""")
+        assertEquals(text, 200, code)
+        assertTrue(JSONObject(text).getBoolean("ok"))
+
+        // The button blocks the ARTIST, so nothing by them comes back — not
+        // just the one record that happened to be offered.
+        val after = json("/api/smart-picks").getJSONArray("picks")
+        val artists = (0 until after.length()).map { after.getJSONObject(it).getString("artist") }
+        assertFalse("$target is still being suggested", target in artists)
+    }
+
+    @Test
+    fun blockingNeedsAnArtistAndSaysSo() {
+        val (code, text) = post("/api/smart-picks/block", "{}")
+        assertEquals(400, code)
+        assertTrue(text, JSONObject(text).getString("error").contains("artist"))
+    }
+
+    /** The card renders `image` as a URL; only sending a key left it blank. */
+    @Test
+    fun aPicksArtIsAUrlTheCardCanPutInAnImgTag() {
+        val picks = json("/api/smart-picks").getJSONArray("picks")
+        val withArt = (0 until picks.length()).map { picks.getJSONObject(it) }
+            .first { !it.isNull("image_key") }
+        assertTrue(
+            withArt.getString("image"),
+            withArt.getString("image").startsWith("/api/image/")
+        )
+    }
+
     @Test
     fun smartPicksSwitchedOffAnswersInTheSameShape() {
         assertEquals(200, post("/api/settings/smart-picks", """{"enabled":false}""").first)

@@ -51,6 +51,9 @@ class RemoteApi(
         /** Roon rejects a play of more albums than this in one go. */
         const val PLAY_MULTI_MAX = 400
 
+        /** Distinguishes a blocked ARTIST from the album keys once stored. */
+        const val BLOCKED_ARTIST_PREFIX = "artist:"
+
         /** Said to anything still asking for a streaming route. */
         const val STREAMING_UNAVAILABLE =
             "%s isn't in this build. Roon streams it through its own account anyway."
@@ -1190,7 +1193,13 @@ class RemoteApi(
 
         val count = (request.int("count") ?: 12).coerceIn(1, 48)
         val blocked = store.blockedPicks()
-        val pool = view.unplayed(6).filter { it.key !in blocked }
+        // Both shapes are honoured: artist blocks (what "Not for me" writes) and
+        // the album keys an earlier build stored, so nothing a user already
+        // rejected comes back.
+        val pool = view.unplayed(6).filter { album ->
+            album.key !in blocked &&
+                (BLOCKED_ARTIST_PREFIX + Normalize.text(album.subtitle)) !in blocked
+        }
         // Seeded by the day so the row does not reshuffle on every Home visit.
         val seed = LibraryView.fnv1a(day)
         val picks = pool.sortedBy { LibraryView.seededRank(it.key, seed) }.take(count)
@@ -1209,7 +1218,15 @@ class RemoteApi(
                                 .put("album", album.title)
                                 .put("album_id", "")
                                 .put("service", "")
-                                .put("image", "")
+                                // The card renders `image` as a URL — upstream
+                                // picks come from a streaming catalogue, so it
+                                // was a remote link. Here the art is Roon's, so
+                                // it points at this server's own image route.
+                                // Sending only image_key left every pick blank.
+                                .put(
+                                    "image",
+                                    album.imageKey?.let { "/api/image/$it?width=400" } ?: ""
+                                )
                                 .put("reason", "Not played in the last six months")
                                 .put("genre", "")
                                 .put("added", JSONObject.NULL)
@@ -1223,13 +1240,25 @@ class RemoteApi(
         )
     }
 
+    /**
+     * "Not for me" — permanently, and per ARTIST rather than per album.
+     *
+     * The client posts `{artist}` and its toast says "Won't suggest <artist>
+     * again", so blocking one record and leaving the rest of the discography in
+     * the pool would not be what the button promises. This asked for `title`,
+     * which is never sent, so every tap answered "title is required".
+     *
+     * Stored under a prefix because the same set once held album keys; the
+     * prefix keeps the two apart rather than having an artist name silently
+     * match an album's key.
+     */
     private fun smartPickBlock(request: Request): Response {
-        val body = Json.body(request)
-        val title = body.str("title").takeIf { it.isNotEmpty() }
-            ?: return Json.error(400, "title is required")
-        val key = AlbumRecord(0, title, body.str("subtitle"), null).key
-        store.blockPick(key)
-        return Json.ok()
+        val artist = Json.body(request).str("artist").takeIf { it.isNotBlank() }
+            ?: return Json.error(400, "artist is required")
+        val canon = Normalize.text(artist).takeIf { it.isNotEmpty() }
+            ?: return Json.error(400, "unrecognisable artist name")
+        store.blockPick(BLOCKED_ARTIST_PREFIX + canon)
+        return Json.ok(JSONObject().put("artist", artist))
     }
 
     // -------------------------------------------------------------- settings

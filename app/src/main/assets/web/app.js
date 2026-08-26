@@ -918,7 +918,9 @@
         const play = document.createElement("button");
         play.type = "button";
         play.className = "pick-add pick-play";
-        play.textContent = "▶ Play";
+        // It opens the album; it does not start playback. The old label said
+        // Play, which is a promise the button does not keep.
+        play.textContent = "Go to Album";
         play.addEventListener("click", () => openAlbum({
           offset:    pick.offset,
           // Roon's OWN strings for the album, not Qobuz's — the play routes
