@@ -111,7 +111,6 @@ class RemoteService : Service() {
                 multicastLock = WifiMulticastLock(),
                 // The Android half of an update. :core notices the new version
                 // and downloads it; only the system installer can apply it.
-                tileInstaller = TileRequest.installer(this),
                 updateInstaller = MusicdLite.UpdateInstaller(
                     downloadDir = ApkInstaller.downloadDir(this),
                     install = { apk -> ApkInstaller.install(this, apk) }
