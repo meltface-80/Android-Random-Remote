@@ -3711,7 +3711,20 @@ body.show-quality .album-quality { display: block; }
    moves into the modal's own header band — to the LEFT of Share and ×, which
    sit at right:12px and right:60px. z-index clears those (2). */
 .sel-menu-wrap.in-modal {
-  position: absolute; top: 12px; right: 108px; z-index: 3;
+  /* Inline with the back chevron and Share, and for the same reason they are:
+     the panel covers the whole screen INCLUDING the status bar, so a top of
+     plain 12px puts this under it. There the system takes the taps and the
+     button does nothing — which is exactly how it behaved. Every pinned
+     control on this panel measures from the same inset.
+
+     The right offset clears Share rather than guessing at it: one control
+     width plus the gap, from the same variable Share's own width comes from.
+     It was 108px, which was right for whatever Share measured the day it was
+     written. */
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: calc(12px + var(--ctl-h) + 10px);
+  z-index: 3;
   margin-left: 0;
 }
 .sel-menu-wrap.in-modal .sel-menu { right: 0; }

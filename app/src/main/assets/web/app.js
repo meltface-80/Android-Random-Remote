@@ -9354,15 +9354,33 @@
   // Hold the grip, then drag. Pointer events so one code path covers touch and
   // mouse; the list reorders live under the finger and the draft array is
   // rewritten from the DOM on drop, so the two can never disagree.
+  //
+  // The listeners are on the DOCUMENT, not on the grip, and that is the whole
+  // point. The original captured the pointer to the grip — but the grip lives
+  // inside the row being dragged, and reordering moves that row in the DOM.
+  // Moving a node drops any pointer capture it holds, so the first swap threw
+  // the capture away: no more pointermove, and crucially no pointerup, so the
+  // drop handler that SAVES never ran. The list reordered under the finger and
+  // nothing was ever written down, which is precisely how it behaved — the new
+  // order right there on screen, and the old one back on the next visit.
   function attachRowDrag(li, grip) {
     let dragging = false;
+    let onMove = null;
+    let onEnd = null;
+
     grip.addEventListener("pointerdown", (e) => {
       e.preventDefault();
+      if (dragging) return;
       dragging = true;
       li.classList.add("is-dragging");
-      grip.setPointerCapture(e.pointerId);
+      onMove = (ev) => move(ev);
+      onEnd = () => end();
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onEnd);
+      document.addEventListener("pointercancel", onEnd);
     });
-    grip.addEventListener("pointermove", (e) => {
+
+    function move(e) {
       if (!dragging || !homeRowsList) return;
       // Which sibling is under the pointer? Compare against each row's middle
       // so the swap happens when the dragged row has genuinely passed it,
@@ -9381,11 +9399,17 @@
           break;
         }
       }
-    });
-    const end = () => {
+    }
+
+    function end() {
       if (!dragging) return;
       dragging = false;
       li.classList.remove("is-dragging");
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onEnd);
+      document.removeEventListener("pointercancel", onEnd);
+      onMove = null;
+      onEnd = null;
       // The DOM is the truth now — read the order back out of it rather than
       // trying to mirror every move into the array as it happened.
       if (homeRowsList) {
@@ -9393,9 +9417,7 @@
         homeRowsDraft.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
       }
       saveHomeRows();
-    };
-    grip.addEventListener("pointerup", end);
-    grip.addEventListener("pointercancel", end);
+    }
   }
 
   async function saveHomeRows() {
