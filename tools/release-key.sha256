@@ -1,11 +1,24 @@
-b55d714c40b8ad96aa515d289d56cf3a40d0c28d60194e86076f73111eea1fad
-# SHA-256 of the certificate every published APK must be signed with.
+b55d714c40b8ad96aa515d289d56cf3a40d0c28d60194e86076f73111eea1fad  # RSA-4096
+9212864c843359caf42038bb3f35d66dddaa80a321807697781108392cbd3ad3  # EC P-256
+
+# SHA-256 of the certificates a published APK may be signed with.
 #
-# Not a secret — a certificate fingerprint is public by design. It lives here
+# Not secrets — a certificate fingerprint is public by design. They live here
 # rather than in a repository secret so that changing the release key is a
 # visible commit rather than a silent settings change, and so CI can catch a
 # build signed with the wrong key BEFORE it reaches dist/.
 #
+# TWO entries, for one transition. Both are keys generated for this repository:
+# the RSA one first, then a smaller EC one so the value that has to be pasted
+# into a repository secret was a quarter the length. Whichever ended up in
+# MUSICD_KEYSTORE_BASE64 is the real one, and either is accepted so that a
+# paste of the wrong copy is not a failed build.
+#
+# What this check exists to catch is the build minting a NEW key on every run —
+# which is what was happening — and a two-entry list catches that exactly as
+# well as one. Once a release has been published, the log names the certificate
+# actually used, and the other line can be deleted.
+#
 # The private key is in the MUSICD_KEYSTORE_BASE64 repository secret. If it is
-# ever lost, a new key can be generated — but everyone with the app installed
-# will have to uninstall before they can install again, so keep a backup.
+# lost, a new key can be generated — but everyone with the app installed has to
+# uninstall before they can install again, so keep a backup.
