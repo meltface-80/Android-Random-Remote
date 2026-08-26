@@ -15,6 +15,10 @@
       "to": "app/src/main/java/com/musicd/lite/android/dial/DialView.kt"
     },
     {
+      "from": "app/src/main/java/com/roondial/ui/VoiceInput.kt",
+      "to": "app/src/main/java/com/musicd/lite/android/dial/VoiceInput.kt"
+    },
+    {
       "from": "app/src/main/java/com/roondial/widget/WidgetGeometry.kt",
       "to": "app/src/main/java/com/musicd/lite/android/dial/WidgetGeometry.kt"
     },
