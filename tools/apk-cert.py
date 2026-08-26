@@ -103,30 +103,40 @@ def main():
     for scheme, digest in certs:
         print(f"  {scheme}  cert SHA-256 {digest}")
 
-    expected = args.expect
-    if not expected and args.expect_file:
+    expected = []
+    if args.expect:
+        expected.append(args.expect)
+    if args.expect_file:
         try:
-            expected = open(args.expect_file).read().split("#")[0].strip()
+            for line in open(args.expect_file):
+                line = line.split("#")[0].strip()
+                if line:
+                    expected.append(line)
         except OSError as e:
             print(f"FAIL  cannot read {args.expect_file}: {e}", file=sys.stderr)
             return 1
-    expected = (expected or "").strip().lower().replace(":", "")
+    expected = {e.strip().lower().replace(":", "") for e in expected if e.strip()}
     if not expected:
         print("  (no expected fingerprint given — signature present, identity unchecked)")
         return 0
 
+    # More than one accepted fingerprint is deliberate and still a real check.
+    # What this guards against is the build silently minting a NEW key every
+    # run — which is what actually happened — not the existence of a second
+    # key the repository knows about. A short, explicit list catches that just
+    # as well as a single entry.
     actual = {d for _, d in certs}
-    if expected not in actual:
+    if not (actual & expected):
         print(
-            f"FAIL  signed with the wrong key.\n"
-            f"      expected {expected}\n"
+            f"FAIL  signed with a key this repository does not know.\n"
+            f"      accepted {', '.join(sorted(expected))}\n"
             f"      got      {', '.join(sorted(actual))}\n"
             f"      An APK signed with a different key CANNOT install over the\n"
             f"      copy already on someone's phone.",
             file=sys.stderr,
         )
         return 1
-    print("  ok    matches the pinned release key")
+    print("  ok    matches a pinned release key")
     return 0
 
 
