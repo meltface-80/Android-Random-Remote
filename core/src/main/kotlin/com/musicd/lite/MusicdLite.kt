@@ -12,6 +12,7 @@ import com.musicd.lite.library.Normalize
 import com.musicd.lite.meta.ImageCache
 import com.musicd.lite.meta.Metadata
 import com.musicd.lite.meta.Pitchfork
+import com.musicd.lite.meta.Updater
 import com.musicd.lite.meta.metadataHttpClient
 import com.musicd.lite.roon.RoonApi
 import com.musicd.lite.roon.RoonCore
@@ -53,6 +54,13 @@ class MusicdLite(
      * ask for.
      */
     private val importSettleMs: Long = IMPORT_SETTLE_MS,
+    /**
+     * Where a downloaded update goes, and how it is installed. Null on any host
+     * that cannot install an APK — the JVM tests, for one — and the update
+     * routes then report that updates are not available here rather than
+     * offering a button that leads nowhere.
+     */
+    private val updateInstaller: UpdateInstaller? = null,
     roonFactory: (Store, RoonCore.ExtensionInfo, RoonCore.MulticastLock) -> RoonApi =
         { store, extension, lock -> RoonCore(store, extension, lock) }
 ) {
@@ -72,7 +80,14 @@ class MusicdLite(
 
         /** How long the album count must hold still to count as "not importing". */
         const val IMPORT_SETTLE_MS = 5_000L
+
+        /** Published by CI next to the APK it describes. */
+        const val UPDATE_MANIFEST_URL =
+            "https://raw.githubusercontent.com/meltface-80/Android-Random-Remote/main/dist/latest.json"
     }
+
+    /** What an Android host supplies so [updater] can finish the job. */
+    class UpdateInstaller(val downloadDir: File, val install: (File) -> Unit)
 
     val extension = RoonCore.ExtensionInfo(
         id = "com.musicd.lite.android",
@@ -93,6 +108,20 @@ class MusicdLite(
     val metadata = Metadata(http, "MusicDRemoteLite/$version ( ${extension.website} )")
     val art = ImageCache(http, artDir)
     val pitchfork = Pitchfork(http, "MusicDRemoteLite/$version ( ${extension.website} )")
+
+    /**
+     * The published manifest CI writes beside the APK. Read from the default
+     * branch, which is where the download link in the README points too.
+     */
+    val updater: Updater? = updateInstaller?.let {
+        Updater(
+            http = http,
+            currentVersion = version,
+            manifestUrl = UPDATE_MANIFEST_URL,
+            downloadDir = it.downloadDir,
+            install = it.install
+        )
+    }
     val radio = Radio(this)
 
     private val jobs: ScheduledExecutorService =

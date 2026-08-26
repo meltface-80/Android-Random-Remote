@@ -163,6 +163,14 @@ class RemoteApi(
             "/api/artist-albums" -> artistAlbums(request)
             "/api/artist-bio" -> artistBio(request)
 
+            // Updates. The banner polls status, taps check, then apply, and
+            // keeps polling until `current` becomes the new version — which
+            // happens when Android has replaced the app and this server has
+            // restarted inside it.
+            "/api/update/status" -> updateStatus()
+            "/api/update/check" -> requirePost(post) { updateCheck() }
+            "/api/update/apply" -> requirePost(post) { updateApply() }
+
             "/api/filters/genres" -> genres()
             "/api/filters/decades" -> decades()
             "/api/filters/tags" -> tags()
@@ -662,19 +670,39 @@ class RemoteApi(
         }
         val year = extras.year ?: record?.let { view.albumYearOf(it) }
 
-        fun bio(b: Metadata.Bio?): Any = if (b == null) JSONObject.NULL else
-            JSONObject()
-                .put("description", b.description)
-                .put("source", b.source)
-                .put("url", b.url ?: JSONObject.NULL)
+        // The Pitchfork score, which the album card draws as a chip beside the
+        // year (plus a BNM badge). It reads extras.album.score and
+        // extras.album.isBestNewMusic — fields this never sent, so the chip
+        // never appeared even though the reviews screen had the data.
+        //
+        // A miss is the normal case: most records were never reviewed, and the
+        // card simply shows no chip.
+        val review = runCatching { app.pitchfork.reviewFor(title, artist) }.getOrNull()
+
+        fun bio(b: Metadata.Bio?, withReview: Boolean = false): Any {
+            if (b == null && !(withReview && review != null)) return JSONObject.NULL
+            val o = JSONObject()
+                .put("description", b?.description ?: "")
+                .put("source", b?.source ?: JSONObject.NULL)
+                .put("url", b?.url ?: JSONObject.NULL)
                 // The lite build has no label chain, and the album card reads
                 // this field. Null keeps the row hidden rather than blank.
                 .put("label", JSONObject.NULL)
+            if (!withReview || review == null) return o
+            // Pitchfork wins the source link when it has the record: the card
+            // then offers "Read the full review on Pitchfork", which is the
+            // whole point of carrying a score with no review text.
+            return o
+                .put("score", review.score ?: JSONObject.NULL)
+                .put("isBestNewMusic", review.isBestNewMusic)
+                .put("source", "Pitchfork")
+                .put("url", review.url)
+        }
 
         return Json.obj(
             JSONObject()
                 .put("year", year ?: JSONObject.NULL)
-                .put("album", bio(extras.album))
+                .put("album", bio(extras.album, withReview = true))
                 .put("artist", bio(extras.artist))
         )
     }
@@ -915,17 +943,33 @@ class RemoteApi(
         )
     }
 
+    /**
+     * The artist bio, in the shape the artist view reads.
+     *
+     * That shape is `text`, NOT `description` — and this sent `description`,
+     * so the view's `if (!b || !b.text) return` dropped every bio silently and
+     * no artist page ever showed one. The album bio on the same screen really
+     * does use `description` (see albumExtras): two names for one idea, which
+     * is the page's inconsistency and not something to tidy away here. The
+     * server's job is to answer what each caller asks for.
+     *
+     * `album` pins the identity. The client sends one of the artist's own album
+     * titles for exactly that reason, and ignoring it was how a search for a
+     * common name could return a stranger's article.
+     */
     private fun artistBio(request: Request): Response {
         val artist = request.str("artist") ?: return Json.error(400, "artist is required")
-        val bio = app.metadata.wikipediaArtist(artist, "")
+        val album = request.str("album") ?: ""
+        val bio = app.metadata.wikipediaArtist(artist, album)
             ?: return Json.obj(JSONObject().put("bio", JSONObject.NULL))
         return Json.obj(
             JSONObject().put(
                 "bio",
                 JSONObject()
-                    .put("description", bio.description)
+                    .put("text", bio.description)
                     .put("source", bio.source)
                     .put("url", bio.url ?: JSONObject.NULL)
+                    .put("image", bio.image ?: JSONObject.NULL)
             )
         )
     }
@@ -1338,6 +1382,28 @@ class RemoteApi(
         )
     }
 
+    // -------------------------------------------------------------- updates
+
+    /**
+     * An APK cannot replace itself: only Android's installer may, and it always
+     * asks. So "apply" downloads the new APK and presents the install, and the
+     * banner's poll finishes the story — when the user confirms, this process
+     * is replaced and the next status call comes from the new version.
+     */
+    private fun updateStatus(): Response =
+        app.updater?.let { Json.obj(it.status()) } ?: notInLite("/api/update/status")
+
+    private fun updateCheck(): Response =
+        app.updater?.let { Json.obj(it.check()) } ?: notInLite("/api/update/check")
+
+    private fun updateApply(): Response {
+        val updater = app.updater ?: return notInLite("/api/update/apply")
+        // The download must not run on the request thread: the banner starts
+        // polling as soon as this returns, and a reply held open for the length
+        // of a download reads as a hung update.
+        return Json.ok(JSONObject().put("status", updater.apply { r -> app.background { r.run() } }))
+    }
+
     // ----------------------------------------------------- not in this build
 
     /**
@@ -1374,11 +1440,13 @@ class RemoteApi(
         path == "/api/search/external" ->
             Json.obj(JSONObject().put("albums", JSONArray()).put("artists", JSONArray()))
 
-        // Self-update is a Docker-era feature: an APK updates by being installed.
+        // Self-update on a host that cannot install an APK — the JVM tests.
+        // "available: false" is the shape the update banner reads as "nothing
+        // to do", so it stays hidden rather than erroring.
         path.startsWith("/api/update") ->
             Json.obj(
                 JSONObject().put("available", false).put("current", app.version)
-                    .put("note", "Update the app by installing a newer APK.")
+                    .put("note", "Updates aren't available on this host.")
             )
 
         // Reading file tags needs a mounted music directory, which a phone

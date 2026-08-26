@@ -1,6 +1,7 @@
 package com.musicd.lite.meta
 
 import com.musicd.lite.str
+import com.musicd.lite.strOrNull
 import com.musicd.lite.Log
 import com.musicd.lite.library.Normalize
 import okhttp3.OkHttpClient
@@ -42,7 +43,16 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
     private val mbGate = RateGate(MB_INTERVAL_MS)
     private val wikiGate = RateGate(WIKI_INTERVAL_MS)
 
-    data class Bio(val description: String, val source: String, val url: String?)
+    /**
+     * [image] is the article's lead thumbnail, which the artist view draws as a
+     * round portrait. Absent for most album articles and plenty of artists.
+     */
+    data class Bio(
+        val description: String,
+        val source: String,
+        val url: String?,
+        val image: String? = null
+    )
 
     data class AlbumExtras(val year: Int?, val album: Bio?, val artist: Bio?)
 
@@ -104,12 +114,19 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
             .filter { it.isNotEmpty() }
     }
 
-    private fun wikiExtract(pageTitle: String): String? {
+    /** An article summary: the lead paragraph and, when it has one, a portrait. */
+    private data class Summary(val extract: String, val image: String?)
+
+    private fun wikiSummary(pageTitle: String): Summary? {
         val url = "https://en.wikipedia.org/api/rest_v1/page/summary/" +
             urlEncode(pageTitle.replace(' ', '_'))
         val json = wikiGate.run { getJson(url) } ?: return null
         if (json.str("type") == "disambiguation") return null
-        return json.str("extract").takeIf { it.length > 40 }
+        val extract = json.str("extract").takeIf { it.length > 40 } ?: return null
+        // The thumbnail is a few hundred pixels wide; originalimage can be a
+        // multi-megabyte scan, which is not what a 96px avatar wants.
+        val image = json.optJSONObject("thumbnail")?.strOrNull("source")
+        return Summary(extract, image)
     }
 
     fun wikipediaAlbum(title: String, artist: String): Bio? {
@@ -119,24 +136,35 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
             // The guard that stops a review being attached to the wrong record:
             // the page title must actually mention the album.
             if (!namesOverlap(page, title)) continue
-            val extract = wikiExtract(page) ?: continue
-            return Bio(extract, "Wikipedia", "https://en.wikipedia.org/wiki/" +
-                urlEncode(page.replace(' ', '_')))
+            val summary = wikiSummary(page) ?: continue
+            return Bio(summary.extract, "Wikipedia", "https://en.wikipedia.org/wiki/" +
+                urlEncode(page.replace(' ', '_')), summary.image)
         }
         return null
     }
 
+    /**
+     * [albumTitle] is not decoration — it is what tells two acts of the same
+     * name apart. The upstream UI dropped its artist bio precisely because the
+     * lookup "was prone to returning wrong articles for less-famous artists",
+     * and the album the user is actually looking at is the strongest available
+     * disambiguator, so the search leads with it when there is one.
+     */
     fun wikipediaArtist(artist: String, albumTitle: String): Bio? {
         if (artist.isBlank()) return null
-        val candidates = wikiSearch("$artist band musician")
-        for (page in candidates) {
-            // "The Who" vs "The Guess Who" is exactly the mismatch this rejects:
-            // matching on a first token alone puts a stranger's biography on the
-            // page. Fail safe — drop the bio rather than show the wrong one.
-            if (!namesOverlap(page, artist)) continue
-            val extract = wikiExtract(page) ?: continue
-            return Bio(extract, "Wikipedia", "https://en.wikipedia.org/wiki/" +
-                urlEncode(page.replace(' ', '_')))
+        val queries = if (albumTitle.isBlank()) listOf("$artist band musician")
+        else listOf("$artist $albumTitle album", "$artist band musician")
+        for (query in queries) {
+            for (page in wikiSearch(query)) {
+                // "The Who" vs "The Guess Who" is exactly the mismatch this
+                // rejects: matching on a first token alone puts a stranger's
+                // biography on the page. Fail safe — drop the bio rather than
+                // show the wrong one.
+                if (!namesOverlap(page, artist)) continue
+                val summary = wikiSummary(page) ?: continue
+                return Bio(summary.extract, "Wikipedia", "https://en.wikipedia.org/wiki/" +
+                    urlEncode(page.replace(' ', '_')), summary.image)
+            }
         }
         return null
     }

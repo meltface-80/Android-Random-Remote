@@ -1,6 +1,7 @@
 package com.musicd.lite.meta
 
 import com.musicd.lite.Log
+import com.musicd.lite.library.Normalize
 import com.musicd.lite.str
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -243,6 +244,65 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
         return words.joinToString(" ") { it.replaceFirstChar(Char::uppercaseChar) }
     }
 
+    /**
+     * The score for one album, from its own review page.
+     *
+     * The listing endpoints only carry the most recent reviews, so an album
+     * from 1994 is never in them — the album view needs a direct lookup, and
+     * Pitchfork's review URLs are built from slugs
+     * (`/reviews/albums/<artist>-<album>/`), so one can be constructed rather
+     * than searched for.
+     *
+     * NO review text is returned, here or anywhere else in this class: the
+     * score, the Best New Music flag and the URL to go and read it. That is
+     * the same line the original draws, and it is deliberate.
+     *
+     * A constructed URL can land on a real page for the WRONG record when two
+     * artists share an album title, so the artist named on the page has to
+     * agree with the one asked about before anything is returned.
+     */
+    fun reviewFor(title: String, artist: String): Item? {
+        if (title.isBlank() || artist.isBlank()) return null
+        val artistSlug = slugify(artist)
+        val albumSlug = slugify(title)
+        if (artistSlug.isEmpty() || albumSlug.isEmpty()) return null
+        val url = "https://pitchfork.com/reviews/albums/$artistSlug-$albumSlug/"
+        val html = text(url) ?: return null
+        return reviewFromPage(html, url, title, artist)
+    }
+
+    /**
+     * Pulls the rating out of a review page's JSON-LD.
+     *
+     * Split out from the fetch so the parsing is testable without a network:
+     * the shape of Pitchfork's markup is the part that can silently change.
+     */
+    internal fun reviewFromPage(html: String, url: String, title: String, artist: String): Item? {
+        val score = jsonLdRating(html) ?: return null
+        // A URL built from slugs can resolve to a different act's record of the
+        // same name. The page has to name the artist we asked about.
+        val onPage = artistFromReviewUrl(url, title) ?: return null
+        if (!Normalize.text(onPage).equals(Normalize.text(artist), ignoreCase = true) &&
+            !Normalize.sortKey(Normalize.text(onPage))
+                .contains(Normalize.sortKey(Normalize.text(artist)))
+        ) {
+            return null
+        }
+        return Item(
+            url = url,
+            album = title,
+            artist = artist,
+            cover = null,
+            score = score,
+            isBestNewMusic = BNM.containsMatchIn(html),
+            date = null
+        )
+    }
+
+    /** `"ratingValue": 8.7` inside any of the page's JSON-LD blocks. */
+    private fun jsonLdRating(html: String): Double? =
+        RATING.find(html)?.groupValues?.get(1)?.toDoubleOrNull()?.takeIf { it in 0.0..10.0 }
+
     internal fun slugify(s: String): String = s.lowercase()
         .replace(Regex("['‘’]"), "")
         .replace(Regex("[^a-z0-9\\s-]"), " ")
@@ -274,6 +334,12 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
     }
 
     companion object Text {
+        /** The rating in a review page's JSON-LD. */
+        private val RATING = Regex("\"ratingValue\"\\s*:\\s*\"?([0-9]+(?:\\.[0-9])?)\"?")
+
+        /** Best New Music is a page-level flag, not part of the rating object. */
+        private val BNM = Regex("best[ -]?new[ -]?music", RegexOption.IGNORE_CASE)
+
         private const val TAG = "Pitchfork"
         private const val LIST_TTL_MS = 6L * 60 * 60 * 1000
         const val HOST = "https://pitchfork.com"

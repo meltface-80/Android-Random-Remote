@@ -94,7 +94,13 @@ class RemoteService : Service() {
                 artDir = File(cacheDir, "art"),
                 version = BuildConfig.VERSION_NAME,
                 httpPort = 0,
-                multicastLock = WifiMulticastLock()
+                multicastLock = WifiMulticastLock(),
+                // The Android half of an update. :core notices the new version
+                // and downloads it; only the system installer can apply it.
+                updateInstaller = MusicdLite.UpdateInstaller(
+                    downloadDir = ApkInstaller.downloadDir(this),
+                    install = { apk -> ApkInstaller.install(this, apk) }
+                )
             )
         } catch (e: Exception) {
             AndroidLog.e(TAG, "could not start the local server", e)
