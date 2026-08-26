@@ -52,7 +52,7 @@ API testable on a JVM with no emulator — see [Verification](#verification).
 
 ## Install
 
-**Download: [musicd-remote-lite-0.1.6.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.1.6.apk)**
+**Download: [musicd-remote-lite-0.1.7.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.1.7.apk)**
 
 Sideload it on Android 8.0 (API 26) or newer. The file in
 [`dist/`](dist/) is published by CI from the source in this repository, so it is
@@ -61,8 +61,36 @@ the commit it was built from. Every push also produces the same APK as a
 [CI artifact](../../actions/workflows/build.yml), and a `v*` tag attaches it to
 a release.
 
-The APK is signed with the standard Android debug key, so it installs alongside
-anything else but will not update in place over a differently-signed build.
+### Signing, and why updates depend on it
+
+Android refuses to install an APK over one signed with a different key. This
+build was signed with the Android **debug** key, which is generated per
+machine — so every CI runner produced a new certificate and every published
+release was un-installable as an update. Three consecutive releases had three
+different certificates.
+
+Releases are now signed with a fixed key held in the
+`MUSICD_KEYSTORE_BASE64` and `MUSICD_KEYSTORE_PASSWORD` repository secrets,
+and CI refuses to publish an APK whose certificate does not match the
+fingerprint pinned in [`tools/release-key.sha256`](tools/release-key.sha256) —
+a wrong key now fails the build instead of failing on someone's phone months
+later.
+
+Without those secrets the build still compiles and every check still runs;
+it just produces an APK marked `-UNSIGNED` and publishes nothing. A missing
+secret is not a broken build and CI does not report it as one.
+
+`tools/apk-cert.py` prints the certificate of any APK, which is how the
+original fault was diagnosed:
+
+```
+python3 tools/apk-cert.py dist/musicd-remote-lite-*.apk
+```
+
+**One-time migration.** Builds from 0.1.8 onward update over each other, but
+none of them can install over 0.1.7 or earlier, which carry the old
+throwaway keys. Uninstall the app once, install 0.1.8, and updates work from
+then on.
 
 Then, once:
 
