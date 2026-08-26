@@ -180,6 +180,9 @@ class RemoteApi(
             "/api/update/status" -> updateStatus()
             "/api/update/check" -> requirePost(post) { updateCheck() }
             "/api/update/apply" -> requirePost(post) { updateApply() }
+            "/api/tile/status" ->
+                Json.ok(JSONObject().put("supported", app.tileSupported()))
+            "/api/tile/add" -> requirePost(post) { tileAdd() }
 
             "/api/filters/genres" -> genres()
             "/api/filters/decades" -> decades()
@@ -1510,6 +1513,25 @@ class RemoteApi(
         // of a download reads as a hung update.
         return Json.ok(JSONObject().put("status", updater.apply { r -> app.background { r.run() } }))
     }
+
+    /**
+     * Offers the Quick Settings tile.
+     *
+     * The tile is declared in the manifest and the system knows about it, but
+     * finding it means opening the shade's tile editor and scrolling past
+     * every tile the phone ships with — so the app asks on the user's behalf
+     * instead of documenting where to look.
+     */
+    private fun tileAdd(): Response = app.requestTile().fold(
+        onSuccess = { Json.ok(JSONObject().put("ok", true)) },
+        onFailure = {
+            Json.ok(
+                JSONObject()
+                    .put("ok", false)
+                    .put("error", it.message ?: "Could not add the tile")
+            )
+        }
+    )
 
     // ----------------------------------------------------- not in this build
 

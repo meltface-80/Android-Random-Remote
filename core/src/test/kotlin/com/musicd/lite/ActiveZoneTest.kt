@@ -77,6 +77,23 @@ class ActiveZoneTest {
     }
 
     @Test
+    fun theFallbackChoiceSticks() {
+        // The bug this locks down: with nothing remembered, "the zone that is
+        // playing" answers differently once playback stops. Pausing and then
+        // pressing play would then address two different rooms — the second
+        // one being whichever zone happened to be first in the list.
+        core.zonesList = listOf(zone("a"), zone("b", state = "playing"), zone("c"))
+        assertEquals("b", app.activeZone()?.zoneId)
+
+        // Now nothing is playing, exactly as it would be a moment after pause.
+        core.zonesList = listOf(zone("a"), zone("b"), zone("c"))
+        assertEquals(
+            "the zone the buttons address must not move when playback stops",
+            "b", app.activeZone()?.zoneId
+        )
+    }
+
+    @Test
     fun noZonesIsNullRatherThanAThrow() {
         core.zonesList = emptyList()
         app.settings.saveLastZone("a")

@@ -39,9 +39,7 @@ import java.util.concurrent.Executors
  */
 class NowPlayingSession(
     private val context: Context,
-    private val app: MusicdLite,
-    /** Rebuilds the foreground notification when the session state changes. */
-    private val onChanged: () -> Unit
+    private val app: MusicdLite
 ) {
 
     private companion object {
@@ -51,20 +49,57 @@ class NowPlayingSession(
         const val ART_PX = 512
 
         /**
-         * What this session can do. Deliberately not SEEK: Roon's seek is
-         * absolute against a track this app does not own the clock for, and a
-         * scrubber that fights the zone's own position is worse than none.
+         * What this session can do when nothing better is known.
+         *
+         * Deliberately not SEEK: Roon's seek is absolute against a track this
+         * app does not own the clock for, and a scrubber that fights the zone's
+         * own position is worse than none.
          */
         const val ACTIONS =
             PlaybackState.ACTION_PLAY or
                 PlaybackState.ACTION_PAUSE or
                 PlaybackState.ACTION_PLAY_PAUSE or
                 PlaybackState.ACTION_SKIP_TO_NEXT or
-                PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                PlaybackState.ACTION_STOP
+                PlaybackState.ACTION_SKIP_TO_PREVIOUS
+
+        /**
+         * What this zone will actually accept, right now.
+         *
+         * Roon says per zone whether play, pause, next and previous are
+         * allowed, and it answers a disallowed command by doing nothing at all.
+         * Advertising the full set regardless meant the lock screen offered
+         * buttons the Core would silently refuse — a button that does nothing,
+         * with nothing anywhere to say why.
+         */
+        fun actionsFor(zone: Zone?): Long {
+            if (zone == null) return ACTIONS
+            var a = 0L
+            if (zone.isPlayAllowed) a = a or PlaybackState.ACTION_PLAY
+            if (zone.isPauseAllowed) a = a or PlaybackState.ACTION_PAUSE
+            if (zone.isPlayAllowed || zone.isPauseAllowed) {
+                a = a or PlaybackState.ACTION_PLAY_PAUSE
+            }
+            if (zone.isNextAllowed) a = a or PlaybackState.ACTION_SKIP_TO_NEXT
+            if (zone.isPreviousAllowed) a = a or PlaybackState.ACTION_SKIP_TO_PREVIOUS
+            return a
+        }
     }
 
     private var session: MediaSession? = null
+
+    /**
+     * The zone this session is currently reporting, and the one its buttons
+     * address.
+     *
+     * Commands used to re-resolve "which zone is this about" at the moment the
+     * button was pressed, which is a different question from "which zone is
+     * this lock screen showing". When the two answers disagreed — and they
+     * could, because the fallback moved with playback — the button affected a
+     * room other than the one named on screen. The session now sends to the
+     * zone it drew.
+     */
+    @Volatile
+    private var zoneId: String? = null
 
     /**
      * Transport commands run here, never on the caller's thread.
@@ -139,6 +174,7 @@ class NowPlayingSession(
      */
     fun update(zone: Zone?) {
         val s = session ?: return
+        zoneId = zone?.zoneId
         try {
             val np = zone?.nowPlaying
             val art = np?.imageKey?.let { artFor(it) }
@@ -167,7 +203,7 @@ class NowPlayingSession(
             }
             s.setPlaybackState(
                 PlaybackState.Builder()
-                    .setActions(ACTIONS)
+                    .setActions(actionsFor(zone))
                     .setState(
                         state,
                         (np?.seekPosition?.toLong() ?: 0L) * 1000L,
@@ -236,12 +272,25 @@ class NowPlayingSession(
         }
     }
 
-    /** The three transport actions, as notification buttons. */
-    fun actions(): List<Notification.Action> = listOf(
-        action("Previous", android.R.drawable.ic_media_previous, RemoteService.ACTION_PREVIOUS),
-        action("Play/pause", android.R.drawable.ic_media_play, RemoteService.ACTION_PLAY_PAUSE),
-        action("Next", android.R.drawable.ic_media_next, RemoteService.ACTION_NEXT)
-    )
+    /**
+     * The three transport actions, as notification buttons.
+     *
+     * The middle one shows what pressing it will do, so it is a pause icon
+     * while the zone is playing. A control that always shows "play" is telling
+     * you the wrong thing half the time.
+     */
+    fun actions(zone: Zone?): List<Notification.Action> {
+        val playing = zone?.state == "playing" || zone?.state == "loading"
+        return listOf(
+            action("Previous", android.R.drawable.ic_media_previous, RemoteService.ACTION_PREVIOUS),
+            action(
+                if (playing) "Pause" else "Play",
+                if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                RemoteService.ACTION_PLAY_PAUSE
+            ),
+            action("Next", android.R.drawable.ic_media_next, RemoteService.ACTION_NEXT)
+        )
+    }
 
     private fun action(title: String, icon: Int, intentAction: String): Notification.Action {
         // Foreground start for the same reason the widget uses one: if the
@@ -266,27 +315,41 @@ class NowPlayingSession(
      * that lies whenever the Core refuses.
      */
     fun command(command: String) {
+        // Read on the caller's thread, so the target is the zone that was on
+        // screen when the button was pressed rather than whatever it may have
+        // become by the time the executor gets to it.
+        val target = zoneId ?: app.activeZone()?.zoneId
+        if (target == null) {
+            Log.w(TAG, "no zone to send $command to")
+            return
+        }
         runCatching {
             commands.execute {
-                runCatching {
-                    val zoneId = app.activeZone()?.zoneId ?: return@runCatching
-                    app.roon.control(zoneId, command)
-                }.onFailure { Log.w(TAG, "transport command $command failed", it) }
+                runCatching { app.roon.control(target, command) }
+                    .onFailure { Log.w(TAG, "transport command $command failed", it) }
             }
         }.onFailure { Log.w(TAG, "could not queue $command", it) }
     }
 
+    /**
+     * Note what is NOT here: an onMediaButtonEvent override.
+     *
+     * It used to exist and to rebuild the notification on every key event —
+     * which meant twice per press, since a key press is a down and an up, and
+     * each rebuild wrote the zone's pre-command state back over the session.
+     * The button therefore snapped back to its old position immediately after
+     * being pressed, which reads as "it did nothing" and invites a second
+     * press. The default implementation treats a second press inside the
+     * double-tap window as skip-to-next, so the reward for the retry was a
+     * track change. Removing the override removes both halves: the default
+     * mapping onto the callbacks below is exactly what is wanted, and the zone
+     * feed is what updates the state.
+     */
     private inner class Callbacks : MediaSession.Callback() {
         override fun onPlay() = command("play")
         override fun onPause() = command("pause")
-        override fun onStop() = command("stop")
+        override fun onStop() = command("pause")
         override fun onSkipToNext() = command("next")
         override fun onSkipToPrevious() = command("previous")
-        override fun onMediaButtonEvent(intent: Intent): Boolean {
-            // Let the default handling map key events onto the callbacks above;
-            // this override exists only so a failure here cannot escape.
-            return runCatching { super.onMediaButtonEvent(intent) }.getOrDefault(false)
-                .also { onChanged() }
-        }
     }
 }

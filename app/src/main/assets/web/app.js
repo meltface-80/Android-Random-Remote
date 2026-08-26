@@ -9861,6 +9861,43 @@
 })();
 
 /* ------------------------------------------------------------------ */
+/*  Add the Quick Settings tile                                        */
+/* ------------------------------------------------------------------ */
+(function initAddTile() {
+  const block = document.getElementById("settings-tile-block");
+  const btn   = document.getElementById("add-tile-btn");
+  if (!block || !btn) return;
+
+  // Hidden unless the system can actually be asked. Below Android 13 there is
+  // no such call, and a button that can only ever explain why it does nothing
+  // is worse than no button.
+  fetch("/api/tile/status", { cache: "no-store" })
+    .then((r) => r.json())
+    .then((s) => { if (s && s.supported) block.hidden = false; })
+    .catch(() => {});
+
+  btn.addEventListener("click", async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "Asking…";
+    try {
+      const r = await fetch("/api/tile/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+      });
+      const s = await r.json();
+      // The system shows its own prompt, so on success there is nothing to say
+      // here — the answer is on screen already.
+      btn.textContent = s && s.ok ? "Add tile" : (s && s.error) || "Not available";
+    } catch (e) {
+      btn.textContent = "Could not ask";
+    }
+    setTimeout(() => { btn.disabled = false; btn.textContent = "Add tile"; }, 3000);
+  });
+})();
+
+/* ------------------------------------------------------------------ */
 /*  Play Unheard — topbar compass button with 2-second spin           */
 /* ------------------------------------------------------------------ */
 (function initPlayUnheard() {

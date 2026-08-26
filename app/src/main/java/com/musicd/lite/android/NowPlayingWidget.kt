@@ -100,6 +100,20 @@ class NowPlayingWidget : AppWidgetProvider() {
                 views.setImageViewResource(R.id.widget_art, R.mipmap.ic_launcher_foreground)
             }
 
+            // What pressing it will do, not what it did last. This was simply
+            // never written: the layout ships a play triangle and nothing ever
+            // changed it, so the widget claimed to be paused the whole time it
+            // was playing.
+            val playing = zone?.state == "playing" || zone?.state == "loading"
+            views.setImageViewResource(
+                R.id.widget_playpause,
+                if (playing) android.R.drawable.ic_media_pause
+                else android.R.drawable.ic_media_play
+            )
+            views.setContentDescription(
+                R.id.widget_playpause, if (playing) "Pause" else "Play"
+            )
+
             views.setOnClickPendingIntent(R.id.widget_art, service(context, ACTION_RANDOM))
 
             views.setOnClickPendingIntent(

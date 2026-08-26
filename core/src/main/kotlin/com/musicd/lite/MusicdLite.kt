@@ -61,6 +61,17 @@ class MusicdLite(
      * offering a button that leads nowhere.
      */
     private val updateInstaller: UpdateInstaller? = null,
+    /**
+     * Asks the system to offer adding the Quick Settings tile, and reports what
+     * it said. Null on any host without one — the JVM tests, and any Android
+     * below 13, where the tile can only be added by hand from the shade's
+     * editor.
+     *
+     * This exists because "the tile is declared correctly" and "the user can
+     * find the tile" turned out to be different things, and only the first one
+     * is something the manifest can settle.
+     */
+    private val tileInstaller: TileInstaller? = null,
     roonFactory: (Store, RoonCore.ExtensionInfo, RoonCore.MulticastLock) -> RoonApi =
         { store, extension, lock -> RoonCore(store, extension, lock) }
 ) {
@@ -368,6 +379,32 @@ class MusicdLite(
     }
 
     /**
+     * How the Android shell offers the Quick Settings tile.
+     *
+     * [supported] is false where the system has no way to ask — below Android
+     * 13 the only route is the shade's own tile editor.
+     */
+    class TileInstaller(
+        val supported: Boolean,
+        /** Puts up the system's "add tile?" prompt. */
+        val request: () -> Unit
+    )
+
+    /** Whether this host can put up the system's "add tile?" prompt at all. */
+    fun tileSupported(): Boolean = tileInstaller?.supported ?: false
+
+    fun requestTile(): Result<Unit> {
+        val installer = tileInstaller
+            ?: return Result.failure(IllegalStateException("Not available on this device"))
+        if (!installer.supported) {
+            return Result.failure(
+                IllegalStateException("Android 13 or newer is needed to add it this way")
+            )
+        }
+        return runCatching { installer.request() }
+    }
+
+    /**
      * The zone everything outside the web UI is about: the notification, the
      * media session, the widget and the tile.
      *
@@ -380,9 +417,19 @@ class MusicdLite(
      */
     fun activeZone(): Zone? = runCatching {
         val zones = roon.zones()
-        settings.lastZone()?.let { id -> zones.firstOrNull { it.zoneId == id } }
-            ?: zones.firstOrNull { it.isPlaying }
-            ?: zones.firstOrNull()
+        if (zones.isEmpty()) return@runCatching null
+        settings.lastZone()?.let { id -> zones.firstOrNull { it.zoneId == id } }?.let {
+            return@runCatching it
+        }
+        // Nothing remembered, so pick one — and then remember it. Without that
+        // last step the answer moved with playback: "the zone that is playing"
+        // resolves to a real zone while something is playing and to "whichever
+        // zone happens to be first" the moment everything pauses. So pausing
+        // and then pressing play could address two different rooms, which is
+        // exactly what a remote must never do.
+        val chosen = zones.firstOrNull { it.isPlaying } ?: zones.first()
+        runCatching { settings.saveLastZone(chosen.zoneId) }
+        chosen
     }.getOrNull()
 
     /**

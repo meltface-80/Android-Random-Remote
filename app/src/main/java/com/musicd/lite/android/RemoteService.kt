@@ -111,6 +111,7 @@ class RemoteService : Service() {
                 multicastLock = WifiMulticastLock(),
                 // The Android half of an update. :core notices the new version
                 // and downloads it; only the system installer can apply it.
+                tileInstaller = TileRequest.installer(this),
                 updateInstaller = MusicdLite.UpdateInstaller(
                     downloadDir = ApkInstaller.downloadDir(this),
                     install = { apk -> ApkInstaller.install(this, apk) }
@@ -131,8 +132,7 @@ class RemoteService : Service() {
         // built the app still serves the UI and stays paired with Roon, which
         // is its actual job.
         runCatching {
-            nowPlaying = NowPlayingSession(this, lite) { refreshNotification() }
-                .takeIf { it.start() }
+            nowPlaying = NowPlayingSession(this, lite).takeIf { it.start() }
             if (nowPlaying == null) AndroidLog.w(TAG, "running without a media session")
         }.onFailure { AndroidLog.w(TAG, "media session unavailable", it) }
 
@@ -318,7 +318,7 @@ class RemoteService : Service() {
         val session = nowPlaying
         val zone = if (session == null) null else currentZone()
         if (session != null && zone != null) {
-            session.actions().forEach { builder.addAction(it) }
+            session.actions(zone).forEach { builder.addAction(it) }
             return session.decorate(builder, zone).build()
         }
         return builder.build()
