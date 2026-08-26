@@ -2,13 +2,13 @@ package com.musicd.lite.android.dial
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.ActivityNotFoundException
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.speech.RecognizerIntent
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
@@ -41,7 +41,10 @@ class DialActivity : Activity(), DialView.Callbacks {
         /** How big a cover to fetch for the middle of the ring. */
         private const val ART_PX = 640
 
-        private const val SPEECH_REQUEST = 7001
+        private const val MICROPHONE_REQUEST = 7001
+
+        /** How long a spoken answer stays on the dial before now-playing returns. */
+        private const val SAID_MS = 3_500L
     }
 
     private lateinit var dial: DialView
@@ -51,6 +54,8 @@ class DialActivity : Activity(), DialView.Callbacks {
     private var watching = false
 
     private var artKey: String? = null
+
+    private val voiceInput by lazy { VoiceInput(this) }
 
     private val app: MusicdLite? get() = RemoteService.instance?.app
 
@@ -84,6 +89,9 @@ class DialActivity : Activity(), DialView.Callbacks {
     override fun onPause() {
         super.onPause()
         watching = false
+        // Holding the microphone open behind another screen is not something
+        // to do by accident.
+        runCatching { voiceInput.stop() }
     }
 
     /**
@@ -213,65 +221,89 @@ class DialActivity : Activity(), DialView.Callbacks {
     }
 
     /**
-     * Say an album or an artist, and it plays.
+     * Speak to the dial.
      *
-     * The recognising is Android's and the matching is this app's own library
-     * index — nothing about what was said leaves the phone beyond whatever the
-     * system recogniser already does, and no music service is consulted,
-     * because the answer can only be a record you own.
+     * This uses the app's own recogniser rather than launching the system
+     * one. Handing the job to RecognizerIntent as an activity worked, but it
+     * covered the dial with Google's full-screen listening UI — which is not
+     * what the dial does, and not what the standalone app does either. Here
+     * the words appear on the dial itself as they are heard.
+     *
+     * What is said is parsed by :core, not by the string-munging that ships in
+     * the synced VoiceInput.kt beside this. That file's SpokenQuery only
+     * strips a "play" verb and searches, which is the behaviour that made
+     * "turn up volume" go looking for an album of that name. Voice.parse
+     * handles the control phrases first, and it is tested.
      */
     override fun onVoiceTapped() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
-            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Album or artist")
-        try {
-            dial.voice = DialView.Voice.Listening("")
-            @Suppress("DEPRECATION")
-            startActivityForResult(intent, SPEECH_REQUEST)
-        } catch (e: ActivityNotFoundException) {
-            dial.voice = DialView.Voice.Idle
-            Toast.makeText(this, "No speech recogniser on this device", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    @Deprecated("startActivityForResult is what the speech recogniser answers on")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        @Suppress("DEPRECATION")
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != SPEECH_REQUEST) return
-
-        val heard = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            ?.firstOrNull()
-            ?.takeIf { resultCode == RESULT_OK && it.isNotBlank() }
-        if (heard == null) {
+        if (voiceInput.isListening) {
+            voiceInput.stop()
             dial.voice = DialView.Voice.Idle
             return
         }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MICROPHONE_REQUEST)
+            return
+        }
+        listen()
+    }
 
-        dial.voice = DialView.Voice.Working(heard)
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != MICROPHONE_REQUEST) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            listen()
+        } else {
+            said("The microphone is needed to ask for a record")
+        }
+    }
+
+    private fun listen() {
+        voiceInput.start(object : VoiceInput.Listener {
+            override fun onListening() {
+                dial.voice = DialView.Voice.Listening("")
+            }
+
+            /** The words so far, so the dial shows it is following along. */
+            override fun onPartial(text: String) {
+                dial.voice = DialView.Voice.Listening(text)
+            }
+
+            override fun onHeard(text: String) {
+                dial.voice = DialView.Voice.Working(text)
+                obey(text)
+            }
+
+            override fun onFailed(reason: String) = said(reason)
+        })
+    }
+
+    /**
+     * Off the main thread: this can walk Roon's browse tree to find a record.
+     */
+    private fun obey(spoken: String) {
         val lite = app
         if (lite == null) {
             said("Still starting up")
             return
         }
         background {
-            val result = lite.playSpoken(heard)
-            main.post {
-                result.fold(
-                    onSuccess = { said("${it.title} — ${it.subtitle}") },
-                    onFailure = { said(it.message ?: "Nothing matched") }
-                )
-            }
+            val outcome = lite.obey(spoken)
+            main.post { said(outcome.message) }
         }
     }
 
     /** Shows a line on the dial, then puts it back to now playing. */
     private fun said(message: String) {
+        main.removeCallbacksAndMessages(null)
         dial.voice = DialView.Voice.Said(message)
-        main.postDelayed({ dial.voice = DialView.Voice.Idle }, 3_500)
+        main.postDelayed({ dial.voice = DialView.Voice.Idle }, SAID_MS)
     }
 
     override fun onLongPress() {

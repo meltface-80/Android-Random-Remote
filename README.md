@@ -60,7 +60,7 @@ API testable on a JVM with no emulator — see [Verification](#verification).
 
 ## Install
 
-**Download: [musicd-remote-lite-0.3.0.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.3.0.apk)**
+**Download: [musicd-remote-lite-0.3.2.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.3.2.apk)**
 
 Sideload it on Android 8.0 (API 26) or newer. The file in
 [`dist/`](dist/) is published by CI from the source in this repository, so it is
@@ -152,6 +152,25 @@ the whole reason for the port:
 - **A Quick Settings tile.** Pull down the shade, tap, and a record starts in
   the zone you were last using — no launcher, no cold start, no WebView. The
   app's most-used action, without the app.
+- **The dial**, as a second launcher icon. A volume ring you sweep with your
+  thumb, album art in the middle, transport under it — and a microphone: say an
+  album or an artist and it plays. One install, two icons, one Roon extension.
+- **The dial as a widget too.** The same view drawn to an image, so the two
+  cannot drift apart, with tap targets laid over the controls it drew. The ring
+  cannot be swept there — a drag on the home screen belongs to the launcher —
+  so its two sides are volume instead.
+
+The dial is not this project's code. It is ported from
+[Dial for Roon](https://github.com/meltface-80/dial-for-Roon) by
+`tools/sync-dial.py`, from the commit pinned in `tools/dial-upstream.json`, and
+the whole difference between that code and the copy here is a declared list of
+string substitutions. CI regenerates it and fails on any difference, so the
+port cannot quietly diverge; a weekly job asks whether upstream has moved.
+
+Speech recognition is Android's own and the matching is this app's library
+index, so "dark side of the moon" finds the record. Nothing about what was said
+goes anywhere beyond whatever the system recogniser already does, and no music
+service is consulted — the answer can only be a record you own.
 
 Nothing here plays audio; Roon does. The session reports the state of whichever
 zone you are watching, which is also why the foreground service is *not*
@@ -280,6 +299,15 @@ emulator in the loop.
   budgets are tested by fetching past them: 64MB of art through a 16MB disk
   tier has to leave 16MB behind, and the art swept has to be the art least
   recently *used*, not merely the oldest on the disk.
+
+- **The dial, drawn for real.** Robolectric with native graphics runs the Skia
+  pipeline on the JVM, so the view is measured, painted and driven with real
+  `MotionEvent`s in CI — a 90° sweep of the ring has to produce exactly 45
+  steps of 0.5 dB, a sweep across the 12 o'clock seam must not spike, a
+  fixed-volume zone must ignore the ring, and each tap has to land on the
+  control that was drawn. The rendered dials are uploaded as build artefacts.
+  This is the only Android code here with a test behind it rather than just a
+  compiler.
 
 - **The API, end to end over a real socket.** 29 tests drive the shipping HTTP
   server and router — the JSON the unmodified front-end reads, `409` on a moved

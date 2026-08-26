@@ -23,6 +23,25 @@
     -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- The dial's microphone. Asked for at the moment it is first tapped, not
+         at launch: an app that wants the microphone before you have used it is
+         an app you should be suspicious of. Nothing is recorded or kept — the
+         recogniser hands back a string and the audio is gone. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!--
+      From Android 11 an app cannot see another package unless it says which it
+      is looking for. Without this the speech recogniser is invisible, and
+      SpeechRecognizer.isRecognitionAvailable() answers false on a phone that
+      has one — so the microphone would report "no speech recognition on this
+      device" and nobody would know why.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

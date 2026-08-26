@@ -81,6 +81,16 @@ class MusicdLite(
         const val TAG = "MusicdLite"
 
         /**
+         * How much of an output's range one spoken volume command moves.
+         *
+         * Around 4dB on a typical -80..0dB output: clearly audible, and small
+         * enough that overshooting into something startling takes deliberate
+         * repetition. The widget's buttons move a sixteenth of this, which is
+         * right for a thing you tap and wrong for a thing you say.
+         */
+        const val VOICE_VOLUME_FRACTION = 0.05
+
+        /**
          * How often to ask Roon whether the library moved. The CHECK is frequent
          * because it is a two-call probe; the REBUILD is rare because it is a
          * full walk. This keeps the app off a busy Core entirely.
@@ -432,6 +442,86 @@ class MusicdLite(
         runCatching { settings.saveLastZone(chosen.zoneId) }
         chosen
     }.getOrNull()
+
+    /**
+     * Does what was said.
+     *
+     * Lives here rather than in the dial because everything it needs is here —
+     * the zone, the outputs, the library index — and because here it can be
+     * tested. The only part that cannot be is the recogniser itself, which is
+     * Android turning sound into a string; from the string onward this is
+     * ordinary code with ordinary tests.
+     *
+     * @return what to say back, and whether it worked.
+     */
+    fun obey(spoken: String): VoiceOutcome = when (val command = Voice.parse(spoken)) {
+        is VoiceCommand.Play -> playSpoken(command.query).fold(
+            onSuccess = { VoiceOutcome(true, "${it.title} — ${it.subtitle}") },
+            onFailure = { VoiceOutcome(false, it.message ?: "Nothing matched") }
+        )
+        is VoiceCommand.Random -> playRandomAlbum().fold(
+            onSuccess = { VoiceOutcome(true, "${it.title} — ${it.subtitle}") },
+            onFailure = { VoiceOutcome(false, it.message ?: "Could not start an album") }
+        )
+        VoiceCommand.Resume -> transport("play", "Playing")
+        VoiceCommand.Pause -> transport("pause", "Paused")
+        VoiceCommand.Next -> transport("next", "Next")
+        VoiceCommand.Previous -> transport("previous", "Previous")
+        is VoiceCommand.Volume -> volume(command.up)
+        is VoiceCommand.Mute -> mute(command.on)
+        is VoiceCommand.Unknown -> VoiceOutcome(false, "Didn't understand that")
+    }
+
+    private fun transport(command: String, said: String): VoiceOutcome {
+        val zone = activeZone() ?: return VoiceOutcome(false, "No zones available")
+        return runCatching { roon.control(zone.zoneId, command); VoiceOutcome(true, said) }
+            .getOrElse { VoiceOutcome(false, it.message ?: "Roon refused that") }
+    }
+
+    /**
+     * One spoken step of volume, on every output in the zone.
+     *
+     * [VOICE_VOLUME_FRACTION] of the output's own range, so the same phrase
+     * means the same amount of change whether the device counts in dB or in
+     * arbitrary units — and it is a step you can hear, since the point of
+     * saying it out loud is not to have to say it four more times.
+     */
+    private fun volume(up: Boolean): VoiceOutcome {
+        val zone = activeZone() ?: return VoiceOutcome(false, "No zones available")
+        if (!zone.hasVolumeControl) {
+            return VoiceOutcome(false, "${zone.displayName} has no volume control")
+        }
+        val direction = if (up) 1 else -1
+        var moved = false
+        for (out in zone.volumeOutputs) {
+            val vol = out.volume ?: continue
+            runCatching {
+                if (vol.isIncremental) {
+                    roon.changeVolume(out.outputId, "relative", direction.toDouble())
+                } else {
+                    val span = vol.effectiveMax - vol.min
+                    if (span <= 0.0) return@runCatching
+                    val steps = ((span * VOICE_VOLUME_FRACTION) / vol.step)
+                        .toInt().coerceAtLeast(1) * direction
+                    roon.changeVolume(out.outputId, "relative_step", steps.toDouble())
+                }
+                moved = true
+            }
+        }
+        return if (moved) VoiceOutcome(true, if (up) "Louder" else "Quieter")
+        else VoiceOutcome(false, "Could not change the volume")
+    }
+
+    private fun mute(on: Boolean): VoiceOutcome {
+        val zone = activeZone() ?: return VoiceOutcome(false, "No zones available")
+        if (!zone.hasVolumeControl) {
+            return VoiceOutcome(false, "${zone.displayName} has no volume control")
+        }
+        for (out in zone.volumeOutputs) {
+            runCatching { roon.mute(out.outputId, if (on) "mute" else "unmute") }
+        }
+        return VoiceOutcome(true, if (on) "Muted" else "Unmuted")
+    }
 
     /**
      * Plays whatever best matches [query], for the dial's microphone.
