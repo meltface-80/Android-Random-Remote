@@ -61,8 +61,32 @@ the commit it was built from. Every push also produces the same APK as a
 [CI artifact](../../actions/workflows/build.yml), and a `v*` tag attaches it to
 a release.
 
-The APK is signed with the standard Android debug key, so it installs alongside
-anything else but will not update in place over a differently-signed build.
+### Signing, and why updates depend on it
+
+Android refuses to install an APK over one signed with a different key. This
+build was signed with the Android **debug** key, which is generated per
+machine — so every CI runner produced a new certificate and every published
+release was un-installable as an update. Three consecutive releases had three
+different certificates.
+
+Releases are now signed with a fixed key held in the
+`MUSICD_KEYSTORE_BASE64` and `MUSICD_KEYSTORE_PASSWORD` repository secrets,
+and CI refuses to publish an APK whose certificate does not match the
+fingerprint pinned in [`tools/release-key.sha256`](tools/release-key.sha256) —
+a wrong key now fails the build instead of failing on someone's phone months
+later.
+
+`tools/apk-cert.py` prints the certificate of any APK, which is how the
+original fault was diagnosed:
+
+```
+python3 tools/apk-cert.py dist/musicd-remote-lite-*.apk
+```
+
+**One-time migration.** Builds from 0.1.8 onward update over each other, but
+none of them can install over 0.1.7 or earlier, which carry the old
+throwaway keys. Uninstall the app once, install 0.1.8, and updates work from
+then on.
 
 Then, once:
 

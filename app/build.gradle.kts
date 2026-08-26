@@ -16,21 +16,43 @@ android {
         // Bumping versionName is what publishes a new APK into dist/ and
         // repoints the README at it — see the workflow. versionCode must rise
         // with it or Android refuses to install over the previous build.
-        versionCode = 8
-        versionName = "0.1.7"
+        versionCode = 9
+        versionName = "0.1.8"
     }
 
     buildFeatures {
         buildConfig = true
     }
 
+    /**
+     * The release key, and why it cannot be the debug one.
+     *
+     * Android refuses to install an APK over one signed with a different key,
+     * and the debug keystore is generated per machine — a CI runner is fresh
+     * every time, so every published build carried a NEW certificate. Three
+     * consecutive releases had three different ones, which is exactly why
+     * installing an update over the existing app stopped working.
+     *
+     * So the key comes from the environment (a CI secret), and there is no
+     * fallback that silently signs with something else: a release build with
+     * no key configured is unsigned, which fails loudly at install time rather
+     * than producing an APK that looks fine and cannot be an update.
+     */
+    val keystorePath = System.getenv("MUSICD_KEYSTORE")
+    if (!keystorePath.isNullOrBlank()) {
+        signingConfigs.create("release") {
+            storeFile = file(keystorePath)
+            storePassword = System.getenv("MUSICD_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("MUSICD_KEY_ALIAS") ?: "musicd"
+            keyPassword = System.getenv("MUSICD_KEY_PASSWORD")
+                ?: System.getenv("MUSICD_KEYSTORE_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so the artifact is directly installable
-            // without a keystore. It will not update in place over a build
-            // signed with a different key.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

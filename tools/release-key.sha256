@@ -1,0 +1,11 @@
+b55d714c40b8ad96aa515d289d56cf3a40d0c28d60194e86076f73111eea1fad
+# SHA-256 of the certificate every published APK must be signed with.
+#
+# Not a secret — a certificate fingerprint is public by design. It lives here
+# rather than in a repository secret so that changing the release key is a
+# visible commit rather than a silent settings change, and so CI can catch a
+# build signed with the wrong key BEFORE it reaches dist/.
+#
+# The private key is in the MUSICD_KEYSTORE_BASE64 repository secret. If it is
+# ever lost, a new key can be generated — but everyone with the app installed
+# will have to uninstall before they can install again, so keep a backup.
