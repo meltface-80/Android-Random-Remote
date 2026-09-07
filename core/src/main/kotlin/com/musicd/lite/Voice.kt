@@ -229,6 +229,49 @@ object Voice {
     private fun bare(word: String): String =
         word.lowercase().filter { it.isLetterOrDigit() || it == '\'' }
 
+    /**
+     * The phrase to search for, out of what a MEDIA_PLAY_FROM_SEARCH carries.
+     *
+     * Android's media-search intent sends the whole spoken sentence in
+     * SearchManager.QUERY, and SEPARATELY sends whatever it managed to pick out
+     * of it as artist, album and title. The sentence is the better search here
+     * — this app matches fuzzily over its own index, and Google's guess at
+     * which half is the artist is one more thing to be wrong about.
+     *
+     * The parts are the fallback, for the senders that fill them in and leave
+     * QUERY empty. Title first, then album, then artist: a name is worth more
+     * to the matcher than the act, because an act has a whole discography and
+     * the record is the thing being asked for.
+     *
+     * Everything empty is not a failure — "play something" arrives that way,
+     * and an empty phrase is how the caller is told to pick at random.
+     */
+    fun mediaQuery(query: String?, artist: String?, album: String?, title: String?): String {
+        query?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        val parts = listOf(title, album, artist).mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
+        // Deduplicated because a sender that knows only one thing often puts
+        // the same string in two of the three.
+        return parts.distinct().joinToString(" ")
+    }
+
+    /**
+     * A media-search intent, as a phrase [MusicdLite.obey] can take.
+     *
+     * Two decisions live here rather than in the Android class that receives
+     * the intent, because here they are tested:
+     *
+     *  - An EMPTY search is "play something", and the something this app has
+     *     always had an opinion about is a random album.
+     *  - A search that found words gets the verb put back on. Without it a
+     *     record called "Pause" or "Next" would be read as a control phrase
+     *     and stop the music instead of starting it — the intent said play,
+     *     so the phrase has to say play too.
+     */
+    fun mediaCommand(query: String?, artist: String?, album: String?, title: String?): String {
+        val found = mediaQuery(query, artist, album, title)
+        return if (found.isEmpty()) "random album" else "play $found"
+    }
+
     fun parse(spoken: String): VoiceCommand {
         val heard = spoken.trim()
         val key = normalise(heard)
