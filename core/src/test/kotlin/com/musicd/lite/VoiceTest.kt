@@ -1,6 +1,7 @@
 package com.musicd.lite
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -125,5 +126,111 @@ class VoiceTest {
         // But the escape hatch still works: an album really called Music, or
         // Record, is reachable by naming the kind first.
         assertEquals(VoiceCommand.Play("Music"), parse("play the album Music"))
+    }
+
+    // ------------------------------------------------------ naming the room
+
+    private val rooms = listOf("Study", "Kitchen", "Kitchen Speakers", "Living Room")
+
+    private fun split(s: String) = Voice.splitZone(s, rooms)
+
+    @Test
+    fun aRoomAtTheEndIsTakenOffTheSentence() {
+        val heard = split("play Mezzanine in the kitchen")
+        assertEquals("Kitchen", heard.zone)
+        // The room must not reach the search, or the album looked for is
+        // "Mezzanine In The Kitchen" and nothing matches it.
+        assertEquals("play Mezzanine", heard.rest)
+    }
+
+    @Test
+    fun everyWayOfNamingTheRoomIsUnderstood() {
+        for (phrase in listOf(
+            "pause in the kitchen", "pause in kitchen", "pause on the kitchen",
+            "pause to the kitchen", "pause through the kitchen", "pause on kitchen"
+        )) {
+            assertEquals(phrase, "Kitchen", split(phrase).zone)
+            assertEquals(phrase, "pause", split(phrase).rest)
+        }
+    }
+
+    @Test
+    fun aRoomOfSeveralWordsIsMatchedWhole() {
+        val heard = split("play Kind of Blue in the living room")
+        assertEquals("Living Room", heard.zone)
+        assertEquals("play Kind of Blue", heard.rest)
+    }
+
+    /**
+     * With both "Kitchen" and "Kitchen Speakers" in the house, the room asked
+     * for is the one whose whole name is at the end — matching "Kitchen" here
+     * would leave "speakers" behind to be searched for as part of the title.
+     *
+     * (splitZone also prefers the longest match outright. That is insurance
+     * for a longer list of lead-ins rather than something this can provoke:
+     * with the eight it has, a name only ever matches the tail one way, so no
+     * test here fails without it. Said plainly instead of dressed up in a
+     * test that would pass either way.)
+     */
+    @Test
+    fun aRoomWhoseNameContainsAnotherRoomsIsMatchedWhole() {
+        val heard = split("play Mezzanine in the kitchen speakers")
+        assertEquals("Kitchen Speakers", heard.zone)
+        assertEquals("play Mezzanine", heard.rest)
+    }
+
+    @Test
+    fun courtesyAfterTheRoomIsNotPartOfIt() {
+        val heard = split("play Mezzanine in the kitchen please")
+        assertEquals("Kitchen", heard.zone)
+        assertEquals("play Mezzanine", heard.rest)
+    }
+
+    /**
+     * The guard that makes this safe at all: nothing is stripped unless it
+     * names a room that really exists, so an album can be called anything.
+     */
+    @Test
+    fun aRoomNobodyHasIsJustWordsInATitle() {
+        val heard = split("play Live at the Garage")
+        assertNull(heard.zone)
+        assertEquals("play Live at the Garage", heard.rest)
+    }
+
+    /**
+     * "Play the album In The Kitchen" is about a record. Taking the room off
+     * would leave "play the album", which means nothing — so the match is
+     * refused and the title survives whole.
+     */
+    @Test
+    fun aTitleThatIsAlsoARoomSurvivesWhenTheKindIsNamed() {
+        val heard = split("play the album In The Kitchen")
+        assertNull(heard.zone)
+        assertEquals(VoiceCommand.Play("In The Kitchen"), Voice.parse(heard.rest))
+    }
+
+    /**
+     * "Play in the kitchen" really is a room, and what is left — "play" —
+     * resumes. That is what somebody standing in a kitchen means by it.
+     */
+    @Test
+    fun aBareVerbBeforeARoomIsAControlNotASearch() {
+        val heard = split("play in the kitchen")
+        assertEquals("Kitchen", heard.zone)
+        assertEquals(VoiceCommand.Resume, Voice.parse(heard.rest))
+    }
+
+    @Test
+    fun aRoomWithNoCommandInFrontOfItIsNotObeyed() {
+        val heard = split("in the kitchen")
+        assertNull(heard.zone)
+        assertEquals("in the kitchen", heard.rest)
+    }
+
+    @Test
+    fun withNoZonesKnownNothingIsStripped() {
+        val heard = Voice.splitZone("play Mezzanine in the kitchen", emptyList())
+        assertNull(heard.zone)
+        assertEquals("play Mezzanine in the kitchen", heard.rest)
     }
 }

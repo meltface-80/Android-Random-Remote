@@ -440,27 +440,54 @@ class MusicdLite(
      *
      * @return what to say back, and whether it worked.
      */
-    fun obey(spoken: String): VoiceOutcome = when (val command = Voice.parse(spoken)) {
-        is VoiceCommand.Play -> playSpoken(command.query).fold(
-            onSuccess = { VoiceOutcome(true, "${it.title} — ${it.subtitle}") },
-            onFailure = { VoiceOutcome(false, it.message ?: "Nothing matched") }
-        )
-        is VoiceCommand.Random -> playRandomAlbum().fold(
-            onSuccess = { VoiceOutcome(true, "${it.title} — ${it.subtitle}") },
-            onFailure = { VoiceOutcome(false, it.message ?: "Could not start an album") }
-        )
-        VoiceCommand.Resume -> transport("play", "Playing")
-        VoiceCommand.Pause -> transport("pause", "Paused")
-        VoiceCommand.Next -> transport("next", "Next")
-        VoiceCommand.Previous -> transport("previous", "Previous")
-        is VoiceCommand.Volume -> volume(command.up)
-        is VoiceCommand.Mute -> mute(command.on)
-        is VoiceCommand.Unknown -> VoiceOutcome(false, "Didn't understand that")
+    fun obey(spoken: String): VoiceOutcome {
+        // The room, first, because every branch below wants it and because the
+        // words that name it must not reach the search: "play Kid A in the
+        // kitchen" is a request for one album, not for one called "Kid A In
+        // The Kitchen".
+        val zones = runCatching { roon.zones() }.getOrDefault(emptyList())
+        val heard = Voice.splitZone(spoken, zones.map { it.displayName })
+        // Only ever a name that came out of that same list, so this cannot miss.
+        val named = heard.zone?.let { name -> zones.firstOrNull { it.displayName == name } }
+
+        // Saying a room out loud moves the active zone, for the reason
+        // activeZone() gives about picking one and remembering it: without
+        // this, "pause in the kitchen" followed by "play" would start the
+        // music somewhere else, which is exactly what a remote must never do.
+        if (named != null) runCatching { settings.saveLastZone(named.zoneId) }
+
+        return when (val command = Voice.parse(heard.rest)) {
+            is VoiceCommand.Play -> playSpoken(command.query, named?.zoneId).fold(
+                onSuccess = { VoiceOutcome(true, said("${it.title} — ${it.subtitle}", named)) },
+                onFailure = { VoiceOutcome(false, it.message ?: "Nothing matched") }
+            )
+            is VoiceCommand.Random -> playRandomAlbum(named?.zoneId).fold(
+                onSuccess = { VoiceOutcome(true, said("${it.title} — ${it.subtitle}", named)) },
+                onFailure = { VoiceOutcome(false, it.message ?: "Could not start an album") }
+            )
+            VoiceCommand.Resume -> transport("play", "Playing", named)
+            VoiceCommand.Pause -> transport("pause", "Paused", named)
+            VoiceCommand.Next -> transport("next", "Next", named)
+            VoiceCommand.Previous -> transport("previous", "Previous", named)
+            is VoiceCommand.Volume -> volume(command.up, named)
+            is VoiceCommand.Mute -> mute(command.on, named)
+            is VoiceCommand.Unknown -> VoiceOutcome(false, "Didn't understand that")
+        }
     }
 
-    private fun transport(command: String, said: String): VoiceOutcome {
-        val zone = activeZone() ?: return VoiceOutcome(false, "No zones available")
-        return runCatching { roon.control(zone.zoneId, command); VoiceOutcome(true, said) }
+    /**
+     * The confirmation, naming the room when the room was asked for.
+     *
+     * A voice command you cannot see the result of has to say where it went:
+     * mishearing "kitchen" as "study" is silent otherwise, and the first you
+     * know of it is music in the wrong room.
+     */
+    private fun said(message: String, zone: Zone?): String =
+        if (zone == null) message else "$message — ${zone.displayName}"
+
+    private fun transport(command: String, verb: String, named: Zone? = null): VoiceOutcome {
+        val zone = named ?: activeZone() ?: return VoiceOutcome(false, "No zones available")
+        return runCatching { roon.control(zone.zoneId, command); VoiceOutcome(true, said(verb, named)) }
             .getOrElse { VoiceOutcome(false, it.message ?: "Roon refused that") }
     }
 
@@ -472,8 +499,8 @@ class MusicdLite(
      * arbitrary units — and it is a step you can hear, since the point of
      * saying it out loud is not to have to say it four more times.
      */
-    private fun volume(up: Boolean): VoiceOutcome {
-        val zone = activeZone() ?: return VoiceOutcome(false, "No zones available")
+    private fun volume(up: Boolean, named: Zone? = null): VoiceOutcome {
+        val zone = named ?: activeZone() ?: return VoiceOutcome(false, "No zones available")
         if (!zone.hasVolumeControl) {
             return VoiceOutcome(false, "${zone.displayName} has no volume control")
         }
@@ -494,19 +521,19 @@ class MusicdLite(
                 moved = true
             }
         }
-        return if (moved) VoiceOutcome(true, if (up) "Louder" else "Quieter")
+        return if (moved) VoiceOutcome(true, said(if (up) "Louder" else "Quieter", named))
         else VoiceOutcome(false, "Could not change the volume")
     }
 
-    private fun mute(on: Boolean): VoiceOutcome {
-        val zone = activeZone() ?: return VoiceOutcome(false, "No zones available")
+    private fun mute(on: Boolean, named: Zone? = null): VoiceOutcome {
+        val zone = named ?: activeZone() ?: return VoiceOutcome(false, "No zones available")
         if (!zone.hasVolumeControl) {
             return VoiceOutcome(false, "${zone.displayName} has no volume control")
         }
         for (out in zone.volumeOutputs) {
             runCatching { roon.mute(out.outputId, if (on) "mute" else "unmute") }
         }
-        return VoiceOutcome(true, if (on) "Muted" else "Unmuted")
+        return VoiceOutcome(true, said(if (on) "Muted" else "Unmuted", named))
     }
 
     /**
