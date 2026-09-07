@@ -82,21 +82,24 @@ class BrowserService : MediaBrowserService() {
     private fun publishToken() {
         Thread({
             val deadline = System.currentTimeMillis() + TOKEN_WAIT_MS
-            while (System.currentTimeMillis() < deadline) {
-                val token = RemoteService.instance?.mediaToken
-                if (token != null) {
-                    runCatching { setSessionToken(token) }
-                        .onFailure { Log.w(TAG, "could not publish the session token", it) }
-                    return@Thread
-                }
+            var token: android.media.session.MediaSession.Token? = null
+            while (token == null && System.currentTimeMillis() < deadline) {
+                token = RemoteService.instance?.mediaToken
+                if (token != null) break
                 try {
                     Thread.sleep(TOKEN_POLL_MS)
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
-                    return@Thread
+                    break
                 }
             }
-            Log.w(TAG, "no media session after ${TOKEN_WAIT_MS}ms; voice control will not work")
+            val found = token
+            if (found == null) {
+                Log.w(TAG, "no media session after ${TOKEN_WAIT_MS}ms; voice control will not work")
+            } else {
+                runCatching { setSessionToken(found) }
+                    .onFailure { Log.w(TAG, "could not publish the session token", it) }
+            }
         }, "browser-token").apply { isDaemon = true }.start()
     }
 
@@ -111,13 +114,26 @@ class BrowserService : MediaBrowserService() {
      * intent already offers any app on this phone. Refusing unknown callers
      * would mainly mean refusing whichever assistant the phone actually has.
      */
-    override fun onGetRoot(clientPackage: String, clientUid: Int, hints: Bundle?): BrowserRoot {
+    override fun onGetRoot(
+        clientPackage: String,
+        clientUid: Int,
+        hints: Bundle?
+    ): MediaBrowserService.BrowserRoot {
         Log.d(TAG, "connect from $clientPackage")
-        return BrowserRoot(ROOT, null)
+        return MediaBrowserService.BrowserRoot(ROOT, null)
     }
 
-    /** Nothing to browse yet — see the note above about Android Auto. */
-    override fun onLoadChildren(parentId: String, result: Result<MutableList<MediaBrowser.MediaItem>>) {
+    /**
+     * Nothing to browse yet — see the note above about Android Auto.
+     *
+     * The Result is spelled out in full because Kotlin auto-imports its own
+     * kotlin.Result, and a bare one here is a coin toss over which the reader
+     * (and the compiler's overload resolution) means.
+     */
+    override fun onLoadChildren(
+        parentId: String,
+        result: MediaBrowserService.Result<MutableList<MediaBrowser.MediaItem>>
+    ) {
         result.sendResult(mutableListOf())
     }
 }

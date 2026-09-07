@@ -52,21 +52,6 @@ class NowPlayingSession(
         const val ART_PX = 512
 
         /**
-         * What this session can do when nothing better is known.
-         *
-         * Deliberately not SEEK: Roon's seek is absolute against a track this
-         * app does not own the clock for, and a scrubber that fights the zone's
-         * own position is worse than none.
-         */
-        const val ACTIONS =
-            PlaybackState.ACTION_PLAY or
-                PlaybackState.ACTION_PAUSE or
-                PlaybackState.ACTION_PLAY_PAUSE or
-                PlaybackState.ACTION_SKIP_TO_NEXT or
-                PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                SEARCH
-
-        /**
          * "Play <something> on MusicD", which is a different kind of thing from
          * the transport actions beside it.
          *
@@ -83,6 +68,21 @@ class NowPlayingSession(
          * it would be the wrong record. Only claim what is implemented.
          */
         const val SEARCH = PlaybackState.ACTION_PLAY_FROM_SEARCH
+
+        /**
+         * What this session can do when nothing better is known.
+         *
+         * Deliberately not SEEK: Roon's seek is absolute against a track this
+         * app does not own the clock for, and a scrubber that fights the zone's
+         * own position is worse than none.
+         */
+        const val ACTIONS =
+            PlaybackState.ACTION_PLAY or
+                PlaybackState.ACTION_PAUSE or
+                PlaybackState.ACTION_PLAY_PAUSE or
+                PlaybackState.ACTION_SKIP_TO_NEXT or
+                PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                SEARCH
 
         /**
          * What this zone will actually accept, right now.
