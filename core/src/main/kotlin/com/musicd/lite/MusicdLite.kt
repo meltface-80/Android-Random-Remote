@@ -26,6 +26,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import okhttp3.OkHttpClient
 
 /**
  * The whole app, minus the Android shell.
@@ -63,6 +64,16 @@ class MusicdLite(
      * offering a button that leads nowhere.
      */
     private val updateInstaller: UpdateInstaller? = null,
+    /**
+     * Everything that leaves the device that is not Roon: MusicBrainz,
+     * Wikipedia, Pitchfork, the art service and the update manifest.
+     *
+     * Injectable because "this path does not touch the network" is a claim
+     * about calls that are NOT made, and the only honest way to assert it is to
+     * be able to see the ones that are. The tests pass a client that counts and
+     * refuses them.
+     */
+    httpClient: OkHttpClient = metadataHttpClient(),
     roonFactory: (Store, RoonCore.ExtensionInfo, RoonCore.MulticastLock) -> RoonApi =
         { store, extension, lock -> RoonCore(store, extension, lock) }
 ) {
@@ -110,7 +121,7 @@ class MusicdLite(
         website = "https://github.com/meltface-80/Android-Random-Remote"
     )
 
-    private val http = metadataHttpClient()
+    private val http = httpClient
 
     val roon: RoonApi = roonFactory(store, extension, multicastLock)
     val index = AlbumIndex()

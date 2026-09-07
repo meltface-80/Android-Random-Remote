@@ -50,6 +50,19 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
     private val cache = TtlCache<String, List<Item>>(LIST_TTL_MS, 4)
 
     /**
+     * One album's score, cached — including the absence of one.
+     *
+     * [reviewFor] downloads a whole review PAGE, and it is called on every
+     * /api/album/extras. The metadata beside it has been cached for twelve
+     * hours since it was written, so opening an album and then sharing it
+     * fetched Pitchfork's markup twice for a number that had not changed, and
+     * every album ever opened paid for it again on the next visit. A miss is
+     * the common case and costs a request just the same, so it is stored as an
+     * empty list rather than left to be asked again.
+     */
+    private val reviewCache = TtlCache<String, List<Item>>(REVIEW_TTL_MS, 512)
+
+    /**
      * One build per type at a time. Concurrent misses — a tab opening while a
      * search runs — share a single fetch instead of each hitting Pitchfork.
      */
@@ -266,10 +279,23 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
         val artistSlug = slugify(artist)
         val albumSlug = slugify(title)
         if (artistSlug.isEmpty() || albumSlug.isEmpty()) return null
-        val url = "https://pitchfork.com/reviews/albums/$artistSlug-$albumSlug/"
-        val html = text(url) ?: return null
-        return reviewFromPage(html, url, title, artist)
+        return reviewCache.get(reviewKey(title, artist)) {
+            val url = "$HOST/reviews/albums/$artistSlug-$albumSlug/"
+            val html = text(url)
+            listOfNotNull(html?.let { reviewFromPage(it, url, title, artist) })
+        }.firstOrNull()
     }
+
+    /**
+     * The score already in hand, without a request. A cached miss and a name
+     * never asked about both answer null, because both mean the same thing to
+     * the caller: draw no chip.
+     */
+    fun cachedReviewFor(title: String, artist: String): Item? =
+        reviewCache.peek(reviewKey(title, artist))?.firstOrNull()
+
+    private fun reviewKey(title: String, artist: String): String =
+        Normalize.text(title) + "||" + Normalize.text(artist)
 
     /**
      * Pulls the rating out of a review page's JSON-LD.
@@ -342,6 +368,13 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
 
         private const val TAG = "Pitchfork"
         private const val LIST_TTL_MS = 6L * 60 * 60 * 1000
+
+        /**
+         * A review is written once and its score does not move, so this could
+         * be far longer; a day keeps a correction or a first review turning up
+         * without the app having to be restarted.
+         */
+        private const val REVIEW_TTL_MS = 24L * 60 * 60 * 1000
         const val HOST = "https://pitchfork.com"
 
         /** Pitchfork throttles; one request at a time, spaced out. */

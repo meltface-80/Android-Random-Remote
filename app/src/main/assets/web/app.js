@@ -8513,12 +8513,47 @@
     if (e.key === "Escape" && !overlay.classList.contains("hidden")) close();
   });
 
-  // Public entry point — called from album modal share button + mini transport
+  // The release year the card prints, out of an /api/album/extras answer.
+  function yearOf(j) {
+    if (!j) return "";
+    if (j.year) return String(j.year);
+    if (j.album && j.album.year) return String(j.album.year);
+    return "";
+  }
+
+  // Bumped on every open(), so a late redraw cannot land on a card the user
+  // has since closed or replaced with a different album's.
+  let renderToken = 0;
+
+  /*
+   * Public entry point — called from album modal share button + mini transport.
+   *
+   * WHY THE CARD USED TO TAKE SECONDS, AND WHAT IT WAITS FOR NOW.
+   *
+   * The one fact the card carries that the app does not already hold is the
+   * release date, and it was fetched by awaiting /api/album/extras before a
+   * single pixel was drawn. On MusicD Server that endpoint answers out of the
+   * album row the server already has, which is why its card is instant. Here
+   * it is a chain of outside lookups — MusicBrainz, two Wikipedia searches,
+   * two summaries, a Pitchfork review page — run one after another from a
+   * phone, behind a 1.1s rate gate and 6s/12s timeouts. Several seconds of
+   * spinner for one four-digit number, and the rest of that answer (the blurb,
+   * the score, the label) never reaches the card at all: it was fetched,
+   * trimmed to ten sentences, and handed to a renderer that ignores it.
+   *
+   * So the card no longer waits on the network to draw. `fast=1` is answered
+   * from what the app already knows — the cached lookup, and the year store
+   * the library's Decade filter is built on — and never opens a socket. Only
+   * when that genuinely has no year is the full lookup fired, and then it is
+   * fired WITHOUT being awaited: the card is already on screen, and it is
+   * redrawn once if an answer turns up while it is still open.
+   */
   async function open(input) {
     const title  = input.title  || "";
     const artist = input.artist || "";
     if (!title) return;
 
+    const token = ++renderToken;
     actions.innerHTML = "";
     hintEl.textContent = "";
     errEl.textContent  = "";
@@ -8529,52 +8564,62 @@
     try {
       await ensureFont();
 
-      // Best-effort release year + label + review via extras endpoint
+      const params = new URLSearchParams({ title, artist });
       let releaseRaw = "";
-      let labelText  = "";
-      let reviewText = "";
       try {
-        const params = new URLSearchParams({ title, artist });
-        const r = await fetch("/api/album/extras?" + params, { cache: "no-store" });
-        if (r.ok) {
-          const j = await r.json();
-          if (j.year) releaseRaw = j.year;
-          if (j.album && j.album.year && !releaseRaw) releaseRaw = String(j.album.year);
-          if (j.album && j.album.label) labelText = String(j.album.label);
-          const desc = j.album && j.album.description;
-          if (desc) {
-            // Card height grows to fit, so show most of the review.
-            // Cap generously (~10 sentences / 1400 chars) to avoid an
-            // absurdly tall card from a very long Wikipedia article.
-            let t = String(desc).trim();
-            const sentences = t.match(/[^.!?]+[.!?]+/g);
-            if (sentences && sentences.length > 10) {
-              t = sentences.slice(0, 10).join(" ").trim();
-            }
-            if (t.length > 1400) t = t.slice(0, 1398).replace(/\s+\S*$/, "") + "…";
-            reviewText = t;
-          }
-        }
+        const r = await fetch("/api/album/extras?fast=1&" + params, { cache: "no-store" });
+        if (r.ok) releaseRaw = yearOf(await r.json());
       } catch { /* keep blank */ }
 
+      // Only worth asking the slow way when the fast answer had nothing. It
+      // also teaches the server the year, so the next card for this album is
+      // complete without any of this.
+      const late = releaseRaw ? null :
+        fetch("/api/album/extras?" + params, { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then(yearOf)
+          .catch(() => "");
+
+      // size=800 is the size the album modal and the now-playing screen ask
+      // for, so the picture the card needs is already in the WebView's cache
+      // and in the app's own art cache by the time the Share button is
+      // pressed. 1000 was a fourth distinct rendering of the same sleeve and
+      // shared a cache entry with nothing, so every card fetched a fresh
+      // megapixel from the Core — and the `t=` cache-buster on it made sure
+      // the second card for the same album did too. The card draws the cover
+      // at 424px and its softened ground at 24px; 800 is already generous.
       const coverUrl = input.image_key
-        ? `/api/image/${encodeURIComponent(input.image_key)}?size=1000&t=${Date.now()}`
+        ? `/api/image/${encodeURIComponent(input.image_key)}?size=800`
         : "";
 
-      const blob = await ShareCard.render({
-        coverUrl,
-        wordmarkUrl: null,
-        title,
-        artist,
-        releaseRaw,
-        label: labelText,
-        review: reviewText
-      });
+      const paint = async (release) => {
+        const blob = await ShareCard.render({
+          coverUrl,
+          wordmarkUrl: null,
+          title,
+          artist,
+          releaseRaw: release
+        });
+        // A card nobody is looking at any more is not worth showing, and the
+        // actions below would hand Share the wrong picture.
+        if (token !== renderToken || overlay.classList.contains("hidden")) return;
+        const dataUrl = await blobToDataUrl(blob);
+        if (token !== renderToken || overlay.classList.contains("hidden")) return;
+        frame.innerHTML = `<img src="${dataUrl}" alt="Share card">`;
+        buildActions(blob, title, artist);
+      };
 
-      const dataUrl = await blobToDataUrl(blob);
-      frame.innerHTML = `<img src="${dataUrl}" alt="Share card">`;
-      buildActions(blob, title, artist);
+      await paint(releaseRaw);
+
+      if (late) {
+        late.then((year) => {
+          if (!year || year === releaseRaw) return;
+          if (token !== renderToken || overlay.classList.contains("hidden")) return;
+          return paint(year);
+        }).catch(() => { /* the card without a date is already on screen */ });
+      }
     } catch (e) {
+      if (token !== renderToken) return;
       frame.innerHTML = `<div class="share-placeholder">Could not generate the card.</div>`;
       errEl.textContent = (e && e.message) ? e.message : String(e);
     }
