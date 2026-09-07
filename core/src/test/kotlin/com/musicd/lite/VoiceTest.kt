@@ -233,4 +233,65 @@ class VoiceTest {
         assertNull(heard.zone)
         assertEquals("play Mezzanine in the kitchen", heard.rest)
     }
+
+    // ------------------------------------------- what a media intent carries
+
+    @Test
+    fun theWholeSpokenSentenceIsPreferredToGooglesGuessAtItsParts() {
+        // The matcher here is fuzzy and searches the whole index, so the
+        // sentence beats a split into fields that may have split it wrongly.
+        assertEquals(
+            "kid a by radiohead",
+            Voice.mediaQuery("kid a by radiohead", artist = "Radiohead", album = null, title = "Kid A")
+        )
+    }
+
+    @Test
+    fun theBrokenOutPartsAreTheFallback() {
+        assertEquals(
+            "Kid A Radiohead",
+            Voice.mediaQuery(query = "", artist = "Radiohead", album = null, title = "Kid A")
+        )
+        assertEquals(
+            "Mezzanine Massive Attack",
+            Voice.mediaQuery(null, artist = "Massive Attack", album = "Mezzanine", title = null)
+        )
+    }
+
+    /** A sender that knows one thing often puts it in two of the three. */
+    @Test
+    fun aPartRepeatedAcrossFieldsIsSaidOnce() {
+        assertEquals(
+            "Mezzanine",
+            Voice.mediaQuery(null, artist = null, album = "Mezzanine", title = "Mezzanine")
+        )
+    }
+
+    /**
+     * "Play something" arrives with nothing in it at all. Empty is not a
+     * failure — it is how the caller is told to pick at random.
+     */
+    @Test
+    fun nothingAtAllComesBackEmptyRatherThanAsAGuess() {
+        assertEquals("", Voice.mediaQuery(null, null, null, null))
+        assertEquals("", Voice.mediaQuery("   ", "", "", ""))
+    }
+
+    @Test
+    fun anEmptyMediaSearchMeansPlaySomething() {
+        assertEquals(VoiceCommand.Random, parse(Voice.mediaCommand(null, null, null, null)))
+    }
+
+    /**
+     * The intent said PLAY, so the phrase has to as well: without the verb, a
+     * record called "Pause" would stop the music instead of starting it.
+     */
+    @Test
+    fun aMediaSearchNamingARecordIsAlwaysASearch() {
+        assertEquals(VoiceCommand.Play("Pause"), parse(Voice.mediaCommand("Pause", null, null, null)))
+        assertEquals(
+            VoiceCommand.Play("kid a by radiohead"),
+            parse(Voice.mediaCommand("kid a by radiohead", "Radiohead", null, "Kid A"))
+        )
+    }
 }

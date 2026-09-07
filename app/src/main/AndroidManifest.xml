@@ -92,6 +92,38 @@
         </activity>
 
         <!--
+          Playing something without opening anything.
+
+          MEDIA_PLAY_FROM_SEARCH is Android's own "play <something>" intent,
+          fired by car head units, launchers and assistants. Declaring it is
+          the only way this app can be offered as an answer to that at all —
+          and it is NOT the same as "Hey Google, play X on MusicD", which is
+          App Actions and needs Play Store publication plus a Google review of
+          a shortcuts.xml. A hand-signed, hand-installed APK gets neither.
+
+          VOICE_COMMAND is ours, and it is the one that will be used: a phrase
+          plus an optional room, run through the same obey() as the dial's
+          microphone. Exported because an intent nothing can send is not an
+          integration — see the class for what that does and does not risk.
+        -->
+        <activity
+            android:name=".VoiceIntentActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.musicd.lite.android.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!--
           A random album from the notification shade: pull down, tap, a record
           starts. The app's most-used action without opening the app.
         -->

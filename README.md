@@ -154,8 +154,9 @@ the whole reason for the port:
 - **Lock screen and hardware buttons.** A media session carries the artwork,
   the track and transport controls onto the lock screen and into the shade —
   and, the part that is not cosmetic, it is what Android routes media keys to.
-  Headset and Bluetooth buttons, steering-wheel controls and Assistant all
-  speak the same interface, so one integration reaches all of them.
+  Headset and Bluetooth buttons and steering-wheel controls all speak the
+  same interface, so one integration reaches all of them. Assistant is a
+  different matter — see the intents below for what it can and cannot do.
 - **A home-screen widget.** Now playing, with previous / play-pause / next, and
   the cover as a one-tap random album. It has no timer of its own: it is
   redrawn when Roon's zone feed actually moves.
@@ -177,10 +178,38 @@ the whole reason for the port:
   | "next track", "go back" | skip forward or back |
   | "mute", "unmute" | mutes the zone |
   | "surprise me" | a random album |
+  | "pause **in the kitchen**" | any of the above, in a named room |
 
   Control phrases are matched whole, before anything becomes a search — which
   is the only way "play music" can resume while "play music by Neil Young"
   still plays Neil Young.
+
+  The room is read off the end against the zones Roon is actually reporting,
+  so nothing is taken off a sentence unless it names a room that is really
+  there — "play *In The Kitchen*" is still an album. Naming a room also moves
+  the zone the next command goes to, and the answer says which room it went
+  to, because a spoken command you cannot see the result of has to.
+- **Two intents, so other apps can drive it.** `VOICE_COMMAND` takes any
+  phrase the microphone would take, and an optional room:
+
+  ```
+  adb shell am start -a com.musicd.lite.android.action.VOICE_COMMAND \
+    -e command "play Mezzanine in the kitchen"
+  ```
+
+  Tasker, MacroDroid, a Bixby routine or another app can send the same thing.
+  The app also answers Android's own `MEDIA_PLAY_FROM_SEARCH`, which is what a
+  car head unit or a launcher fires for "play something" — an empty search
+  gets a random album.
+
+  **Neither of these is "Hey Google, play X on MusicD."** That is App Actions,
+  and [Android's own documentation](https://developer.android.com/develop/devices/assistant/get-started)
+  requires the app to be published on the Play Store and its `shortcuts.xml`
+  separately reviewed by Google. An APK signed with a private key and installed
+  by hand satisfies neither, and Gemini plays from an account-linked list of
+  streaming services rather than from whatever is installed. The
+  `MEDIA_PLAY_FROM_SEARCH` filter is a standing offer Google may never take up;
+  everything that is not Google can use it today.
 - **The dial as a widget too.** The same view drawn to an image, so the two
   cannot drift apart, with tap targets laid over the controls it drew. The ring
   cannot be swept there — a drag on the home screen belongs to the launcher —

@@ -438,9 +438,15 @@ class MusicdLite(
      * Android turning sound into a string; from the string onward this is
      * ordinary code with ordinary tests.
      *
+     * [inZone] is the room to use when the sentence does not name one — for a
+     * caller that already knows which room it means and is not saying it out
+     * loud, such as an automation firing the same command at the kitchen every
+     * morning. A room named IN the sentence always wins: the words somebody
+     * actually said outrank a default set somewhere else.
+     *
      * @return what to say back, and whether it worked.
      */
-    fun obey(spoken: String): VoiceOutcome {
+    fun obey(spoken: String, inZone: String? = null): VoiceOutcome {
         // The room, first, because every branch below wants it and because the
         // words that name it must not reach the search: "play Kid A in the
         // kitchen" is a request for one album, not for one called "Kid A In
@@ -449,6 +455,9 @@ class MusicdLite(
         val heard = Voice.splitZone(spoken, zones.map { it.displayName })
         // Only ever a name that came out of that same list, so this cannot miss.
         val named = heard.zone?.let { name -> zones.firstOrNull { it.displayName == name } }
+            ?: inZone?.let { want ->
+                zones.firstOrNull { it.displayName.equals(want.trim(), ignoreCase = true) }
+            }
 
         // Saying a room out loud moves the active zone, for the reason
         // activeZone() gives about picking one and remembering it: without

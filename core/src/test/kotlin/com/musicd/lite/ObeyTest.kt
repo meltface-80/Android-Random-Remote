@@ -243,4 +243,36 @@ class ObeyTest {
         assertTrue(app.obey("pause").ok)
         assertEquals(listOf("control:z1:pause"), core.calls)
     }
+
+    // --------------------------------------- a room the caller already knows
+
+    /**
+     * For a caller that knows which room it means and is not saying it out
+     * loud — an automation firing the same command at the kitchen every
+     * morning, which has no sentence to put the room in.
+     */
+    @Test
+    fun aCallerCanNameTheRoomWithoutSayingItInTheSentence() {
+        core.zonesList = listOf(zone(), kitchen())
+
+        assertTrue(app.obey("pause", inZone = "Kitchen").ok)
+        assertEquals(listOf("control:z2:pause"), core.calls)
+    }
+
+    /** Said out loud beats set somewhere else. */
+    @Test
+    fun aRoomInTheSentenceOutranksTheCallersDefault() {
+        core.zonesList = listOf(zone(), kitchen())
+
+        assertTrue(app.obey("pause in the study", inZone = "Kitchen").ok)
+        assertEquals(listOf("control:z1:pause"), core.calls)
+    }
+
+    @Test
+    fun aDefaultRoomThatIsNotThereFallsBackToTheActiveZone() {
+        core.zonesList = listOf(zone(), kitchen())
+
+        assertTrue(app.obey("pause", inZone = "Greenhouse").ok)
+        assertEquals(listOf("control:z1:pause"), core.calls)
+    }
 }
