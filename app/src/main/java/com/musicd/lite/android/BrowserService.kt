@@ -41,7 +41,7 @@ import android.util.Log
 class BrowserService : MediaBrowserService() {
 
     private companion object {
-        const val TAG = "MediaBrowser"
+        const val TAG = "BrowserService"
 
         /**
          * The root's id. Nothing hangs off it yet, but a controller expects an
