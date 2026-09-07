@@ -3,6 +3,7 @@ package com.musicd.lite
 import com.musicd.lite.api.StaticAssets
 import com.musicd.lite.roon.Zone
 import com.musicd.lite.store.MemoryStore
+import com.musicd.lite.store.YearSource
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -14,8 +15,10 @@ import org.junit.Test
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import okhttp3.OkHttpClient
 
 /**
  * The whole request path, over a real socket.
@@ -31,6 +34,30 @@ class RemoteApiTest {
     private lateinit var core: FakeCore
     private lateinit var app: MusicdLite
     private lateinit var store: MemoryStore
+    private lateinit var outbound: CountingHttp
+
+    /**
+     * Everything the app sends anywhere that is not Roon — MusicBrainz,
+     * Wikipedia, Pitchfork — counted, and refused.
+     *
+     * "This path does not go to the network" is a claim about calls that are
+     * NOT made, and the only way to assert it is to be able to see the ones
+     * that are. Refusing them keeps the suite off the internet as well: every
+     * lookup then fails the way it does on a phone with no signal, which is a
+     * shape the endpoints have to survive anyway.
+     */
+    private class CountingHttp {
+        val calls = java.util.Collections.synchronizedList(ArrayList<String>())
+
+        val client: OkHttpClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                calls.add(chain.request().url.host)
+                throw IOException("the test refuses outbound requests")
+            }
+            .build()
+
+        fun to(host: String): Int = synchronized(calls) { calls.count { it.contains(host) } }
+    }
 
     private val assets = object : StaticAssets {
         private val files = mapOf(
@@ -74,13 +101,15 @@ class RemoteApiTest {
         core.outputsList = core.zonesList.flatMap { it.outputs }
 
         store = MemoryStore()
+        outbound = CountingHttp()
         app = MusicdLite(
             store = store,
             assets = assets,
             artDir = null,
             version = "test",
             httpPort = 0,
-            importSettleMs = 0          // no need to wait out an import in a test
+            importSettleMs = 0,         // no need to wait out an import in a test
+            httpClient = outbound.client
         ) { _, _, _ -> core }
         app.start()
         // Pairing is what normally triggers this; the scripted Core is simply
@@ -875,6 +904,63 @@ class RemoteApiTest {
         val genres = json("/api/filters/genres").getJSONArray("genres")
         assertEquals(1, genres.length())
         assertEquals("Trip-Hop", genres.getJSONObject(0).getString("title"))
+    }
+
+    // ------------------------------------------------- the share card's extras
+
+    /**
+     * The share card asks with `fast=1` and gets an answer without a single
+     * packet leaving the phone.
+     *
+     * It needs one field of this endpoint — the release year — and it holds a
+     * spinner in front of the user until it has it. Asking the slow way meant
+     * MusicBrainz, two Wikipedia searches, two summaries and a Pitchfork review
+     * page, in sequence, behind a one-per-second rate gate: seconds of spinner
+     * for a number the app had already learned and written down.
+     */
+    @Test
+    fun theShareCardsExtrasNeverLeaveTheDevice() {
+        val album = app.index.albums.first { it.title == "Mezzanine" }
+        store.putAlbumYear(album.key, 1998, YearSource.MUSICBRAINZ)
+
+        val before = outbound.calls.size
+        val body = json("/api/album/extras?fast=1&title=Mezzanine&artist=Massive%20Attack")
+
+        assertEquals(1998, body.getInt("year"))
+        assertEquals(
+            "the fast path went to the network: ${outbound.calls.drop(before)}",
+            before, outbound.calls.size
+        )
+    }
+
+    /**
+     * The control for the test above: the album card still looks things up, so
+     * a zero there means the fast path stayed home rather than the counter
+     * being blind.
+     */
+    @Test
+    fun theAlbumCardsExtrasStillLookThingsUp() {
+        val before = outbound.calls.size
+        json("/api/album/extras?title=Mezzanine&artist=Massive%20Attack")
+        assertTrue("nothing was looked up at all", outbound.calls.size > before)
+    }
+
+    /**
+     * A Pitchfork score is fetched once per album, not once per request.
+     *
+     * The lookup downloads a whole review page and sat outside the cache that
+     * covers everything beside it, so opening an album and then sharing it
+     * fetched the same markup twice — and every later visit paid again. A miss
+     * is the usual answer and costs exactly the same request, so it is cached
+     * too.
+     */
+    @Test
+    fun aPitchforkReviewIsFetchedOncePerAlbum() {
+        json("/api/album/extras?title=Mezzanine&artist=Massive%20Attack")
+        assertEquals("the review page was never asked for", 1, outbound.to("pitchfork.com"))
+
+        json("/api/album/extras?title=Mezzanine&artist=Massive%20Attack")
+        assertEquals("the review page was fetched twice", 1, outbound.to("pitchfork.com"))
     }
 
     @Test

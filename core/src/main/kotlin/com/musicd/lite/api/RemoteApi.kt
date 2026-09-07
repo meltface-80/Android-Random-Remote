@@ -721,20 +721,39 @@ class RemoteApi(
         .put("partial", r.partial)
         .put("declared_tracks", r.declaredTracks ?: JSONObject.NULL)
 
+    /**
+     * The facts about an album that Roon does not carry — release year, blurb,
+     * Pitchfork score.
+     *
+     * `fast=1` answers the same shape out of what the app already holds and
+     * never opens a socket. The share card is the caller, and it wants exactly
+     * one field of this — the year — with a spinner in front of the user while
+     * it waits. The full answer is a chain of five requests to MusicBrainz and
+     * Wikipedia behind a one-per-second rate gate, plus a Pitchfork review
+     * page: seconds, on a phone, for a four-digit number the app has usually
+     * learned already. The album card still asks the slow way, because a blurb
+     * that has never been fetched is the thing it is there to show.
+     */
     private fun albumExtras(request: Request): Response {
         val title = request.str("title") ?: return Json.error(400, "title is required")
         val artist = request.str("artist") ?: ""
-        val extras = app.metadata.extras(title, artist)
+        val fast = request.bool("fast") == true
+        val extras =
+            if (fast) app.metadata.cachedExtras(title, artist)
+            else app.metadata.extras(title, artist)
 
         // A year learned here is worth keeping: it feeds the Decade filter and
         // the year sort, which otherwise only fill in as albums are played.
         val record = index.relocate(title, artist)
-        if (record != null && extras.year != null) {
+        if (record != null && extras?.year != null) {
             runCatching {
                 store.putAlbumYear(record.key, extras.year, YearSource.MUSICBRAINZ)
             }
         }
-        val year = extras.year ?: record?.let { view.albumYearOf(it) }
+        // The store is the fast path's real source: every album whose card has
+        // been opened has left its year here, which is why `fast=1` usually
+        // has an answer at all.
+        val year = extras?.year ?: record?.let { view.albumYearOf(it) }
 
         // The Pitchfork score, which the album card draws as a chip beside the
         // year (plus a BNM badge). It reads extras.album.score and
@@ -743,7 +762,9 @@ class RemoteApi(
         //
         // A miss is the normal case: most records were never reviewed, and the
         // card simply shows no chip.
-        val review = runCatching { app.pitchfork.reviewFor(title, artist) }.getOrNull()
+        val review =
+            if (fast) app.pitchfork.cachedReviewFor(title, artist)
+            else runCatching { app.pitchfork.reviewFor(title, artist) }.getOrNull()
 
         fun bio(b: Metadata.Bio?, withReview: Boolean = false): Any {
             if (b == null && !(withReview && review != null)) return JSONObject.NULL
@@ -768,8 +789,8 @@ class RemoteApi(
         return Json.obj(
             JSONObject()
                 .put("year", year ?: JSONObject.NULL)
-                .put("album", bio(extras.album, withReview = true))
-                .put("artist", bio(extras.artist))
+                .put("album", bio(extras?.album, withReview = true))
+                .put("artist", bio(extras?.artist))
         )
     }
 

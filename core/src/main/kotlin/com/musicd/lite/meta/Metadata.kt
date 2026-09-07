@@ -57,8 +57,7 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
     data class AlbumExtras(val year: Int?, val album: Bio?, val artist: Bio?)
 
     fun extras(title: String, artist: String): AlbumExtras {
-        val key = Normalize.text(title) + "||" + Normalize.text(artist)
-        if (key == "||") return AlbumExtras(null, null, null)
+        val key = cacheKey(title, artist) ?: return AlbumExtras(null, null, null)
         return cache.get(key) {
             AlbumExtras(
                 year = runCatching { musicBrainzYear(title, artist) }.getOrNull(),
@@ -67,6 +66,27 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
             )
         }
     }
+
+    /**
+     * What [extras] would answer without going near the network, or null when
+     * this album has not been looked up recently enough to say. A name with
+     * nothing in it answers empty rather than null: there is nothing to find,
+     * as opposed to nothing found yet.
+     *
+     * The share card is the caller. It needs one number off this — the release
+     * year — and it is holding a spinner in front of the user while it waits,
+     * where [extras] is five sequential requests to two outside hosts behind a
+     * rate gate. "What do we already know" is a different question from "go and
+     * find out", and only the second one is worth seconds.
+     */
+    fun cachedExtras(title: String, artist: String): AlbumExtras? {
+        val key = cacheKey(title, artist) ?: return AlbumExtras(null, null, null)
+        return cache.peek(key)
+    }
+
+    /** Null when there is not enough of a name here to key anything on. */
+    private fun cacheKey(title: String, artist: String): String? =
+        (Normalize.text(title) + "||" + Normalize.text(artist)).takeIf { it != "||" }
 
     // ---------------------------------------------------------- MusicBrainz
 
