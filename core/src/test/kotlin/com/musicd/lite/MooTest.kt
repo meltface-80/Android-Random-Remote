@@ -74,6 +74,33 @@ class MooTest {
         assertEquals(body, msg.bodyText)
     }
 
+    /**
+     * The reply to a service the CORE calls into us — status and settings.
+     *
+     * Every other frame this app writes is a REQUEST it started. These go the
+     * other way, on a Request-Id Roon chose, and a subscribe is answered
+     * CONTINUE so the id stays open for the Changed that follow. Written out as
+     * a sample because there is no other way to find out that Roon cannot read
+     * it: an unparseable reply is not an error, it is an Extensions screen that
+     * stays blank.
+     */
+    @Test
+    fun encodesTheReplyToAServiceRoonCallsIntoUs() {
+        val body = """{"message":"Paired with Fake Core","is_error":false}"""
+        val bytes = Moo.encode(Moo.VERB_CONTINUE, "Subscribed", 4, body.toByteArray())
+        File(samples, "subscribed.bin").writeBytes(bytes)
+
+        assertEquals(
+            "MOO/1 CONTINUE Subscribed\n" +
+                "Request-Id: 4\n" +
+                "Content-Length: ${body.toByteArray().size}\n" +
+                "Content-Type: application/json\n" +
+                "\n" +
+                body,
+            bytes.toString(Charsets.UTF_8)
+        )
+    }
+
     @Test
     fun bodyIsBinarySafe() {
         // Content-Length counts BYTES. A body carrying multi-byte UTF-8 is where

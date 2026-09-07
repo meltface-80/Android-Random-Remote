@@ -102,9 +102,30 @@ class RoonCore(
 
     override val status: RoonStatus get() = currentStatus
 
+    /**
+     * The services the Core calls INTO, rather than the ones we call.
+     *
+     * Until a host calls [useSettingsPanel] this carries no panel, and only the
+     * status service is advertised — a host with nothing to configure must not
+     * claim a settings screen it cannot draw.
+     */
+    private val services = ExtensionServices()
+
+    override fun useSettingsPanel(panel: ExtensionServices.Panel) {
+        services.panel = panel
+    }
+
     private fun publish(next: RoonStatus) {
         currentStatus = next
         Log.i(TAG, next.stage.name + ": " + (next.detail ?: ""))
+        // Roon's own Extensions screen shows this line. It is the one place the
+        // phone can report itself on a screen that is not the phone — which is
+        // the screen you are looking at when the phone has stopped working.
+        val pushes = services.setStatus(next.detail ?: next.stage.name, next.stage == RoonStage.ERROR)
+        if (pushes.isNotEmpty()) {
+            val ws = socket.get()
+            for (push in pushes) runCatching { ws?.push(push.requestId, push.name, push.body) }
+        }
         listeners.forEach { runCatching { it.onStatusChanged(next) } }
     }
 
@@ -244,8 +265,21 @@ class RoonCore(
             onNet { register() }
         }
 
+        override fun onCoreRequest(msg: Moo.Message): ExtensionServices.Reply? {
+            val body = msg.bodyText?.takeIf { it.isNotBlank() }?.let { runCatching { JSONObject(it) }.getOrNull() }
+            val service = msg.service ?: return null
+            val outcome = services.onRequest(service, msg.name, msg.requestId, body) ?: return null
+            if (outcome.pushes.isNotEmpty()) {
+                val ws = socket.get()
+                for (push in outcome.pushes) runCatching { ws?.push(push.requestId, push.name, push.body) }
+            }
+            return outcome.reply
+        }
+
         override fun onClosed(reason: String) {
             onNet {
+                // The subscriptions the Core held were on that socket.
+                services.onDisconnected()
                 zoneStore.clear()
                 outputStore.clear()
                 tree.clearOffsetCache()
@@ -285,7 +319,15 @@ class RoonCore(
                     JSONArray().put(RoonServices.TRANSPORT).put(RoonServices.BROWSE)
                 )
                 .put("optional_services", JSONArray().put(RoonServices.IMAGE))
-                .put("provided_services", JSONArray().put(RoonServices.PING))
+                .put(
+                    "provided_services",
+                    JSONArray().put(RoonServices.PING).also { provided ->
+                        // Advertising a service means answering it: Roon
+                        // subscribes as soon as it sees one listed here.
+                        provided.put(RoonServices.STATUS)
+                        if (services.panel != null) provided.put(RoonServices.SETTINGS)
+                    }
+                )
             coreId?.let { id -> store.tokenFor(id)?.let { reginfo.put("token", it) } }
 
             // Registration is not a one-shot reply: Roon answers "Registered"

@@ -34,6 +34,15 @@ interface RoonApi {
      */
     fun start() {}
     fun stop() {}
+
+    /**
+     * The panel Roon draws for this extension in Settings → Extensions.
+     *
+     * Defaulted to nothing, like the lifecycle above: a scripted Core in a test
+     * has no settings screen to draw, and the app must not have to care which
+     * kind of Core it was handed.
+     */
+    fun useSettingsPanel(panel: ExtensionServices.Panel) {}
     fun addListener(listener: Listener) {}
 
     val isPaired: Boolean

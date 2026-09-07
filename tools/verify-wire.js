@@ -95,6 +95,20 @@ check("CONTINUE carrying a zones delta", () => {
   assertEqual(msg.body.zones_changed[0].zone_id, "16", "zone_id");
 });
 
+check("CONTINUE answering a service Roon calls into us", () => {
+  // status:1 and settings:1 are PROVIDED, so these frames are ours to write and
+  // Roon's to read — the opposite direction from everything above. A subscribe
+  // must be answered CONTINUE, so the Request-Id stays open for the Changed
+  // pushed down it later; COMPLETE would close it and the line would freeze.
+  const msg = moo.parse(sample("subscribed.bin"));
+  if (!msg) throw new Error("moo.js refused the frame");
+  assertEqual(msg.verb, "CONTINUE", "verb");
+  assertEqual(msg.name, "Subscribed", "name");
+  assertEqual(msg.request_id, "4", "request_id");
+  assertEqual(msg.body.message, "Paired with Fake Core", "body.message");
+  assertEqual(msg.body.is_error, false, "body.is_error");
+});
+
 // sood.js keeps its parser private, so the query is checked against the same
 // layout sood.js writes: "SOOD" | 0x02 | 'Q' | (name_len:u8 name value_len:u16be value)*
 console.log("SOOD query, decoded with sood.js's own layout:");
