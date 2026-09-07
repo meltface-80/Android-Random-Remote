@@ -154,6 +154,81 @@ object Voice {
         "some", "something", "anything", "me", "it", "one", "that", "this"
     )
 
+    /** A room named out loud, and the sentence with that part taken off. */
+    data class Heard(val zone: String?, val rest: String)
+
+    /**
+     * Ways of naming the room a command is FOR, longest first.
+     *
+     * Only a trailing one counts. A leading "in the kitchen, play …" is not
+     * how anybody talks to a stereo, and looking for it at the front would put
+     * every album whose title starts with a preposition at risk.
+     */
+    private val ZONE_LEADS: List<List<String>> = listOf(
+        listOf("through", "the"), listOf("in", "the"), listOf("on", "the"), listOf("to", "the"),
+        listOf("through"), listOf("in"), listOf("on"), listOf("to")
+    )
+
+    /** Dropped from the end before looking, because it sits after the room. */
+    private val COURTESY = setOf("please", "thanks", "thankyou")
+
+    /**
+     * Which room was named, and what is left to obey.
+     *
+     * THE ZONE NAMES ARE PASSED IN, and that is the whole reason this is
+     * trustworthy. "Play In The Kitchen" is an album; "play Kid A in the
+     * kitchen" is a room — and no amount of grammar tells the two apart. What
+     * does is knowing that a zone called Kitchen exists, so nothing is ever
+     * stripped off a sentence unless it matches a room that is really there.
+     *
+     * A zone named with nothing in front of it is not a command ("in the
+     * kitchen" on its own), so a match must leave at least one word behind.
+     * Zone names are matched WHOLE and longest first: with both "Kitchen" and
+     * "Kitchen Speakers", "in the kitchen speakers" has to take the longer one
+     * or "speakers" is left behind to be searched for as part of a title.
+     *
+     * AND THE REMAINDER HAS TO BE A COMMAND. That is what keeps "play the album
+     * In The Kitchen" pointing at the record: taking the room off leaves "play
+     * the album", which is a lead-in with nothing after it and means nothing,
+     * so the match is refused and the whole title survives. It also settles
+     * the genuinely ambiguous "play in the kitchen" the way a person means it
+     * — what is left is "play", which resumes, in that room.
+     *
+     * When nothing matches, the sentence comes back untouched — including its
+     * courtesy, which [parse] has always stripped for itself.
+     */
+    fun splitZone(spoken: String, zones: List<String>): Heard {
+        val text = spoken.trim()
+        if (text.isEmpty() || zones.isEmpty()) return Heard(null, text)
+
+        val spokenWords = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        var tail = spokenWords
+        while (tail.isNotEmpty() && bare(tail.last()) in COURTESY) tail = tail.dropLast(1)
+        if (tail.isEmpty()) return Heard(null, text)
+
+        var best: Heard? = null
+        var bestLength = 0
+        for (zone in zones) {
+            val zoneWords = zone.split(Regex("\\s+")).map(::bare).filter { it.isNotEmpty() }
+            if (zoneWords.isEmpty()) continue
+            for (lead in ZONE_LEADS) {
+                val phrase = lead + zoneWords
+                if (tail.size <= phrase.size) continue
+                if (phrase.size <= bestLength) continue
+                if (tail.takeLast(phrase.size).map(::bare) != phrase) continue
+                val rest = tail.dropLast(phrase.size).joinToString(" ")
+                if (parse(rest) is VoiceCommand.Unknown) continue
+                bestLength = phrase.size
+                best = Heard(zone, rest)
+            }
+        }
+        return best ?: Heard(null, text)
+    }
+
+    /** One word, stripped to what a recogniser cannot vary. */
+    private fun bare(word: String): String =
+        word.lowercase().filter { it.isLetterOrDigit() || it == '\'' }
+
     fun parse(spoken: String): VoiceCommand {
         val heard = spoken.trim()
         val key = normalise(heard)

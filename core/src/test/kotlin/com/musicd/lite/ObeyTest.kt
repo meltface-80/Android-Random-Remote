@@ -42,6 +42,18 @@ class ObeyTest {
         )
     )
 
+    /** A second room, so a command can be sent somewhere that is not active. */
+    private fun kitchen(): Zone = Zone.parse(
+        JSONObject(
+            """
+            {"zone_id":"z2","display_name":"Kitchen","state":"stopped",
+             "outputs":[{"output_id":"o2","display_name":"Kitchen",
+               "volume":{"type":"db","min":-80,"max":0,"value":-30,"step":0.5,
+                         "is_muted":false}}]}
+            """.trimIndent()
+        )
+    )
+
     @Before
     fun setUp() {
         core = FakeCore()
@@ -153,5 +165,82 @@ class ObeyTest {
         app.settings.saveLastZone("b")
         app.obey("pause")
         assertEquals(listOf("control:b:pause"), core.calls)
+    }
+
+    // ------------------------------------------------- saying which room
+
+    /**
+     * The gap this closes: playSpoken() and playRandomAlbum() have always
+     * taken a zone, and the parser never produced one — so every spoken
+     * command went to the active zone and naming a room did nothing but
+     * corrupt the search text.
+     */
+    @Test
+    fun aNamedRoomGetsTheCommandInsteadOfTheActiveOne() {
+        core.zonesList = listOf(zone(), kitchen())
+
+        assertTrue(app.obey("pause in the kitchen").ok)
+        assertEquals(listOf("control:z2:pause"), core.calls)
+    }
+
+    @Test
+    fun aNamedRoomGetsTheAlbumToo() {
+        core.zonesList = listOf(zone(), kitchen())
+
+        val outcome = app.obey("play Mezzanine in the kitchen")
+
+        assertTrue(outcome.message, outcome.ok)
+        // An album is played by invoking its Play Now action through the
+        // browse tree, and the zone rides on that call — so what proves the
+        // routing is the zone the invoke names.
+        assertTrue(
+            "the album went somewhere other than the kitchen: ${core.invoked}",
+            core.invoked.any { it.endsWith("@z2") }
+        )
+    }
+
+    /**
+     * Naming a room moves the active zone, for the reason activeZone() gives
+     * about remembering its choice: otherwise "pause in the kitchen" followed
+     * by a bare "play" starts the music in a different room.
+     */
+    @Test
+    fun namingARoomMovesTheActiveZone() {
+        core.zonesList = listOf(zone(), kitchen())
+
+        app.obey("pause in the kitchen")
+        core.calls.clear()
+        assertTrue(app.obey("play").ok)
+
+        assertEquals(listOf("control:z2:play"), core.calls)
+    }
+
+    /** A command you cannot see the result of has to say where it went. */
+    @Test
+    fun theReplyNamesTheRoomItWentTo() {
+        core.zonesList = listOf(zone(), kitchen())
+
+        assertEquals("Paused — Kitchen", app.obey("pause in the kitchen").message)
+        assertEquals("Louder — Kitchen", app.obey("turn it up in the kitchen").message)
+        // No room named, no room mentioned.
+        assertEquals("Paused", app.obey("pause").message)
+    }
+
+    @Test
+    fun volumeGoesToTheNamedRoomsOutputs() {
+        core.zonesList = listOf(zone(), kitchen())
+
+        assertTrue(app.obey("turn up the volume in the kitchen").ok)
+
+        assertEquals(listOf("volume:o2:relative_step:8.0"), core.calls)
+    }
+
+    /** Everything without a room in it must behave exactly as it did. */
+    @Test
+    fun aPhraseWithNoRoomStillUsesTheActiveZone() {
+        core.zonesList = listOf(zone(), kitchen())
+
+        assertTrue(app.obey("pause").ok)
+        assertEquals(listOf("control:z1:pause"), core.calls)
     }
 }

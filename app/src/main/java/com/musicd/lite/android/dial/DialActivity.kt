@@ -234,6 +234,10 @@ class DialActivity : Activity(), DialView.Callbacks {
      * strips a "play" verb and searches, which is the behaviour that made
      * "turn up volume" go looking for an album of that name. Voice.parse
      * handles the control phrases first, and it is tested.
+     *
+     * It also reads the room off the end — "pause in the kitchen" — against
+     * the zones Roon is actually reporting, so the answer shown on the dial
+     * names the room it went to when one was asked for.
      */
     override fun onVoiceTapped() {
         if (voiceInput.isListening) {
