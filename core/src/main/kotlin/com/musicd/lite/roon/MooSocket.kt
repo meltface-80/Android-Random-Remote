@@ -39,8 +39,16 @@ class MooSocket(
         fun onOpen()
         /** Terminal: the socket is gone and this object will not be reused. */
         fun onClosed(reason: String)
-        /** A REQUEST the Core made of us, other than ping (already answered). */
-        fun onCoreRequest(msg: Moo.Message) {}
+        /**
+         * A REQUEST the Core made of us, other than ping (already answered).
+         *
+         * Returns what to answer, or null for a service we do not provide —
+         * which is then refused as InvalidRequest. Answering every one of these
+         * with InvalidRequest is what this used to do, and it is why the status
+         * and settings services could not be advertised: Roon asks the moment
+         * it sees them in `provided_services`.
+         */
+        fun onCoreRequest(msg: Moo.Message): ExtensionServices.Reply? = null
     }
 
     /** Thrown when the Core does not answer, or answers with a failure name. */
@@ -157,8 +165,17 @@ class MooSocket(
             if (msg.service == RoonServices.PING && msg.name == "ping") {
                 reply(Moo.VERB_COMPLETE, "Success", msg.requestId)
             } else {
-                events.onCoreRequest(msg)
-                reply(Moo.VERB_COMPLETE, "InvalidRequest", msg.requestId)
+                val answer = try {
+                    events.onCoreRequest(msg)
+                } catch (e: Exception) {
+                    Log.w(TAG, "${msg.service}/${msg.name} threw: ${e.message}", e)
+                    null
+                }
+                if (answer == null) {
+                    reply(Moo.VERB_COMPLETE, "InvalidRequest", msg.requestId)
+                } else {
+                    reply(answer.verb, answer.name, msg.requestId, answer.body)
+                }
             }
             return
         }
@@ -176,6 +193,14 @@ class MooSocket(
         } catch (e: Exception) {
             Log.w(TAG, "handler for ${msg.name} threw: ${e.message}", e)
         }
+    }
+
+    /**
+     * A CONTINUE on a request the CORE made of us — how a subscription it holds
+     * is updated. Distinct from [send], which opens a request of our own.
+     */
+    fun push(requestId: String, name: String, body: JSONObject?) {
+        reply(Moo.VERB_CONTINUE, name, requestId, body)
     }
 
     private fun reply(verb: String, name: String, requestId: String, body: JSONObject? = null) {
@@ -248,4 +273,8 @@ object RoonServices {
     const val BROWSE = "com.roonlabs.browse:1"
     const val IMAGE = "com.roonlabs.image:1"
     const val PING = "com.roonlabs.ping:1"
+
+    /** Provided, not consumed — see [ExtensionServices]. */
+    const val STATUS = "com.roonlabs.status:1"
+    const val SETTINGS = "com.roonlabs.settings:1"
 }

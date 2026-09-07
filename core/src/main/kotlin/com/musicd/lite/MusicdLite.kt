@@ -1,5 +1,6 @@
 package com.musicd.lite
 
+import com.musicd.lite.api.ExtensionPanel
 import com.musicd.lite.api.RemoteApi
 import com.musicd.lite.api.Settings
 import com.musicd.lite.api.StaticAssets
@@ -146,6 +147,13 @@ class MusicdLite(
         )
     }
     val radio = Radio(this)
+
+    /**
+     * Roon draws this behind the gear beside the extension's name. Handed over
+     * before start(), because whether a settings service is advertised at all
+     * is decided at registration — see RoonCore.register().
+     */
+    private val extensionPanel = ExtensionPanel(this).also { roon.useSettingsPanel(it) }
 
     /** Playlists you make yourself. Kept here; Roon cannot store them. */
     val userPlaylists = UserPlaylists(store)
