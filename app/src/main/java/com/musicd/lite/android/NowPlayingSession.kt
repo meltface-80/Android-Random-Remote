@@ -9,10 +9,13 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.util.Log
 import com.musicd.lite.MusicdLite
+import com.musicd.lite.Voice
 import com.musicd.lite.roon.Zone
 import java.util.concurrent.Executors
 
@@ -60,7 +63,26 @@ class NowPlayingSession(
                 PlaybackState.ACTION_PAUSE or
                 PlaybackState.ACTION_PLAY_PAUSE or
                 PlaybackState.ACTION_SKIP_TO_NEXT or
-                PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                SEARCH
+
+        /**
+         * "Play <something> on MusicD", which is a different kind of thing from
+         * the transport actions beside it.
+         *
+         * Those say what can be done to what is ALREADY playing, so Roon gates
+         * them per zone. This says the app can be asked for something new, and
+         * that is true whatever the zone is doing — a stopped zone is exactly
+         * where you would want to ask. So it is never gated.
+         *
+         * PLAY only, and NOT PREPARE_FROM_SEARCH. Offering prepare tells
+         * Assistant it may send the search first and a bare PLAY after it, to
+         * start what was prepared — and a bare PLAY here is a transport
+         * command that resumes whatever the zone already had. Advertising a
+         * prepare this does not honour would therefore not be a wasted call,
+         * it would be the wrong record. Only claim what is implemented.
+         */
+        const val SEARCH = PlaybackState.ACTION_PLAY_FROM_SEARCH
 
         /**
          * What this zone will actually accept, right now.
@@ -81,7 +103,7 @@ class NowPlayingSession(
             }
             if (zone.isNextAllowed) a = a or PlaybackState.ACTION_SKIP_TO_NEXT
             if (zone.isPreviousAllowed) a = a or PlaybackState.ACTION_SKIP_TO_PREVIOUS
-            return a
+            return a or SEARCH
         }
     }
 
@@ -351,5 +373,58 @@ class NowPlayingSession(
         override fun onStop() = command("pause")
         override fun onSkipToNext() = command("next")
         override fun onSkipToPrevious() = command("previous")
+
+        /**
+         * "Hey Google, play Mezzanine on MusicD."
+         *
+         * Assistant hands over the spoken query and, separately, whatever it
+         * managed to pick out of it as artist / album / title. Which of those
+         * to believe is decided in :core by Voice.mediaCommand, where it is
+         * tested — and the phrase it returns goes through the same obey() as
+         * the dial's microphone, so "on the kitchen speakers" works here too.
+         */
+        override fun onPlayFromSearch(query: String?, extras: Bundle?) {
+            search(query, extras)
+        }
+    }
+
+    /**
+     * Finds and plays what was asked for, off the caller's thread.
+     *
+     * The state goes to CONNECTING first because this is a library search
+     * followed by a walk of Roon's browse tree — seconds, sometimes — and a
+     * controller that is told nothing assumes the app ignored it. Android's own
+     * guidance for this callback is to do exactly that rather than block.
+     */
+    private fun search(query: String?, extras: Bundle?) {
+        val spoken = Voice.mediaCommand(
+            query,
+            extras?.getString(MediaStore.EXTRA_MEDIA_ARTIST),
+            extras?.getString(MediaStore.EXTRA_MEDIA_ALBUM),
+            extras?.getString(MediaStore.EXTRA_MEDIA_TITLE)
+        )
+        runCatching {
+            session?.setPlaybackState(
+                PlaybackState.Builder()
+                    .setActions(ACTIONS)
+                    .setState(PlaybackState.STATE_CONNECTING, 0L, 0f)
+                    .build()
+            )
+        }
+        runCatching {
+            commands.execute {
+                val outcome = runCatching { app.obey(spoken) }.getOrNull()
+                if (outcome?.ok != true) {
+                    Log.w(TAG, "search \"$spoken\" -> ${outcome?.message ?: "failed"}")
+                    // Put the session back where it was; the zone feed will
+                    // correct it the moment Roon says anything, but a state
+                    // left at CONNECTING after a miss is a spinner forever.
+                    runCatching { update(app.activeZone()) }
+                }
+                // On success nothing is written here on purpose: Roon pushes
+                // the new track through the zone feed and that updates this,
+                // which is the same rule the transport buttons follow.
+            }
+        }.onFailure { Log.w(TAG, "could not queue the search", it) }
     }
 }

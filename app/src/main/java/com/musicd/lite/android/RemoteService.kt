@@ -67,6 +67,15 @@ class RemoteService : Service() {
     private var store: Store? = null
     private var nowPlaying: NowPlayingSession? = null
 
+    /**
+     * The media session's token, for [BrowserService] to hand to a controller.
+     *
+     * Assistant cannot send this app anything until it has this, and it only
+     * gets it by connecting to a MediaBrowserService — which is a separate
+     * component with no way to reach the session except through here.
+     */
+    val mediaToken: android.media.session.MediaSession.Token? get() = nowPlaying?.token
+
     /** Stops the zone watcher when the service goes away. */
     @Volatile
     private var watching = false
