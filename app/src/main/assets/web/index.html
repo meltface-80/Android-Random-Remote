@@ -853,11 +853,21 @@
             <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
 
-          <!-- The wall display is not in this build. It was a page served to
-               OTHER devices on the network, and this app's server is bound to
-               loopback so nothing off the phone can reach it. Opening that up
-               would put an unauthenticated control API on the LAN and keep the
-               phone awake serving a TV; see the README. -->
+          <!-- The wall display is still not in this build. Serving the page
+               to other devices IS now possible — see the Network pane below —
+               but a always-on wall display is a different feature: it keeps
+               the phone awake rendering for a TV. -->
+
+          <button class="settings-nav-item" type="button" data-pane="network">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14 0"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M8.5 16.43a6 6 0 0 1 7 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">Network</span>
+              <span class="settings-nav-desc">Open this page on another device</span>
+            </span>
+            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
 
           <button class="settings-nav-item" type="button" data-pane="appearance">
             <span class="settings-nav-ico" aria-hidden="true">
@@ -1106,6 +1116,42 @@
       </div>
 
       <!-- Smart Picks -->
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="network">
+        <div class="settings-pane-head">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <h2>Network</h2>
+        </div>
+
+        <div class="settings-block">
+          <div class="settings-row">
+            <span class="settings-label">Open on other devices <button class="settings-info-btn" data-info="Off by default. While off, this page is served only to this phone and nothing on your network can reach it at all. While on, any device on the same wifi can open it after entering the code below — which is why there is a code: everything behind this page controls your music system and holds your Discogs and fanart.tv keys." aria-label="Info">ⓘ</button></span>
+            <label class="switch">
+              <input type="checkbox" id="lan-enabled" aria-label="Open on other devices">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+          <div class="settings-note">Off by default. Everything below applies only while this is on.</div>
+        </div>
+
+        <div class="settings-block hidden" id="lan-details">
+          <div class="settings-sub">Open this address on the other device</div>
+          <div class="lan-url" id="lan-url">—</div>
+          <div class="settings-sub">and enter this code once</div>
+          <div class="lan-pin" id="lan-pin">—</div>
+          <div class="settings-note" id="lan-note"></div>
+        </div>
+
+        <div class="settings-block">
+          <div class="settings-note">
+            Traffic on your network is not encrypted, so use this on a network you
+            trust rather than a shared or guest one. Turning the switch off and on
+            again issues a new code and signs out every device that used the old one.
+          </div>
+        </div>
+      </div>
+
       <div class="settings-view settings-pane hidden" data-view="pane" data-pane="smartpicks">
         <div class="settings-pane-head">
           <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">

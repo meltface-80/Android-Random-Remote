@@ -116,7 +116,6 @@ class RemoteService : Service() {
                 assets = AndroidAssets(this),
                 artDir = File(cacheDir, "art"),
                 version = BuildConfig.VERSION_NAME,
-                httpPort = 0,
                 multicastLock = WifiMulticastLock(),
                 // The Android half of an update. :core notices the new version
                 // and downloads it; only the system installer can apply it.

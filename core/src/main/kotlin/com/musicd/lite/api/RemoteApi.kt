@@ -5,6 +5,8 @@ import com.musicd.lite.strOrNull
 import com.musicd.lite.Log
 import com.musicd.lite.MusicdLite
 import com.musicd.lite.http.HttpServer
+import com.musicd.lite.http.LanAccess
+import com.musicd.lite.http.Network
 import com.musicd.lite.http.Request
 import com.musicd.lite.http.Response
 import com.musicd.lite.library.AlbumRecord
@@ -205,6 +207,7 @@ class RemoteApi(
             "/api/smart-picks/rebuild" -> requirePost(post) { Json.ok() }
 
             "/api/settings/home-rows" -> if (post) saveHomeRows(request) else homeRows()
+            "/api/settings/lan" -> if (post) saveLan(request) else lanStatus(request)
 
             "/api/user-playlists" ->
                 if (post) saveUserPlaylist(request) else userPlaylistList()
@@ -1322,6 +1325,43 @@ class RemoteApi(
                 .put("unavailable", settings.homeRowUnavailable(id) ?: JSONObject.NULL)
         }
     )
+
+    // ------------------------------------------------------------ lan access
+
+    /**
+     * What Settings shows: the switch, the code, and the address to type.
+     *
+     * LOOPBACK ONLY, both of these. The PIN is the credential — serving it to a
+     * device that authenticated WITH it would be harmless, but serving it to
+     * anything else would make the whole thing decorative, and the simplest
+     * rule that cannot be got wrong later is that the network never sees this
+     * route at all.
+     */
+    private fun lanStatus(request: Request): Response {
+        if (!LanAccess.isLoopback(request.remoteAddress)) return Json.error(404, "Not found")
+        val lan = settings.lan()
+        return Json.obj(
+            JSONObject()
+                .put("enabled", lan.enabled)
+                .put("pin", lan.pin)
+                .put("port", app.port)
+                .put("addresses", JSONArray().also { a -> Network.hostAddresses().forEach { a.put(it) } })
+        )
+    }
+
+    private fun saveLan(request: Request): Response {
+        if (!LanAccess.isLoopback(request.remoteAddress)) return Json.error(404, "Not found")
+        val body = Json.body(request)
+        if (!body.has("enabled")) return Json.error(400, "enabled is required")
+        val lan = app.setLanAccess(body.optBoolean("enabled", false))
+        return Json.ok(
+            JSONObject()
+                .put("enabled", lan.enabled)
+                .put("pin", lan.pin)
+                .put("port", app.port)
+                .put("addresses", JSONArray().also { a -> Network.hostAddresses().forEach { a.put(it) } })
+        )
+    }
 
     private fun homeRows(): Response = Json.obj(JSONObject().put("rows", homeRowsJson()))
 

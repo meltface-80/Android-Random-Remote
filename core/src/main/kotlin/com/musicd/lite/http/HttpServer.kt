@@ -5,6 +5,7 @@ import java.io.BufferedOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
@@ -25,22 +26,29 @@ import java.util.concurrent.atomic.AtomicInteger
  * in the WebView — cannot work, because `shouldInterceptRequest` is not given
  * the body of a POST, and the UI POSTs for every play, queue and control.
  *
- * Loopback-only by construction: nothing here is reachable from the network,
- * so there is no authentication and none is needed.
+ * LOOPBACK BY DEFAULT, AND THAT IS STILL THE SAFE STATE. [bindAddress] exists
+ * so the owner can deliberately serve the page to other devices on their own
+ * network — an iPhone, a tablet — and it must never be widened without the
+ * gate in [LanAccess] in front of it. There are 79 `/api/` routes behind this
+ * socket, they control somebody's music system, and the settings store holds
+ * their Discogs token and fanart.tv key. The address is chosen once, at
+ * construction: turning the feature on or off builds a new server rather than
+ * mutating a live one, so there is no window where the socket is open and the
+ * gate is not.
  */
 class HttpServer(
     private val handler: Handler,
     /** 0 asks the OS for a free port, which avoids clashing with anything. */
-    requestedPort: Int = 0
+    requestedPort: Int = 0,
+    /** "127.0.0.1" for this phone only; "0.0.0.0" to answer the network. */
+    bindAddress: String = LOOPBACK
 ) {
 
     fun interface Handler {
         fun handle(request: Request): Response
     }
 
-    private val server = ServerSocket(
-        requestedPort, 64, InetAddress.getByName("127.0.0.1")
-    )
+    private val server = bind(requestedPort, bindAddress)
 
     private val running = AtomicBoolean(false)
     private val threadSeq = AtomicInteger(0)
@@ -58,7 +66,11 @@ class HttpServer(
     /** The port actually bound. Ask after [start]. */
     val port: Int get() = server.localPort
 
-    val rootUrl: String get() = "http://127.0.0.1:$port"
+    /**
+     * Always loopback, whatever this is bound to: this is the URL the app's own
+     * WebView loads, and it must not depend on the phone having an address.
+     */
+    val rootUrl: String get() = "http://$LOOPBACK:$port"
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -76,10 +88,24 @@ class HttpServer(
         }
     }
 
+    /**
+     * Closes the listening socket and lets the workers finish.
+     *
+     * shutdown(), NOT shutdownNow(). Switching LAN access calls this from a
+     * request handler — which runs ON one of these workers — so shutdownNow()
+     * interrupts the very thread doing the switching, and everything it does
+     * next that can be interrupted fails instantly. That is not hypothetical:
+     * it made rebinding take a random port on roughly half of all switches.
+     * The socket is closed first either way, which is what actually stops new
+     * work arriving; the requests already in flight, including the reply to
+     * the switch itself, get to finish.
+     */
     fun stop() {
         if (!running.compareAndSet(true, false)) return
         runCatching { server.close() }
-        workers.shutdownNow()
+        workers.shutdown()
+        // A different thread, and it is parked in accept() until the close
+        // above wakes it, so interrupting it costs nothing and hurries it up.
         acceptor.shutdownNow()
     }
 
@@ -89,6 +115,7 @@ class HttpServer(
         try {
             client.soTimeout = READ_TIMEOUT_MS
             client.tcpNoDelay = true
+            val remote = client.inetAddress?.hostAddress ?: ""
             val input = client.getInputStream().buffered()
             val output = BufferedOutputStream(client.getOutputStream())
 
@@ -96,7 +123,7 @@ class HttpServer(
             // a fresh connection per poll is pure overhead on a phone.
             while (running.get()) {
                 val request = try {
-                    readRequest(input)
+                    readRequest(input, remote)
                 } catch (e: SocketTimeoutException) {
                     return
                 } catch (e: HttpError) {
@@ -126,7 +153,7 @@ class HttpServer(
     private class HttpError(val status: Int, message: String) : IOException(message)
 
     /** Returns null at a clean end of stream. */
-    private fun readRequest(input: InputStream): Request? {
+    private fun readRequest(input: InputStream, remote: String): Request? {
         val line = readLine(input) ?: return null
         if (line.isEmpty()) return null
 
@@ -159,7 +186,7 @@ class HttpServer(
         val path = if (q < 0) target else target.substring(0, q)
         val query = if (q < 0) emptyMap() else parseQuery(target.substring(q + 1))
 
-        return Request(method, decodePath(path), query, headers, body, keepAlive)
+        return Request(method, decodePath(path), query, headers, body, keepAlive, remote)
     }
 
     private fun readLine(input: InputStream): String? {
@@ -199,6 +226,74 @@ class HttpServer(
 
     companion object Codec {
         private const val TAG = "Http"
+
+        /** The only address this is guaranteed to be reachable on. */
+        const val LOOPBACK = "127.0.0.1"
+
+        /**
+         * Every interface — which means the network can reach it. Only ever
+         * passed when the owner has switched LAN access on, and never without
+         * the gate in LanAccess standing in front.
+         */
+        const val ANY = "0.0.0.0"
+
+        /** How long to keep trying for the port we asked for. */
+        private const val BIND_TRIES = 20
+        private const val BIND_WAIT_MS = 25L
+
+        /**
+         * Binds [port], briefly insisting, and falling back to whatever the OS
+         * will give rather than failing to start.
+         *
+         * THE RETRY IS NOT POLITENESS. Switching LAN access closes this socket
+         * and immediately opens another on the same port, and for a few
+         * milliseconds after the close the kernel can still refuse it — the
+         * old connections have not finished going away. Taking the first
+         * refusal at face value silently moves the port, and the app's own
+         * WebView is already showing a page loaded from the old one, so it
+         * would be left talking to nothing with no way to explain itself.
+         * Measured, not theorised: without this the port moved on roughly one
+         * switch in three.
+         *
+         * The fallback still exists for the case it was written for, which is
+         * something else on the phone genuinely holding 3450 at startup.
+         * Failing to start at all would take the whole UI with it, and that is
+         * far worse than an unmemorable port.
+         */
+        private fun bind(port: Int, address: String): ServerSocket {
+            val addr = InetAddress.getByName(address)
+            if (port == 0) return open(0, addr)
+            var last: IOException? = null
+            repeat(BIND_TRIES) {
+                try {
+                    return open(port, addr)
+                } catch (e: IOException) {
+                    last = e
+                    try {
+                        Thread.sleep(BIND_WAIT_MS)
+                    } catch (interrupted: InterruptedException) {
+                        // Keep the flag for whoever owns this thread, but do
+                        // NOT give up on the port: taking a random one is the
+                        // damaging outcome here, not waiting a moment longer.
+                        Thread.currentThread().interrupt()
+                    }
+                }
+            }
+            Log.w(TAG, "port $port would not bind (${last?.message}); asking the OS for another")
+            return open(0, addr)
+        }
+
+        /**
+         * SO_REUSEADDR has to be set BEFORE the bind, which the
+         * ServerSocket(port, backlog, address) constructor cannot do: its
+         * initial setting is explicitly undefined, so on a JDK where it
+         * defaults off, reclaiming a port straight after a close never works.
+         */
+        private fun open(port: Int, addr: InetAddress): ServerSocket =
+            ServerSocket().apply {
+                reuseAddress = true
+                bind(InetSocketAddress(addr, port), 64)
+            }
         private const val READ_TIMEOUT_MS = 30_000
         private const val MAX_HEADER_BYTES = 32 * 1024
         private const val MAX_BODY_BYTES = 4 * 1024 * 1024
@@ -279,7 +374,13 @@ class Request(
     val query: Map<String, String>,
     val headers: Map<String, String>,
     val body: ByteArray,
-    val keepAlive: Boolean
+    val keepAlive: Boolean,
+    /**
+     * Who is asking. The whole access decision turns on whether this is
+     * loopback, so it comes from the socket rather than from any header a
+     * client could set — X-Forwarded-For and friends are deliberately ignored.
+     */
+    val remoteAddress: String = HttpServer.LOOPBACK
 ) {
     val bodyText: String get() = body.toString(Charsets.UTF_8)
 

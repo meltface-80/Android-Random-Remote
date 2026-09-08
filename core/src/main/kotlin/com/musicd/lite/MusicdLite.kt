@@ -5,6 +5,11 @@ import com.musicd.lite.api.RemoteApi
 import com.musicd.lite.api.Settings
 import com.musicd.lite.api.StaticAssets
 import com.musicd.lite.http.HttpServer
+import com.musicd.lite.http.LanAccess
+import com.musicd.lite.http.LanLoginPage
+import com.musicd.lite.http.LoginThrottle
+import com.musicd.lite.http.Request
+import com.musicd.lite.http.Response
 import com.musicd.lite.library.AlbumIndex
 import com.musicd.lite.library.AlbumRecord
 import com.musicd.lite.library.Albums
@@ -43,8 +48,12 @@ class MusicdLite(
     assets: StaticAssets,
     artDir: File?,
     val version: String,
-    /** 0 lets the OS pick a free loopback port, which cannot clash. */
-    httpPort: Int = 0,
+    /**
+     * Fixed rather than OS-assigned, so the URL is worth writing down or saving
+     * to a home screen. Falls back to any free port if something already holds
+     * it — see HttpServer.bind.
+     */
+    private val httpPort: Int = DEFAULT_PORT,
     multicastLock: RoonCore.MulticastLock = RoonCore.MulticastLock.NONE,
     /**
      * How the Roon client is built. Production uses the real one; the tests
@@ -81,6 +90,15 @@ class MusicdLite(
 
     private companion object {
         const val TAG = "MusicdLite"
+
+        /**
+         * The one route a device that has not signed in may POST to. Answered
+         * by the gate itself, before the decision that would turn it away.
+         */
+        const val LOGIN_PATH = "/api/lan/login"
+
+        /** The port the page is served on, when it can be had. */
+        const val DEFAULT_PORT = 3450
 
         /**
          * How much of an output's range one spoken volume command moves.
@@ -164,7 +182,45 @@ class MusicdLite(
         }
 
     private val api = RemoteApi(this, assets)
-    private val server = HttpServer(api, httpPort)
+
+    /** Counts wrong PINs per address so the code cannot be ground down. */
+    private val throttle = LoginThrottle()
+
+    /**
+     * The switch and its credentials, held in memory.
+     *
+     * [guard] runs on EVERY request and the page polls several endpoints
+     * continuously, so reading this back out of SQLite each time would put a
+     * database hit in front of every album tile. It changes only through
+     * [setLanAccess], which updates this before it touches the socket.
+     */
+    @Volatile
+    private var lanCache: Settings.Lan = settings.lan()
+
+    /**
+     * REBUILT, NOT RECONFIGURED, when LAN access is switched.
+     *
+     * A ServerSocket's bind address is fixed for its life, so the honest way to
+     * stop answering the network is to close the socket and open a new one. It
+     * also means there is never a moment when the socket is listening on the
+     * network with the feature — and therefore the gate — off.
+     */
+    @Volatile
+    private var server = newServer(httpPort)
+
+    /**
+     * [port] is the port to ask for — the configured one at startup, and the
+     * one already in use when rebuilding.
+     *
+     * Keeping the port across a rebuild is not tidiness: the app's WebView has
+     * already loaded a page from it, and moving the port would leave that page
+     * talking to nothing with no way to tell the user why.
+     */
+    private fun newServer(port: Int): HttpServer = HttpServer(
+        { request -> guard(request) },
+        port,
+        if (lanCache.enabled) HttpServer.ANY else HttpServer.LOOPBACK
+    )
 
     private val started = AtomicBoolean(false)
 
@@ -172,6 +228,119 @@ class MusicdLite(
     val rootUrl: String get() = server.rootUrl
 
     val port: Int get() = server.port
+
+    // --------------------------------------------------------------- the gate
+
+    /**
+     * Everything the server accepts passes through here before the API sees it.
+     *
+     * One place, so there is no route that can be added later and quietly miss
+     * the check — which is the failure mode that makes per-endpoint auth a bad
+     * idea. Loopback is allowed through untouched, so the app's own WebView
+     * behaves exactly as it did before any of this existed.
+     */
+    private fun guard(request: Request): Response {
+        val now = System.currentTimeMillis()
+        val lan = lanCache
+        val remote = request.remoteAddress
+
+        // The login POST is the one thing a stranger may do, so it is answered
+        // before the decision that would otherwise turn it away.
+        if (request.path == LOGIN_PATH && request.method == "POST" &&
+            !LanAccess.isLoopback(remote)
+        ) {
+            return login(request, lan, remote, now)
+        }
+
+        val locked = throttle.lockedForMs(remote, now)
+        return when (
+            val d = LanAccess.decide(
+                remote, lan.enabled, lan.secret, request.headers["cookie"], locked, now
+            )
+        ) {
+            LanAccess.Decision.Allow -> api.handle(request)
+            // Deliberately terse and deliberately not 401: an off switch should
+            // not advertise that there is something here to log in to.
+            LanAccess.Decision.Refused -> Response.text(404, "Not found")
+            LanAccess.Decision.LoginRequired -> challenge(request, "")
+            is LanAccess.Decision.Throttled -> Response(
+                429, "text/plain; charset=utf-8",
+                "Too many attempts. Try again in ${d.retryAfterSeconds}s.\n"
+                    .toByteArray(Charsets.UTF_8),
+                mapOf("Retry-After" to d.retryAfterSeconds.toString())
+            )
+        }
+    }
+
+    /**
+     * What an unauthenticated device gets.
+     *
+     * A page for a page request and a 401 for an API one: the front-end fetches
+     * constantly, and answering those with HTML would have it parsing a login
+     * form as JSON rather than reloading into it.
+     */
+    private fun challenge(request: Request, message: String): Response =
+        if (request.path.startsWith("/api/")) {
+            Response.json(401, """{"error":"Not signed in"}""")
+        } else {
+            Response(
+                200, "text/html; charset=utf-8",
+                LanLoginPage.html(message).toByteArray(Charsets.UTF_8),
+                mapOf("Cache-Control" to "no-store")
+            )
+        }
+
+    /** A PIN attempt from the network. */
+    private fun login(
+        request: Request,
+        lan: Settings.Lan,
+        remote: String,
+        now: Long
+    ): Response {
+        if (!lan.enabled) return Response.text(404, "Not found")
+        val wait = throttle.lockedForMs(remote, now)
+        if (wait > 0) {
+            return challenge(request, "Too many attempts. Wait a few minutes.")
+        }
+        val offered = HttpServer.parseQuery(request.bodyText)["pin"]?.trim()?.uppercase() ?: ""
+        if (offered.isEmpty() || !LanAccess.constantTimeEquals(offered, lan.pin)) {
+            throttle.onFailure(remote, now)
+            Log.w(TAG, "a wrong code was tried from $remote")
+            return challenge(request, "That code is not right.")
+        }
+        throttle.onSuccess(remote)
+        Log.i(TAG, "$remote signed in")
+        // 303 so the browser re-requests with GET; a plain 200 would leave the
+        // POST in history and re-submit it on every refresh.
+        return Response(
+            303, "text/plain; charset=utf-8", ByteArray(0),
+            mapOf(
+                "Location" to "/",
+                "Set-Cookie" to LanAccess.setCookie(LanAccess.mint(lan.secret, now))
+            )
+        )
+    }
+
+    /**
+     * Switches LAN access, and rebuilds the socket to match.
+     *
+     * Returns what the settings screen should now show. Enabling always mints a
+     * new PIN, so this is also how somebody changes a code they have shared.
+     */
+    fun setLanAccess(enabled: Boolean): Settings.Lan {
+        val lan = settings.saveLan(enabled)
+        // Before the socket moves, so there is no instant where a rebound
+        // server is deciding from the old switch.
+        lanCache = lan
+        if (started.get()) {
+            val keep = server.port
+            runCatching { server.stop() }
+            server = newServer(keep)
+            server.start()
+            Log.i(TAG, if (enabled) "serving the network on port $port" else "back to loopback only")
+        }
+        return lan
+    }
 
     fun store(): Store = store
 

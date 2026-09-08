@@ -9127,6 +9127,74 @@
   }
 
 
+  // ----- Network ---------------------------------------------------------
+  // Off by default, and the switch is the whole feature: while it is off the
+  // server is bound to loopback and nothing on the wifi can reach it at all.
+  // Turning it on rebinds the socket and mints a code — see LanAccess in :core,
+  // which is where the deciding happens and where it is tested.
+  const lanEnabled = document.getElementById("lan-enabled");
+  const lanDetails = document.getElementById("lan-details");
+  const lanUrl     = document.getElementById("lan-url");
+  const lanPin     = document.getElementById("lan-pin");
+  const lanNote    = document.getElementById("lan-note");
+
+  function renderLan(j) {
+    if (!lanEnabled) return;
+    lanEnabled.checked = !!j.enabled;
+    if (lanDetails) lanDetails.classList.toggle("hidden", !j.enabled);
+    if (!j.enabled) return;
+    const addresses = Array.isArray(j.addresses) ? j.addresses : [];
+    if (lanUrl) {
+      // A phone with a VPN or a hotspot up has several addresses and nothing
+      // here can know which one the other device is on, so the first is shown
+      // and the rest are offered rather than one being guessed at.
+      lanUrl.textContent = addresses.length
+        ? "http://" + addresses[0] + ":" + j.port
+        : "This phone has no network address right now";
+    }
+    if (lanPin) lanPin.textContent = j.pin || "—";
+    if (lanNote) {
+      lanNote.textContent = addresses.length > 1
+        ? "Other addresses on this phone: " +
+          addresses.slice(1).map(a => "http://" + a + ":" + j.port).join(", ")
+        : "";
+    }
+  }
+
+  async function loadLanSettings() {
+    if (!lanEnabled) return;
+    try {
+      const r = await fetch("/api/settings/lan");
+      if (!r.ok) return;
+      renderLan(await r.json());
+    } catch (e) { /* the pane just stays as it was */ }
+  }
+
+  if (lanEnabled) {
+    lanEnabled.addEventListener("change", async () => {
+      const want = lanEnabled.checked;
+      // Put it back if the server refuses, rather than showing a switch that
+      // disagrees with what the socket is actually doing.
+      try {
+        const r = await fetch("/api/settings/lan", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: want })
+        });
+        const j = await r.json();
+        if (!r.ok || j.error) {
+          lanEnabled.checked = !want;
+          showToast(j.error || "Couldn't save", "error");
+          return;
+        }
+        renderLan(j);
+        showToast(want ? "Other devices can now open this page" : "Back to this phone only");
+      } catch (e) {
+        lanEnabled.checked = !want;
+        showToast("Couldn't save: " + e.message, "error");
+      }
+    });
+  }
+
   // ----- Smart Picks -----------------------------------------------------
   // The build reaches three external services and then hands Roon a batch of
   // albums to import, so WHEN it runs is a real setting rather than a nicety:
@@ -9446,7 +9514,7 @@
     renderHomeRowsList();
   }
 
-  const open = () => { showView("home"); pendingThemeId = null; renderThemeList(); loadRadio(); loadVersion(); loadDiscogsToken(); loadFanartKey(); loadLabelFolderDepth(); loadSmartPicksSettings(); loadLabelsEnabled(); loadHomeRowsSettings(); overlay.classList.remove("hidden"); };
+  const open = () => { showView("home"); pendingThemeId = null; renderThemeList(); loadRadio(); loadVersion(); loadDiscogsToken(); loadFanartKey(); loadLabelFolderDepth(); loadSmartPicksSettings(); loadLabelsEnabled(); loadHomeRowsSettings(); loadLanSettings(); overlay.classList.remove("hidden"); };
   const close = () => {
     overlay.classList.add("hidden");
   };

@@ -8,6 +8,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -727,6 +728,72 @@ class RemoteApiTest {
         assertEquals(400, post("/api/zone-settings", """{"zone_or_output_id":"z1","loop":"next"}""").first)
         assertEquals(200, post("/api/zone-settings", """{"zone_or_output_id":"z1","loop":"loop_one"}""").first)
         assertTrue(core.calls.any { it.startsWith("settings:z1:") && it.contains("loop_one") })
+    }
+
+    // ------------------------------------------------------------ lan access
+
+    /**
+     * THE ONE THAT MATTERS MOST.
+     *
+     * Every request in this file goes over loopback, which is exactly what the
+     * app's own WebView does. If the gate ever stops letting loopback through,
+     * turning on LAN access locks the owner out of their own phone — and the
+     * whole suite going red here is the loudest way to find that out.
+     */
+    @Test
+    fun turningOnLanAccessDoesNotLockThisPhoneOut() {
+        // Switching rebuilds the socket, and the WebView has already loaded a
+        // page from the old one — so the port must survive, or that page is
+        // left talking to nothing with nothing to say why.
+        val before = app.port
+        assertEquals(200, post("/api/settings/lan", """{"enabled":true}""").first)
+        assertEquals("the port must not move under the open page", before, app.port)
+
+        // The ordinary API still answers, with no cookie and no PIN anywhere.
+        assertNotNull(json("/api/zones"))
+        assertEquals(200, get("/api/settings/home-rows").first)
+
+        // And back again.
+        assertEquals(200, post("/api/settings/lan", """{"enabled":false}""").first)
+        assertEquals(before, app.port)
+        assertNotNull(json("/api/zones"))
+    }
+
+    @Test
+    fun lanAccessIsOffAndHasNoCredentialsUntilItIsAskedFor() {
+        val before = json("/api/settings/lan")
+        assertFalse(before.getBoolean("enabled"))
+        assertEquals("", before.getString("pin"))
+    }
+
+    @Test
+    fun turningItOnMintsACodeAndTurningItOffThrowsTheCodeAway() {
+        val on = JSONObject(post("/api/settings/lan", """{"enabled":true}""").second)
+        assertTrue(on.getBoolean("enabled"))
+        assertEquals("a code somebody has to type once", 8, on.getString("pin").length)
+        assertTrue("the port is what the owner types", on.getInt("port") > 0)
+
+        val off = JSONObject(post("/api/settings/lan", """{"enabled":false}""").second)
+        assertFalse(off.getBoolean("enabled"))
+        assertEquals("a code that is no longer usable must not be shown", "", off.getString("pin"))
+    }
+
+    /**
+     * Enabling twice mints a different code, which is how somebody revokes one
+     * they have shared — and it invalidates the cookies the old one bought.
+     */
+    @Test
+    fun switchingItOnAgainIssuesADifferentCode() {
+        fun enable() =
+            JSONObject(post("/api/settings/lan", """{"enabled":true}""").second).getString("pin")
+        val first = enable()
+        post("/api/settings/lan", """{"enabled":false}""")
+        assertNotEquals(first, enable())
+    }
+
+    @Test
+    fun aRequestWithoutTheFlagIsRefusedRatherThanGuessedAt() {
+        assertEquals(400, post("/api/settings/lan", """{}""").first)
     }
 
     @Test
