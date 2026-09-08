@@ -9,20 +9,45 @@ import android.util.Log
 /**
  * The door Assistant knocks on before it can say anything to this app.
  *
- * WHY PAUSE ALREADY WORKED AND NOTHING ELSE DID. A media session that is
- * ACTIVE is reachable by the system for transport — that is how "Hey Google,
- * pause" reached Roon with none of this in place. But "play <something> on
- * MusicD" is not a transport command: Assistant has to find the app by name,
- * start it, and get hold of its session, and the only route to that is a
- * MediaBrowserService. Android's own guidance is blunt about it — "You must
- * return a BrowserRoot in order to allow the Assistant to send commands to
- * your media session."
+ * WHY PAUSE ALREADY WORKED. A media session that is ACTIVE is reachable by the
+ * system for transport — that is how "Hey Google, pause" reached Roon with
+ * none of this in place. This service is the other half: Android's guidance is
+ * blunt about it — "You must return a BrowserRoot in order to allow the
+ * Assistant to send commands to your media session."
  *
- * That is what this is for, and it is worth being clear that it is NOT App
- * Actions. App Actions needs the app published on Play and a shortcuts.xml
- * reviewed by Google, which a privately signed APK will never have. This route
- * asks for neither; it is the ordinary media-app integration that every player
- * on Android implements, and it is the one that was missing.
+ * It is NOT App Actions. App Actions needs the app published on Play and a
+ * shortcuts.xml reviewed by Google, which a privately signed APK will never
+ * have. This route asks for neither; it is the ordinary media-app integration
+ * every player on Android implements.
+ *
+ * WHAT THIS DOES NOT BUY, MEASURED RATHER THAN ASSUMED. This service was added
+ * to make "play <album> on <this app>" work. IT DOES NOT, and no amount of
+ * conformance here will. Asked exactly that, with the app installed, running,
+ * named correctly and transcribed correctly, Gemini answered:
+ *
+ *     "I cannot directly control or trigger playback on your local devices
+ *      or apps."
+ *
+ * It declined the category. There was no app to find and no session to reach,
+ * because nothing was ever routed. Google's own documentation points the same
+ * way: an assistant starts a media app from Search-indexed content with
+ * watch-action deep links, and third-party media control is described as
+ * working with a few dozen top Play apps. A sideloaded APK can supply neither.
+ *
+ * The full measured picture on one phone, Gemini as the assistant:
+ *
+ *   "pause" / "next track"      works   device assistance -> this session
+ *   "open <app label>"          works   plain launch by name
+ *   volume rocker               works   volume keys -> VolumeProvider -> Roon
+ *   "turn up volume"            FAILS   moves the phone's stream, not the zone
+ *   "play <album> on <app>"     FAILS   refused outright, quoted above
+ *
+ * So: keep this service, because the two that work depend on it and on the
+ * session it publishes. Do not add browsing, prepare actions or anything else
+ * in the belief that it will unlock the last two. It will not. Voice commands
+ * beyond transport reach this app through launch-by-name — the one channel
+ * that is proven — or through the exported VOICE_COMMAND intent on
+ * VoiceIntentActivity.
  *
  * BROWSING IS NOT IMPLEMENTED, DELIBERATELY, AND IT IS NOT NEEDED FOR VOICE.
  * A root is returned so a controller can connect and reach the session, and
