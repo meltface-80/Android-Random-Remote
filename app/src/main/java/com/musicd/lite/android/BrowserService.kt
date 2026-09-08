@@ -44,10 +44,18 @@ import android.util.Log
  *
  * So: keep this service, because the two that work depend on it and on the
  * session it publishes. Do not add browsing, prepare actions or anything else
- * in the belief that it will unlock the last two. It will not. Voice commands
- * beyond transport reach this app through launch-by-name — the one channel
- * that is proven — or through the exported VOICE_COMMAND intent on
- * VoiceIntentActivity.
+ * in the belief that it will unlock the last two. It will not.
+ *
+ * LAUNCH-BY-NAME WAS TRIED AS A WAY ROUND, AND IT DID NOT CARRY. A launcher
+ * entry named "Roulette", whose whole job was to start a random album when
+ * opened, was answered by Gemini with facts about the casino game. Opening
+ * THIS app by its own name does work, so the channel is real, but a name only
+ * survives by being said to a phone and there is no way to check one in
+ * advance — see VoiceName in :core. The idea is not disproven, only expensive:
+ * each attempt costs a release and a name.
+ *
+ * What is left for anything beyond transport is the exported VOICE_COMMAND
+ * intent on VoiceIntentActivity, which any automation app can send.
  *
  * BROWSING IS NOT IMPLEMENTED, DELIBERATELY, AND IT IS NOT NEEDED FOR VOICE.
  * A root is returned so a controller can connect and reach the session, and
