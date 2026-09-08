@@ -206,9 +206,6 @@
 <section id="download">
   <div class="wrap">
     <h2>Download</h2>
-    <p class="lead">Built and published by CI from the source in this repository — the commit that
-       adds each APK names the commit it was built from, so the binary is always traceable to the
-       code beside it.</p>
     <div class="dl">
       <a class="get" id="dl-link"
          href="https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.4.18.apk">Download the APK</a>
@@ -237,6 +234,15 @@
         <li><b>Approve it in Roon:</b> <b>Settings &rarr; Extensions</b> &rarr; Enable
             <em>MusicD Remote Lite (Android)</em>. The pairing token is stored per Core, so this
             happens only the first time.</li>
+        <li><b>Optional &mdash; open it on your other devices.</b> In the app, go to
+            <b>Settings &rarr; Network</b> and switch on <em>Open on other devices</em>. It shows
+            an address like <code>http://192.168.0.42:3450</code> and an eight-character code.
+            Open that address in a browser on the iPhone, iPad or laptop, enter the code once, and
+            that device stays signed in. On iOS, <b>Share &rarr; Add to Home Screen</b> gives it an
+            icon and opens it without browser chrome.
+            <br><span style="color:var(--muted)">Off by default: while it is off, nothing on your
+            network can reach the app at all. Give the phone a fixed address in your router, or
+            the one you bookmarked will eventually move.</span></li>
       </ol>
     </div>
   </div>
@@ -258,8 +264,8 @@
         <p>Albums and artists, matched as you type against a snapshot held in the app — no round
            trip to the Core for every keystroke.</p></div>
       <div class="card"><h3><span class="em">✨</span>Smart Picks</h3>
-        <p>A handful of albums a day you have not played in six months. Drawn from your own
-           library, so every one is a tap from playing.</p></div>
+        <p>A handful of albums a day, drawn from your own library and steady until tomorrow, so
+           every one is a tap from playing.</p></div>
       <div class="card"><h3><span class="em">📝</span>Reviews &amp; biographies</h3>
         <p>Album blurbs and artist biographies from Wikipedia, with Pitchfork scores and Best New
            Music where they exist.</p></div>
@@ -278,6 +284,10 @@
       <div class="card"><h3><span class="em">⚡</span>Quick Settings tile</h3>
         <p>Pull down the shade and tap: a random record starts in the zone you were last using,
            without opening the app at all.</p></div>
+      <div class="card"><h3><span class="em">🌐</span>Open it on your other devices</h3>
+        <p>Switch it on in Settings &rarr; Network and the same page opens on any device on your
+           Wi-Fi — an iPhone, a tablet, a laptop. Off by default, and behind a code when it is
+           on.</p></div>
       <div class="card"><h3><span class="em">🎛️</span>The dial</h3>
         <p>A second launcher icon: a volume ring you sweep with your thumb, album art in the
            middle, transport under it. One install, two icons, one Roon extension.</p></div>
@@ -312,11 +322,10 @@
             <td>Read from the files themselves during a scan, which needs that same music
                 directory.</td></tr>
         <tr><td>Wall display</td>
-            <td>The <code>/display</code> page is served to <em>other</em> devices, and this app's
-                server is bound to loopback so nothing off the phone can reach it. Opening that up
-                would put an unauthenticated control API on your network, and a phone would have to
-                stay awake serving it. Use MusicD Remote proper for a wall display — it runs on a
-                machine that is already on.</td></tr>
+            <td>The <code>/display</code> page is not ported. Serving pages to other devices IS
+                possible now — Settings &rarr; Network, behind a code — but a wall display also
+                means a phone staying awake rendering for a TV. Use MusicD Remote proper for that;
+                it runs on a machine that is already on.</td></tr>
         <tr><td>Queue editing</td>
             <td>Not a lite limitation: Roon's extension API exposes no way to remove, reorder or
                 clear queue items. Playing from a chosen track is the one queue action it allows,
