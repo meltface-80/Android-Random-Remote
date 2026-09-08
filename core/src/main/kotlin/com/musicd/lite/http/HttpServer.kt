@@ -5,6 +5,7 @@ import java.io.BufferedOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
@@ -87,10 +88,24 @@ class HttpServer(
         }
     }
 
+    /**
+     * Closes the listening socket and lets the workers finish.
+     *
+     * shutdown(), NOT shutdownNow(). Switching LAN access calls this from a
+     * request handler — which runs ON one of these workers — so shutdownNow()
+     * interrupts the very thread doing the switching, and everything it does
+     * next that can be interrupted fails instantly. That is not hypothetical:
+     * it made rebinding take a random port on roughly half of all switches.
+     * The socket is closed first either way, which is what actually stops new
+     * work arriving; the requests already in flight, including the reply to
+     * the switch itself, get to finish.
+     */
     fun stop() {
         if (!running.compareAndSet(true, false)) return
         runCatching { server.close() }
-        workers.shutdownNow()
+        workers.shutdown()
+        // A different thread, and it is parked in accept() until the close
+        // above wakes it, so interrupting it costs nothing and hurries it up.
         acceptor.shutdownNow()
     }
 
@@ -222,24 +237,63 @@ class HttpServer(
          */
         const val ANY = "0.0.0.0"
 
+        /** How long to keep trying for the port we asked for. */
+        private const val BIND_TRIES = 20
+        private const val BIND_WAIT_MS = 25L
+
         /**
-         * Binds [port], falling back to whatever the OS will give.
+         * Binds [port], briefly insisting, and falling back to whatever the OS
+         * will give rather than failing to start.
          *
-         * A fixed port is what makes the URL worth writing down or saving to a
-         * home screen, but something else on the phone may already hold it —
-         * and failing to start at all would take the app's own UI with it,
-         * which is a far worse outcome than an unmemorable port.
+         * THE RETRY IS NOT POLITENESS. Switching LAN access closes this socket
+         * and immediately opens another on the same port, and for a few
+         * milliseconds after the close the kernel can still refuse it — the
+         * old connections have not finished going away. Taking the first
+         * refusal at face value silently moves the port, and the app's own
+         * WebView is already showing a page loaded from the old one, so it
+         * would be left talking to nothing with no way to explain itself.
+         * Measured, not theorised: without this the port moved on roughly one
+         * switch in three.
+         *
+         * The fallback still exists for the case it was written for, which is
+         * something else on the phone genuinely holding 3450 at startup.
+         * Failing to start at all would take the whole UI with it, and that is
+         * far worse than an unmemorable port.
          */
         private fun bind(port: Int, address: String): ServerSocket {
             val addr = InetAddress.getByName(address)
-            return try {
-                ServerSocket(port, 64, addr)
-            } catch (e: IOException) {
-                if (port == 0) throw e
-                Log.w(TAG, "port $port is taken; asking the OS for another")
-                ServerSocket(0, 64, addr)
+            if (port == 0) return open(0, addr)
+            var last: IOException? = null
+            repeat(BIND_TRIES) {
+                try {
+                    return open(port, addr)
+                } catch (e: IOException) {
+                    last = e
+                    try {
+                        Thread.sleep(BIND_WAIT_MS)
+                    } catch (interrupted: InterruptedException) {
+                        // Keep the flag for whoever owns this thread, but do
+                        // NOT give up on the port: taking a random one is the
+                        // damaging outcome here, not waiting a moment longer.
+                        Thread.currentThread().interrupt()
+                    }
+                }
             }
+            Log.w(TAG, "port $port would not bind (${last?.message}); asking the OS for another")
+            return open(0, addr)
         }
+
+        /**
+         * SO_REUSEADDR has to be set BEFORE the bind, which the
+         * ServerSocket(port, backlog, address) constructor cannot do: its
+         * initial setting is explicitly undefined, so on a JDK where it
+         * defaults off, reclaiming a port straight after a close never works.
+         */
+        private fun open(port: Int, addr: InetAddress): ServerSocket =
+            ServerSocket().apply {
+                reuseAddress = true
+                bind(InetSocketAddress(addr, port), 64)
+            }
         private const val READ_TIMEOUT_MS = 30_000
         private const val MAX_HEADER_BYTES = 32 * 1024
         private const val MAX_BODY_BYTES = 4 * 1024 * 1024
