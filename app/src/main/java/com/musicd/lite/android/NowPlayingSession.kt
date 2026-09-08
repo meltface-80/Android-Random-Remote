@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.MediaMetadata
+import android.media.Rating
 import android.media.VolumeProvider
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -48,7 +49,13 @@ class NowPlayingSession(
     private val app: MusicdLite
 ) {
 
-    private companion object {
+    /**
+     * NOT private: [ACTIONS] and [actionsFor] are asserted by SessionActionsTest
+     * against Google's documented required set for a music app, which is the
+     * only place that requirement is checked. Re-privatising this removes the
+     * check along with it.
+     */
+    companion object {
         const val TAG = "NowPlaying"
 
         /** Big enough for a lock screen, small enough to decode without care. */
@@ -96,6 +103,7 @@ class NowPlayingSession(
             PlaybackState.ACTION_PLAY or
                 PlaybackState.ACTION_PAUSE or
                 PlaybackState.ACTION_PLAY_PAUSE or
+                PlaybackState.ACTION_STOP or
                 PlaybackState.ACTION_SKIP_TO_NEXT or
                 PlaybackState.ACTION_SKIP_TO_PREVIOUS or
                 SEARCH
@@ -117,6 +125,10 @@ class NowPlayingSession(
             if (zone.isPlayAllowed || zone.isPauseAllowed) {
                 a = a or PlaybackState.ACTION_PLAY_PAUSE
             }
+            // Roon has no stop, so onStop() pauses — which means STOP is
+            // offered exactly when pause is. Google lists it as required for a
+            // music app, and it was the one required action never advertised.
+            if (zone.isPauseAllowed) a = a or PlaybackState.ACTION_STOP
             if (zone.isNextAllowed) a = a or PlaybackState.ACTION_SKIP_TO_NEXT
             if (zone.isPreviousAllowed) a = a or PlaybackState.ACTION_SKIP_TO_PREVIOUS
             return a or SEARCH
@@ -198,6 +210,12 @@ class NowPlayingSession(
                         .setState(PlaybackState.STATE_STOPPED, 0L, 0f)
                         .build()
                 )
+                // Required by Google's Assistant guide whether or not the app
+                // has ratings: "If the app does not support rating, it should
+                // set the rating type to RATING_NONE." Roon has no rating this
+                // session could carry, so this says so rather than leaving the
+                // field unset and the answer unknown.
+                setRatingType(Rating.RATING_NONE)
                 isActive = true
             }
             true
