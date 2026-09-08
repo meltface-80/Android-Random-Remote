@@ -170,7 +170,6 @@ class RemoteApi(
             "/api/play" -> playAlbum(request, "play_now")
             "/api/play-track" -> playTrack(request)
             "/api/play-multi" -> playMulti(request)
-            "/api/play-unheard" -> playUnheard(request)
 
             "/api/search" -> search(request)
             "/api/search-status" -> Json.obj(
@@ -196,7 +195,6 @@ class RemoteApi(
             "/api/filters/decades" -> decades()
             "/api/filters/tags" -> tags()
 
-            "/api/home/unplayed" -> homeUnplayed(request)
             "/api/home/history" -> homeHistory(request)
             "/api/home/album-of-the-day" -> albumOfTheDay()
             "/api/home/genre-groups" -> genreGroups()
@@ -226,8 +224,7 @@ class RemoteApi(
             "/api/pitchfork/review" -> pitchforkReview(request)
 
             "/api/shortcut/zones" -> zones()
-            "/api/shortcut/play-random" -> shortcutPlay(request, unheardOnly = false)
-            "/api/shortcut/play-unheard" -> shortcutPlay(request, unheardOnly = true)
+            "/api/shortcut/play-random" -> shortcutPlay(request)
 
             else -> notInLite(path)
         }
@@ -665,11 +662,7 @@ class RemoteApi(
 
         val playedChips = listOf(
             JSONObject().put("id", "never").put("label", "Never played").put("count", index.count - played),
-            JSONObject().put("id", "played").put("label", "Played").put("count", played),
-            JSONObject().put("id", "6").put("label", "Not in 6 months")
-                .put("count", view.unplayed(6).size),
-            JSONObject().put("id", "12").put("label", "Not in a year")
-                .put("count", view.unplayed(12).size)
+            JSONObject().put("id", "played").put("label", "Played").put("count", played)
         )
 
         val facets = JSONArray()
@@ -954,26 +947,12 @@ class RemoteApi(
         }
     }
 
-    private fun playUnheard(request: Request): Response {
-        val body = Json.body(request)
-        val zone = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
-            ?: return Json.error(400, "zone_or_output_id is required")
-        val months = body.optInt("months", 6).coerceIn(1, 120)
-        val pool = view.unplayed(months).ifEmpty { index.albums }
-        val album = view.sample(pool, 1).firstOrNull()
-            ?: return Json.error(503, "The library index is still building")
-        val r = app.albums.open(
-            album.offset, zone, "play_now", null, Albums.Expect(album.title, album.subtitle)
-        )
-        return Json.ok(JSONObject().put("album", Json.album(album)).put("invoked", r.invoked ?: JSONObject.NULL))
-    }
-
     /**
      * One tap, one album. Shared with the widget and the Quick Settings tile,
      * which reach the same action without going through HTTP at all.
      */
-    private fun shortcutPlay(request: Request, unheardOnly: Boolean): Response =
-        app.playRandomAlbum(request.str("zone"), unheardOnly).fold(
+    private fun shortcutPlay(request: Request): Response =
+        app.playRandomAlbum(request.str("zone")).fold(
             onSuccess = { Json.ok(JSONObject().put("album", Json.album(it))) },
             onFailure = { Json.error(503, it.message ?: "Could not start an album") }
         )
@@ -1141,18 +1120,6 @@ class RemoteApi(
 
     // ----------------------------------------------------------------- home
 
-    private fun homeUnplayed(request: Request): Response {
-        val months = (request.int("months") ?: 6).coerceIn(1, 120)
-        val count = (request.int("count") ?: RANDOM_DEFAULT).coerceIn(1, 96)
-        val pool = view.unplayed(months)
-        return Json.obj(
-            JSONObject()
-                .put("albums", Json.albums(view.sample(pool, count)))
-                .put("total", pool.size)
-                .put("months", months)
-        )
-    }
-
     private fun homeHistory(request: Request): Response {
         val count = (request.int("count") ?: HISTORY_MAX_TILES).coerceIn(1, HISTORY_MAX_TILES)
         return Json.obj(
@@ -1280,7 +1247,9 @@ class RemoteApi(
         // Both shapes are honoured: artist blocks (what "Not for me" writes) and
         // the album keys an earlier build stored, so nothing a user already
         // rejected comes back.
-        val pool = view.unplayed(6).filter { album ->
+        // The whole library, minus anything rejected. It used to be albums not
+        // played in six months, which the plays table cannot actually answer.
+        val pool = index.albums.filter { album ->
             album.key !in blocked &&
                 (BLOCKED_ARTIST_PREFIX + Normalize.text(album.subtitle)) !in blocked
         }
@@ -1297,7 +1266,7 @@ class RemoteApi(
                     Json.arrayOf(
                         picks.map { album ->
                             JSONObject()
-                                .put("kind", "unplayed")
+                                .put("kind", "library")
                                 .put("artist", album.subtitle)
                                 .put("album", album.title)
                                 .put("album_id", "")
@@ -1311,7 +1280,7 @@ class RemoteApi(
                                     "image",
                                     album.imageKey?.let { "/api/image/$it?width=400" } ?: ""
                                 )
-                                .put("reason", "Not played in the last six months")
+                                .put("reason", "From your library")
                                 .put("genre", "")
                                 .put("added", JSONObject.NULL)
                                 .put("offset", album.offset)

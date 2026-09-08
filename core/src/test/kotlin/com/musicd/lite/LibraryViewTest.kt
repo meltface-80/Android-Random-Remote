@@ -83,14 +83,30 @@ class LibraryViewTest {
         assertEquals(listOf("Blue"), never)
     }
 
+    /**
+     * There is no recency window any more, and this is what replaced it: a play
+     * counts however long ago it happened.
+     *
+     * The window was removed because the plays table holds only what this app
+     * watched happen and starts empty, so "not in the last six months" was
+     * really "not seen by this app", which is a different and much weaker
+     * claim than the label made.
+     */
     @Test
-    fun unplayedIgnoresOldHistory() {
+    fun aPlayCountsHoweverLongAgoItWas() {
         build("Aja" to "Steely Dan", "Blue" to "Joni Mitchell")
         val longAgo = System.currentTimeMillis() - 400L * 24 * 60 * 60 * 1000
         store.recordPlay(keyOf("Aja", "Steely Dan"), "Aja", "Steely Dan", "Peg", longAgo)
-        // Played, but not in the last six months, so it is still a rediscovery.
-        assertEquals(2, view.unplayed(6).size)
-        assertEquals(1, view.unplayed(240).size)
+        val played = view.select(view.sanitize(null, null, null, "played", null, null, null))
+        assertEquals(listOf("Aja"), played.map { it.title })
+    }
+
+    /** A window filter is no longer offered, so asking for one falls back. */
+    @Test
+    fun aRecencyFilterIsNoLongerAccepted() {
+        build("Aja" to "Steely Dan", "Blue" to "Joni Mitchell")
+        assertEquals("any", view.sanitize(null, null, null, "6", null, null, null).played)
+        assertEquals("any", view.sanitize(null, null, null, "12", null, null, null).played)
     }
 
     @Test

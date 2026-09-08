@@ -51,8 +51,9 @@ import android.util.Log
  * opened, was answered by Gemini with facts about the casino game. Opening
  * THIS app by its own name does work, so the channel is real, but a name only
  * survives by being said to a phone and there is no way to check one in
- * advance — see VoiceName in :core. The idea is not disproven, only expensive:
- * each attempt costs a release and a name.
+ * advance — the four that were tried are recorded against app_name in
+ * res/values/strings.xml. The idea is not disproven, only expensive: each
+ * attempt costs a release and a name.
  *
  * What is left for anything beyond transport is the exported VOICE_COMMAND
  * intent on VoiceIntentActivity, which any automation app can send.

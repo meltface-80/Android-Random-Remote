@@ -18,7 +18,10 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
 
     companion object {
         val SORTS = listOf("album", "artist", "year", "added", "plays", "lastplayed", "random")
-        val PLAYED_FILTERS = listOf("any", "never", "played", "6", "12")
+        // "6" and "12" ("not in the last N months") are gone: the plays table
+        // only holds what this app watched happen, and it starts empty, so a
+        // recency window was answering a question the app cannot know.
+        val PLAYED_FILTERS = listOf("any", "never", "played")
 
         const val PREFIX_MAX = 40
         private const val DAY_MS = 24L * 60 * 60 * 1000
@@ -97,9 +100,6 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
     fun playedTitlesSince(cutoff: Long): Set<String> =
         store.playsSince(cutoff).mapTo(HashSet()) { it.album.lowercase(Locale.ROOT).trim() }
 
-    fun playedTitlesInLastMonths(months: Int): Set<String> =
-        playedTitlesSince(System.currentTimeMillis() - months * MONTH_MS)
-
     // ------------------------------------------------------------------ query
 
     data class Query(
@@ -148,11 +148,9 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
         }
 
         if (q.played != "any") {
-            // "never" uses the whole history; "played" is its complement;
-            // "6"/"12" mean "not in the last N months".
-            val months = q.played.toIntOrNull()
-            val seen = if (q.played == "never" || q.played == "played") playedTitlesSince(0)
-            else playedTitlesInLastMonths(if (months != null && months > 0) months else 6)
+            // The whole history, not a window: "played" means this app has seen
+            // it play at least once, and "never" is its complement.
+            val seen = playedTitlesSince(0)
             val want = q.played == "played"
             list = list.filter { (playKey(it) in seen) == want }
         }
@@ -208,12 +206,6 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
         val rnd = ThreadLocalRandom.current()
         while (picked.size < want) picked += rnd.nextInt(pool.size)
         return picked.map { pool[it] }
-    }
-
-    /** Albums whose title has not been played in the last [months] months. */
-    fun unplayed(months: Int): List<AlbumRecord> {
-        val heard = playedTitlesInLastMonths(months)
-        return index.albums.filter { playKey(it) !in heard }
     }
 
     /**
