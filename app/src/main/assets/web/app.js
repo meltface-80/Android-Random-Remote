@@ -7342,6 +7342,16 @@
   // Freezing while Roon says `loading` is the honest reading, and it makes both
   // transitions into it and out of it re-baseline on the server's exact
   // position.
+  //
+  // WHAT THIS DOES NOT EXPLAIN, so nobody chases it twice. A Sonos endpoint can
+  // go silent on resume-from-pause while Roon still reports the zone as
+  // `playing` and the position genuinely advances. That is not this, and it is
+  // not anything a remote can fix: the same pause and resume from Roon's OWN
+  // app does it too, which is how it was pinned down. Next and previous appear
+  // to "fix" it only because each forces a fresh stream. If the bar is MOVING
+  // during the silence the zone is `playing` and the fault is downstream of
+  // Roon; if the bar is FROZEN it is `loading` and the stream never started.
+  // Reading which of the two it is, is the whole use of this predicate.
   function npPlaying() {
     return !!currentZone && currentZone.state === "playing";
   }
