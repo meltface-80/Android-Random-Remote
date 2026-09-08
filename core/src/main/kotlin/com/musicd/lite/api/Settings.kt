@@ -3,6 +3,7 @@ package com.musicd.lite.api
 import com.musicd.lite.str
 import com.musicd.lite.strOrNull
 import com.musicd.lite.store.Store
+import com.musicd.lite.http.LanAccess
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -45,6 +46,13 @@ class Settings(private val store: Store) {
         const val KEY_LAST_ZONE = "last_zone"
 
         /**
+         * Whether the page is served to the rest of the network, and the PIN
+         * and signing key that guard it when it is. Off, with no PIN and no
+         * key, until the owner deliberately turns it on — see LanAccess.
+         */
+        const val KEY_LAN = "lan_access"
+
+        /**
          * Why every label route in this build answers the way it does.
          *
          * Record labels come from a scan of file tags on a mounted music
@@ -83,6 +91,47 @@ class Settings(private val store: Store) {
         }
         for (id in HOME_ROW_IDS) if (id !in seen) out += id to true
         return out
+    }
+
+    // ------------------------------------------------------------ lan access
+
+    /** What the owner has chosen, and the credentials that go with it. */
+    data class Lan(val enabled: Boolean, val pin: String, val secret: String)
+
+    fun lan(): Lan {
+        val d = doc(KEY_LAN)
+        // str(), not optString: Android hands back the literal "null" for a
+        // JSON null where the JVM hands back "" — see JsonSafe.kt, and the test
+        // that scans for it.
+        return Lan(
+            enabled = d.optBoolean("enabled", false),
+            pin = d.str("pin"),
+            secret = d.str("secret")
+        )
+    }
+
+    /**
+     * Turning it on mints a fresh PIN and a fresh signing key every time.
+     *
+     * Rolling the key on each enable is what makes the switch a real off:
+     * every browser that was logged in before is logged out, so turning the
+     * feature off and on again does not silently readmit a device that was
+     * trusted last month.
+     */
+    fun saveLan(enabled: Boolean): Lan {
+        val next = if (enabled) {
+            Lan(true, LanAccess.newPin(), LanAccess.newSecret())
+        } else {
+            Lan(false, "", "")
+        }
+        save(
+            KEY_LAN,
+            JSONObject()
+                .put("enabled", next.enabled)
+                .put("pin", next.pin)
+                .put("secret", next.secret)
+        )
+        return next
     }
 
     fun saveHomeRows(rows: List<Pair<String, Boolean>>) {

@@ -25,22 +25,29 @@ import java.util.concurrent.atomic.AtomicInteger
  * in the WebView — cannot work, because `shouldInterceptRequest` is not given
  * the body of a POST, and the UI POSTs for every play, queue and control.
  *
- * Loopback-only by construction: nothing here is reachable from the network,
- * so there is no authentication and none is needed.
+ * LOOPBACK BY DEFAULT, AND THAT IS STILL THE SAFE STATE. [bindAddress] exists
+ * so the owner can deliberately serve the page to other devices on their own
+ * network — an iPhone, a tablet — and it must never be widened without the
+ * gate in [LanAccess] in front of it. There are 79 `/api/` routes behind this
+ * socket, they control somebody's music system, and the settings store holds
+ * their Discogs token and fanart.tv key. The address is chosen once, at
+ * construction: turning the feature on or off builds a new server rather than
+ * mutating a live one, so there is no window where the socket is open and the
+ * gate is not.
  */
 class HttpServer(
     private val handler: Handler,
     /** 0 asks the OS for a free port, which avoids clashing with anything. */
-    requestedPort: Int = 0
+    requestedPort: Int = 0,
+    /** "127.0.0.1" for this phone only; "0.0.0.0" to answer the network. */
+    bindAddress: String = LOOPBACK
 ) {
 
     fun interface Handler {
         fun handle(request: Request): Response
     }
 
-    private val server = ServerSocket(
-        requestedPort, 64, InetAddress.getByName("127.0.0.1")
-    )
+    private val server = bind(requestedPort, bindAddress)
 
     private val running = AtomicBoolean(false)
     private val threadSeq = AtomicInteger(0)
@@ -58,7 +65,11 @@ class HttpServer(
     /** The port actually bound. Ask after [start]. */
     val port: Int get() = server.localPort
 
-    val rootUrl: String get() = "http://127.0.0.1:$port"
+    /**
+     * Always loopback, whatever this is bound to: this is the URL the app's own
+     * WebView loads, and it must not depend on the phone having an address.
+     */
+    val rootUrl: String get() = "http://$LOOPBACK:$port"
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -89,6 +100,7 @@ class HttpServer(
         try {
             client.soTimeout = READ_TIMEOUT_MS
             client.tcpNoDelay = true
+            val remote = client.inetAddress?.hostAddress ?: ""
             val input = client.getInputStream().buffered()
             val output = BufferedOutputStream(client.getOutputStream())
 
@@ -96,7 +108,7 @@ class HttpServer(
             // a fresh connection per poll is pure overhead on a phone.
             while (running.get()) {
                 val request = try {
-                    readRequest(input)
+                    readRequest(input, remote)
                 } catch (e: SocketTimeoutException) {
                     return
                 } catch (e: HttpError) {
@@ -126,7 +138,7 @@ class HttpServer(
     private class HttpError(val status: Int, message: String) : IOException(message)
 
     /** Returns null at a clean end of stream. */
-    private fun readRequest(input: InputStream): Request? {
+    private fun readRequest(input: InputStream, remote: String): Request? {
         val line = readLine(input) ?: return null
         if (line.isEmpty()) return null
 
@@ -159,7 +171,7 @@ class HttpServer(
         val path = if (q < 0) target else target.substring(0, q)
         val query = if (q < 0) emptyMap() else parseQuery(target.substring(q + 1))
 
-        return Request(method, decodePath(path), query, headers, body, keepAlive)
+        return Request(method, decodePath(path), query, headers, body, keepAlive, remote)
     }
 
     private fun readLine(input: InputStream): String? {
@@ -199,6 +211,35 @@ class HttpServer(
 
     companion object Codec {
         private const val TAG = "Http"
+
+        /** The only address this is guaranteed to be reachable on. */
+        const val LOOPBACK = "127.0.0.1"
+
+        /**
+         * Every interface — which means the network can reach it. Only ever
+         * passed when the owner has switched LAN access on, and never without
+         * the gate in LanAccess standing in front.
+         */
+        const val ANY = "0.0.0.0"
+
+        /**
+         * Binds [port], falling back to whatever the OS will give.
+         *
+         * A fixed port is what makes the URL worth writing down or saving to a
+         * home screen, but something else on the phone may already hold it —
+         * and failing to start at all would take the app's own UI with it,
+         * which is a far worse outcome than an unmemorable port.
+         */
+        private fun bind(port: Int, address: String): ServerSocket {
+            val addr = InetAddress.getByName(address)
+            return try {
+                ServerSocket(port, 64, addr)
+            } catch (e: IOException) {
+                if (port == 0) throw e
+                Log.w(TAG, "port $port is taken; asking the OS for another")
+                ServerSocket(0, 64, addr)
+            }
+        }
         private const val READ_TIMEOUT_MS = 30_000
         private const val MAX_HEADER_BYTES = 32 * 1024
         private const val MAX_BODY_BYTES = 4 * 1024 * 1024
@@ -279,7 +320,13 @@ class Request(
     val query: Map<String, String>,
     val headers: Map<String, String>,
     val body: ByteArray,
-    val keepAlive: Boolean
+    val keepAlive: Boolean,
+    /**
+     * Who is asking. The whole access decision turns on whether this is
+     * loopback, so it comes from the socket rather than from any header a
+     * client could set — X-Forwarded-For and friends are deliberately ignored.
+     */
+    val remoteAddress: String = HttpServer.LOOPBACK
 ) {
     val bodyText: String get() = body.toString(Charsets.UTF_8)
 

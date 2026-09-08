@@ -3955,3 +3955,24 @@ body.show-quality .album-quality { display: block; }
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .lib-filter-input::placeholder { color: var(--text-faint); }
+
+/* ------------------------------------------------------------------ */
+/*  Network pane — an address to type and a code to copy               */
+/* ------------------------------------------------------------------ */
+/* Both are read off this screen and typed into a different device, so they
+   are monospaced and given room: a proportional font makes 0/O and 1/l the
+   reader's problem, which is the same reason the code's alphabet excludes
+   them in the first place (see LanAccess). */
+.lan-url, .lan-pin {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  user-select: all;
+  -webkit-user-select: all;
+  word-break: break-all;
+  background: var(--surface-2, #16191d);
+  border: 1px solid var(--border, #2a2e33);
+  border-radius: 10px;
+  padding: .7rem .8rem;
+  margin: .35rem 0 .9rem;
+}
+.lan-url { font-size: 1rem; }
+.lan-pin { font-size: 1.5rem; letter-spacing: .22em; text-align: center; }

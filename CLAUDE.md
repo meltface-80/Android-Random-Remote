@@ -126,9 +126,18 @@ are different claims.
 - **Never call Roon from the main thread.** `roon.control` blocks until the Core
   answers. `onStartCommand`, `onUpdate` and media-session callbacks are all main
   thread.
-- **The HTTP server binds to `127.0.0.1` by construction.** There is no
-  authentication because nothing off-device can reach it. Do not open it to the
-  network without building auth first.
+- **The HTTP server binds to `127.0.0.1` unless the owner says otherwise.**
+  That is still the default and still the safe state. LAN access is a switch in
+  Settings → Network: turning it on rebuilds the socket on `0.0.0.0` and mints
+  a PIN, and every request then passes `MusicdLite.guard()` before the API sees
+  it. Loopback is allowed through untouched, which is why the app's own WebView
+  is unaffected.
+  There are 79 `/api/` routes behind that socket, they control somebody's music
+  system, and the settings store holds their Discogs token and fanart.tv key —
+  so the gate is one chokepoint on purpose. **Do not add an authentication
+  bypass per route**, and do not widen the bind address anywhere else. The
+  deciding lives in `LanAccess` in `:core` with the tests to match; the Android
+  side only supplies a peer address.
 - **The signing keystore is private key material.** It lives in CI secrets. Do
   not commit it, and do not change the key: an APK signed with a different one
   cannot install over the existing app.
