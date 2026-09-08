@@ -9759,15 +9759,70 @@
     paintList(items);
   }
 
+  // Genres biggest first, and a record filed under two appears under both —
+  // which is what Pitchfork itself does with it. Returns null when NOTHING
+  // carries a genre, which is not hypothetical: a session cache from before
+  // this existed, or a parse miss upstream. The caller falls back to the flat
+  // list rather than filing every review under "Other".
+  function groupByGenre(items) {
+    const by = new Map();
+    let any = false;
+    for (const it of items) {
+      const gs = Array.isArray(it.genres) ? it.genres : [];
+      if (gs.length) any = true;
+      for (const g of gs) {
+        if (!by.has(g)) by.set(g, []);
+        by.get(g).push(it);
+      }
+    }
+    if (!any) return null;
+    const out = Array.from(by.entries())
+      .map(([name, list]) => ({ name: name, items: list }))
+      .sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name));
+    const loose = items.filter(it => !(Array.isArray(it.genres) && it.genres.length));
+    if (loose.length) out.push({ name: "Other", items: loose });
+    return out;
+  }
+
   function paintList(items) {
     setStatus("");
     listEl.innerHTML = "";
+    listEl.classList.remove("pf-grouped");
     if (!items.length) {
       listEl.innerHTML = '<div class="pf-empty">No reviews to show right now.</div>';
       return;
     }
+
+    const groups = groupByGenre(items);
     const frag = document.createDocumentFragment();
-    for (const it of items) frag.appendChild(buildCard(it));
+
+    if (!groups) {
+      for (const it of items) frag.appendChild(buildCard(it));
+      listEl.appendChild(frag);
+      return;
+    }
+
+    // Each genre gets its OWN grid, with the heading between them rather than
+    // inside one. The mosaic is built from :nth-child(6n+1) and (6n+4) picking
+    // the wide tiles, so a heading counted as a child would shift that pattern
+    // and a heading inside the grid would be laid out as a cell. Per-genre
+    // grids also restart the pattern, so every section opens with a big tile.
+    listEl.classList.add("pf-grouped");
+    for (const g of groups) {
+      const head = document.createElement("h3");
+      head.className = "pf-genre-head";
+      head.textContent = g.name;
+      const count = document.createElement("span");
+      count.className = "pf-genre-count";
+      count.textContent = g.items.length;
+      head.appendChild(count);
+      frag.appendChild(head);
+
+      const grid = document.createElement("div");
+      grid.className = "pf-grid pf-genre-grid";
+      for (const it of g.items) grid.appendChild(buildCard(it));
+      frag.appendChild(grid);
+    }
     listEl.appendChild(frag);
   }
 
@@ -9899,8 +9954,27 @@
     }
 
     // The not-owned path used to hop to the Qobuz and Tidal browsers with the
-    // search pre-seeded. Neither is in this build, so a review of an album you
-    // do not own offers its Pitchfork link and nothing else.
+    // search pre-seeded. Neither browser is in this build — but the services'
+    // own apps are one link away, so the affordance comes back in an honest
+    // form. Android hands an https link to whichever app claims that domain,
+    // so these open IN Qobuz or Tidal when installed and the web player when
+    // not; the WebView already routes off-site links out through ACTION_VIEW.
+    //
+    // "Find on", not "Open": all that is known here is two strings off a
+    // review, so the link carries a SEARCH. Naming the album exactly would
+    // need that service's own id for it, which needs their API — see
+    // StreamingLinks in :core, which builds and encodes these.
+    for (const svc of [{ key: "qobuz", name: "Qobuz" }, { key: "tidal", name: "Tidal" }]) {
+      const href = it[svc.key];
+      if (!href) continue;
+      const a = document.createElement("a");
+      a.className = "pf-action pf-action-link";
+      a.href = href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "Find on " + svc.name + " ↗";
+      container.appendChild(a);
+    }
   }
 
 })();
