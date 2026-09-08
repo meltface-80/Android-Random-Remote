@@ -36,6 +36,13 @@
     -->
     <string name="app_name">Jukebox</string>
     <string name="dial_name">Dial for Roon</string>
+
+    <!--
+      A voice verb's name IS the command: "Ok Google, open Roulette". It is a
+      launcher label under exactly the same rule as app_name above, and
+      VoiceVerbsTest checks it against VoiceName rather than trusting the eye.
+    -->
+    <string name="verb_roulette">Roulette</string>
     <string name="tile_random_album">Random album</string>
 
     <!-- The plain bar widget. -->
