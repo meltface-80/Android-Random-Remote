@@ -327,7 +327,7 @@ class RemoteApiTest {
         val body = json("/api/smart-picks")
         assertTrue("the screen reads j.picks", body.has("picks"))
         val picks = body.getJSONArray("picks")
-        assertTrue("the library has unplayed albums to offer", picks.length() > 0)
+        assertTrue("the library has albums to offer", picks.length() > 0)
 
         val pick = picks.getJSONObject(0)
         // Every field the card touches, because a missing one renders as
@@ -734,7 +734,7 @@ class RemoteApiTest {
         val rows = json("/api/settings/home-rows").getJSONArray("rows")
         val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }
         assertEquals(
-            listOf("unplayed", "history", "picks", "random", "library", "genres"),
+            listOf("aotd", "history", "picks", "random", "library", "genres"),
             ids
         )
         // The settings screen renders its list from this response, so a row
@@ -854,10 +854,6 @@ class RemoteApiTest {
 
     @Test
     fun homeRowsServeAlbumsAndTheDailyPick() {
-        val unplayed = json("/api/home/unplayed?count=3")
-        assertEquals(5, unplayed.getInt("total"))
-        assertEquals(3, unplayed.getJSONArray("albums").length())
-
         assertNotNull(json("/api/home/album-of-the-day").getJSONObject("album").getString("title"))
         assertEquals(0, json("/api/home/history").getJSONArray("albums").length())
     }

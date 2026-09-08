@@ -83,7 +83,6 @@
   };
   let albumCount = computeAlbumCount();
   let labelsActive = false;        // viewing the record-label browser?
-  let unplayedWallActive = false;  // viewing the full "Not played in 6 months" grid?
   let libraryWallActive = false;   // viewing the full A-Z library grid?
   // Declared up here with the other view flags, NOT beside showPlaylists():
   // showHome() and enterFullWall() read them and both can run during boot,
@@ -311,7 +310,7 @@
   window.addEventListener("resize", () => {
     clearTimeout(_wallResizeTimer);
     _wallResizeTimer = setTimeout(() => {
-      if (labelsActive || unplayedWallActive || libraryWallActive) return;
+      if (labelsActive || libraryWallActive) return;
       // The artist view owns the grid too — without this, a phone rotation (or
       // Safari collapsing its toolbar mid-scroll) replaced the discography with
       // a random wall while the header still said the artist's name.
@@ -328,7 +327,7 @@
   // ----- Home landing view -----
   const homeView     = document.getElementById("home-view");
   const homeSections = document.getElementById("home-sections");
-  const homeUnplayed = document.getElementById("home-unplayed");
+  const homeAotd = document.getElementById("home-aotd");
   const homeRandom   = document.getElementById("home-random");
   const homeLibrary  = document.getElementById("home-library");
   const homeLotw     = document.getElementById("home-lotw");
@@ -361,8 +360,8 @@
   // to stop the work behind it, not just the paint.
   // ---------------------------------------------------------------------------
   const HOME_ROWS = [
-    { id: "unplayed", title: "Not played in 6 months",
-      load: () => { loadHomeUnplayed(); }, isFresh: () => rowsTtlFresh() },
+    { id: "aotd",     title: "Album of the day",
+      load: () => { loadHomeAotd(); }, isFresh: () => rowsTtlFresh() },
     { id: "history",  title: "Recently played",
       load: () => { loadHomeHistory(); }, isFresh: () => homeHistoryLoaded },
     { id: "picks",    title: "Smart Picks",
@@ -456,7 +455,6 @@
   // Show the Home landing (hide the wall). The wall loads lazily when entered.
   function showHome() {
     { const c = document.getElementById("library-controls"); if (c) c.classList.add("hidden"); }
-    unplayedWallActive = false;
     libraryWallActive = false;
     leavePlaylistScreens();
     if (window.__clearSearchIfActive) window.__clearSearchIfActive();  // drop stale search results
@@ -478,12 +476,12 @@
     setTopbarNav(false, false, true);   // Home: search box, no Back/Refresh
     const m = document.querySelector("main");
     if (m) m.scrollTop = 0;
-    // The unplayed + random rows keep their tiles for 5 minutes: every Back tap
+    // The album-of-the-day + random rows keep their tiles for 5 minutes: every Back tap
     // lands here, and rebuilding ~60 fresh-random tiles each time re-fetched
     // ~60 cover images through the Roon Core — the single biggest repeated cost
     // in the app. Within the TTL the existing DOM (and the browser's image
     // cache) is reused; after it, or if a load failed, both rows reload fresh.
-    // The unplayed and random rows share one TTL, so mark it before the loop
+    // The daily pick and random rows share one TTL, so mark it before the loop
     // rather than once per row.
     if (!rowsTtlFresh()) homeRowsLoadedAt = Date.now();
     for (const row of HOME_ROWS) {
@@ -497,7 +495,7 @@
   function rowsTtlFresh() {
     return !!(homeRowsLoadedAt &&
       (Date.now() - homeRowsLoadedAt) < HOME_ROWS_TTL_MS &&
-      homeUnplayed && homeUnplayed.querySelector(".album") &&
+      homeAotd && homeAotd.querySelector(".album") &&
       homeRandom && homeRandom.querySelector(".album"));
   }
   // Reveal the album wall. opts.loadIfEmpty loads a fresh wall only when it has
@@ -507,7 +505,6 @@
   function showWall(opts) {
     leavePlaylistScreens();   // this screen owns the grid now
     { const c = document.getElementById("library-controls"); if (c) c.classList.add("hidden"); }
-    unplayedWallActive = false;
     libraryWallActive = false;
     if (window.__clearSearchIfActive) window.__clearSearchIfActive();  // drop stale search results
     // Discard, don't restore: this function is establishing its own screen and
@@ -532,7 +529,7 @@
   if (topbarBack)    topbarBack.addEventListener("click", showHome);
   if (topbarRefresh) topbarRefresh.addEventListener("click", () => loadRandom());
 
-  // Home unplayed/random rows are reused within this TTL instead of being
+  // Home daily-pick/random rows are reused within this TTL instead of being
   // rebuilt (and re-randomised) on every visit — see showHome.
   const HOME_ROWS_TTL_MS = 5 * 60 * 1000;
   let homeRowsLoadedAt = 0;
@@ -572,107 +569,40 @@
     if (extraClass) tile.classList.add(extraClass);
     return tile;
   }
-
-  // The action that used to live in the side menu, as the first tile of the
-  // "Not played" row. It reuses .album so the grid/carousel sizing, the hover
-  // state and the art aspect ratio all come for free — only the inside of the
-  // art square differs.
-  function buildUnheardTile() {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "album home-unheard-tile";
-    btn.id = "home-unheard-tile";
-    btn.setAttribute("aria-label", "Play something you haven't heard");
-
-    const art = document.createElement("div");
-    art.className = "album-art-wrap unheard-art";
-    const glyph = document.createElement("span");
-    glyph.className = "unheard-glyph";
-    glyph.setAttribute("aria-hidden", "true");
-    glyph.textContent = "✧";
-    art.appendChild(glyph);
-    btn.appendChild(art);
-
-    const meta = document.createElement("div");
-    meta.className = "album-meta";
-    const t = document.createElement("div");
-    t.className = "album-title";
-    t.textContent = "Play something unheard";
-    const s = document.createElement("div");
-    s.className = "album-artist";
-    s.textContent = "Surprise me";
-    meta.appendChild(t); meta.appendChild(s);
-    btn.appendChild(meta);
-
-    // One implementation, two triggers: the request, the zone check and the
-    // spin all live in playUnheard, which spins whichever control was pressed.
-    btn.addEventListener("click", () => {
-      if (window.__playUnheard) window.__playUnheard(btn);
-    });
-    return btn;
-  }
-
-  // Render helper shared by the live loader and the instant-open cache repaint.
-  function renderHomeUnplayed(aotd, albums) {
-    albums = albums || [];
-    homeUnplayed.innerHTML = "";
-    if (!albums.length && !aotd) {
-      homeUnplayed.innerHTML = '<div class="home-carousel-empty">Nothing here yet — play some music and check back.</div>';
+  // Album of the day: one album for everyone, changing at local midnight.
+  // This used to be the first two tiles of a "Not played in 6 months" row —
+  // an unheard-shuffle button and the daily pick. The row is gone (the plays
+  // table only holds what this app watched happen, so it could not answer its
+  // own title), and the daily pick, which never depended on any of that, keeps
+  // the section to itself.
+  function renderHomeAotd(aotd) {
+    homeAotd.innerHTML = "";
+    if (!aotd) {
+      homeAotd.innerHTML = '<div class="home-carousel-empty">Nothing to suggest yet.</div>';
       return;
     }
-    const frag = document.createDocumentFragment();
-    // "Play something unheard" leads the row it belongs to: this carousel IS
-    // the unheard albums, so the action and the row mean the same thing, and
-    // it sits at the top of Home without needing a place of its own. Built as
-    // a tile so it inherits the carousel's sizing on every screen rather than
-    // carrying breakpoints of its own.
-    frag.appendChild(buildUnheardTile());
-    if (aotd) {
-      const tile = homeTile(aotd, "home-aotd");
-      const wrap = tile.querySelector(".album-art-wrap");
-      if (wrap) {
-        const badge = document.createElement("span");
-        badge.className = "aotd-badge";
-        badge.textContent = "★ Today";
-        wrap.appendChild(badge);
-      }
-      frag.appendChild(tile);
+    const tile = homeTile(aotd, "home-aotd");
+    const wrap = tile.querySelector(".album-art-wrap");
+    if (wrap) {
+      const badge = document.createElement("span");
+      badge.className = "aotd-badge";
+      badge.textContent = "\u2605 Today";
+      wrap.appendChild(badge);
     }
-    for (const a of albums) frag.appendChild(homeTile(a));
-    homeUnplayed.appendChild(frag);
+    homeAotd.appendChild(tile);
   }
 
-  async function loadHomeUnplayed() {
-    if (!homeUnplayed) return;
-    // Don't flash "Loading…" over cached tiles the user is already looking at —
-    // only when the row is genuinely empty (first ever load).
-    if (!rowHasContent(homeUnplayed)) homeUnplayed.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
-    // Album of the day (completely random; hidden once played today) sits
-    // first. Fetched in PARALLEL with the unplayed list — they're independent,
-    // and awaiting them in sequence added a full round-trip to every reload.
-    const aotdPromise = fetch("/api/home/album-of-the-day")
-      .then(ar => ar.json()).catch(() => null);
-    const unplayedPromise = fetch("/api/home/unplayed?months=6&count=30");
-    unplayedPromise.catch(() => {});   // handled at the await below — this just silences the pre-await rejection warning
-    const aj = await aotdPromise;
-    const aotd = (aj && aj.album) ? aj.album : null;   // non-fatal — just no album-of-the-day
+  async function loadHomeAotd() {
+    if (!homeAotd) return;
+    if (!rowHasContent(homeAotd)) homeAotd.innerHTML = '<div class="home-carousel-empty">Loading\u2026</div>';
     try {
-      const r = await unplayedPromise;
-      if (r.status === 503) {
-        if (!rowHasContent(homeUnplayed)) homeUnplayed.innerHTML = '<div class="home-carousel-empty">Waiting for Roon Core…</div>';
-        homeRowsLoadedAt = 0;   // retry on the next Home visit
-        return;   // keep any cached tiles + cache untouched while the index builds
-      }
+      const r = await fetch("/api/home/album-of-the-day");
       const j = await r.json();
-      const albums = (j && j.albums) || [];
-      renderHomeUnplayed(aotd, albums);
-      // Persist only a non-empty row (mirrors random/genres) so a legitimately
-      // empty response can't be cached and shown as "Nothing here yet" next
-      // open. Timestamp is per-row so a stale sibling can't ride a fresh one's
-      // freshness (see hydrateHomeFromCache).
-      if (albums.length || aotd) saveHomeCache({ unplayed: { aotd, albums }, unplayedAt: Date.now() });
+      const aotd = (j && j.album) ? j.album : null;
+      renderHomeAotd(aotd);
+      if (aotd) saveHomeCache({ aotd: { aotd }, aotdAt: Date.now() });
     } catch (e) {
-      if (!rowHasContent(homeUnplayed)) homeUnplayed.innerHTML = '<div class="home-carousel-empty">Couldn’t load.</div>';
+      if (!rowHasContent(homeAotd)) homeAotd.innerHTML = '<div class="home-carousel-empty">Couldn\u2019t load.</div>';
       homeRowsLoadedAt = 0;   // retry on the next Home visit
     }
   }
@@ -1246,7 +1176,6 @@
   // topbar chrome + title, scroll to the top, paint skeletons. Both walls'
   // active flags are reset here; the caller sets its own to true afterwards.
   function enterFullWall(title) {
-    unplayedWallActive = false;
     libraryWallActive = false;
     // Cleared here as well as by the caller: every other wall's entry point must
     // orphan an in-flight playlist fetch, or its response paints into this one.
@@ -1269,42 +1198,6 @@
     if (m) m.scrollTop = 0;
     renderSkeletons(computeAlbumCount());
     return m;
-  }
-
-  // Full-screen "Not played in 6 months" grid — reached by tapping the section
-  // header. Fills the main grid with a larger unplayed list (tiles open
-  // unfiltered, like the Home row) and shows a Back button to Home.
-  async function showUnplayedWall() {
-    enterFullWall("Not played in 6 months");
-    unplayedWallActive = true;
-    try {
-      const r = await fetch("/api/home/unplayed?months=6&count=96");
-      // The user may have navigated away while the fetch ran — a late response
-      // must not clobber whatever view owns the shared grid now.
-      if (!unplayedWallActive) return;
-      if (r.status === 503) {
-        const j = await r.json().catch(() => ({}));
-        if (!unplayedWallActive) return;
-        setBanner(j.error || "Waiting for Roon Core. Enable this extension in Roon → Settings → Extensions.", true);
-        grid.innerHTML = ""; return;
-      }
-      const j = await r.json();
-      if (!unplayedWallActive) return;
-      const albums = (j && j.albums) || [];
-      grid.innerHTML = "";
-      if (!albums.length) {
-        setBanner("Nothing here yet — play some music and check back.", false);
-        return;
-      }
-      setBanner(null);
-      const frag = document.createDocumentFragment();
-      for (const a of albums) frag.appendChild(homeTile(a));   // filter:null → offsets resolve
-      grid.appendChild(frag);
-    } catch (e) {
-      if (!unplayedWallActive) return;
-      grid.innerHTML = "";
-      setBanner("Couldn’t load: " + e.message, true);
-    }
   }
 
   // Full-screen Library wall — the WHOLE library in Roon's own album order,
@@ -3331,19 +3224,19 @@
   // open the library wall with the view applied, which was the query working
   // correctly but reading as "it just took me to the library".
   // "New Dynamic Playlist", as the first tile of the wall. Built on .album so it
-  // sizes with the grid at every width — the same approach as Home's unheard
-  // tile, and for the same reason: no breakpoints of its own to get wrong.
+  // sizes with the grid at every width, for the same reason every tile is: no
+  // breakpoints of its own to get wrong.
   function buildNewSmartTile() {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "album home-unheard-tile";
+    btn.className = "album home-action-tile";
     btn.id = "new-smart-tile";
     btn.setAttribute("aria-label", "Create a Dynamic Playlist");
 
     const art = document.createElement("div");
-    art.className = "album-art-wrap unheard-art";
+    art.className = "album-art-wrap action-tile-art";
     const glyph = document.createElement("span");
-    glyph.className = "unheard-glyph";
+    glyph.className = "action-tile-glyph";
     glyph.setAttribute("aria-hidden", "true");
     glyph.textContent = "＋";
     art.appendChild(glyph);
@@ -4320,10 +4213,9 @@
     });
   }
 
-  // Header taps: Not played → full unplayed grid; Random albums → full random
-  // wall; Library → full A-Z wall; Label of the week → label view.
+  // Header taps: Random albums → full random wall; Library → full A-Z wall;
+  // Label of the week → label view. Album of the day has no wall to open.
   {
-    wireSectionHeader("home-unplayed-title", showUnplayedWall);
     wireSectionHeader("home-random-title", () => { if (window.__applyFilter) window.__applyFilter(null); });
     wireSectionHeader("home-library-title", showLibraryWall);
     wireSectionHeader("home-lotw-title", () => {
@@ -4438,9 +4330,9 @@
   // the boot path can reveal Home right away instead of a blank "Connecting…".
   // The live loaders (called by showHome once paired) then revalidate silently,
   // swapping fresh data in without a "Loading…" flash. Seeding homeRowsLoadedAt
-  // lets the existing 5-minute TTL skip the unplayed/random refetch entirely on
+  // lets the existing 5-minute TTL skip the daily-pick/random refetch entirely on
   // a quick reopen — but only when BOTH rows are recent: it's seeded from the
-  // OLDER of the two per-row timestamps, so a stale sibling (e.g. unplayed kept
+  // OLDER of the two per-row timestamps, so a stale sibling (e.g. the daily pick kept
   // an old cache while random refreshed) forces a silent revalidation instead
   // of riding the fresh row's freshness.
   function hydrateHomeFromCache() {
@@ -4450,15 +4342,15 @@
     // reordering is a visible flash on every cold open.
     applyHomeLayout();
     let painted = false;
-    if (c.unplayed && homeUnplayed) { renderHomeUnplayed(c.unplayed.aotd, c.unplayed.albums); painted = rowHasContent(homeUnplayed) || painted; }
+    if (c.aotd && homeAotd) { renderHomeAotd(c.aotd.aotd); painted = rowHasContent(homeAotd) || painted; }
     if (c.random   && homeRandom)   { renderHomeRandom(c.random);                              painted = rowHasContent(homeRandom)   || painted; }
     if (c.library  && homeLibrary)  { renderHomeLibrary(c.library); }
     if (c.lotw     && homeLotw)     { renderHomeLotw(c.lotw.label, c.lotw.albums); }
     if (c.history  && homeHistory)  { renderHomeHistory(c.history); }
     if (c.genres   && homeGenres)   { renderHomeGenres(c.genres); }
     if (!painted) return false;
-    if (typeof c.unplayedAt === "number" && typeof c.randomAt === "number") {
-      homeRowsLoadedAt = Math.min(c.unplayedAt, c.randomAt);   // honour the TTL across reopens
+    if (typeof c.aotdAt === "number" && typeof c.randomAt === "number") {
+      homeRowsLoadedAt = Math.min(c.aotdAt, c.randomAt);   // honour the TTL across reopens
     }
     // Reveal Home so the cached content is actually on screen while we reconnect.
     if (homeView)     homeView.classList.remove("hidden");
@@ -6046,7 +5938,7 @@
     // Stop searching and restore the random wall, WITHOUT touching whether the
     // bar itself is open. Used when the field is emptied (incl. the 1st X tap).
     // Search lives on the Home screen. Clearing it drops the results grid and
-    // restores the Home sections (unplayed / genres) below the search box.
+    // restores the Home sections (album of the day / genres) below the search box.
     function stopSearch() {
       active = false;
       seq++;                                   // invalidate any pending response
@@ -9979,48 +9871,6 @@
   });
 })();
 
-/* ------------------------------------------------------------------ */
-/*  Play Unheard — topbar compass button with 2-second spin           */
-/* ------------------------------------------------------------------ */
-(function initPlayUnheard() {
-  const btn        = document.getElementById("play-unheard-topbar");
-  const zoneSelect = document.getElementById("zone-select");
-  if (!btn) return;
-
-  // `spinEl` is whichever control the user actually pressed — the top-bar
-  // compass or the Home tile. Forwarding a click from one to the other would
-  // have left the pressed control inert for the two seconds it takes.
-  async function playUnheard(spinEl) {
-    const el = spinEl || btn;
-    const zone = zoneSelect && zoneSelect.value;
-    if (!zone) { if (window.__showToast) window.__showToast("Select a zone first"); return; }
-    if (el.classList.contains("spinning")) return;
-
-    // Spin the compass for 2 seconds, then fetch
-    el.classList.add("spinning");
-    await new Promise(r => setTimeout(r, 2000));
-
-    try {
-      const r = await fetch("/api/play-unheard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zone })
-      });
-      const j = await r.json();
-      if (!r.ok) {
-        if (window.__showToast) window.__showToast(j.error || "Could not start playback", "error");
-      } else {
-        if (window.__showToast) window.__showToast("Playing: " + (j.album || "random album"));
-      }
-    } catch (e) {
-      if (window.__showToast) window.__showToast("Request failed", "error");
-    } finally {
-      el.classList.remove("spinning");
-    }
-  }
-  btn.addEventListener("click", () => playUnheard(btn));
-  window.__playUnheard = playUnheard;
-})();
 
 /* ------------------------------------------------------------------ */
 /*  Artist albums view                                                 */
@@ -10443,8 +10293,8 @@
       }
 
       // Everything else just triggers the original control; each one manages
-      // its own view — Filter/Labels reveal the wall when they render, Qobuz/
-      // Tidal/Settings open an overlay over Home, Play-unheard just plays.
+      // its own view — Filter/Labels reveal the wall when they render, and
+      // Qobuz/Tidal/Settings open an overlay over Home.
       if (target) {
         const btn = document.getElementById(target);
         if (btn) btn.click();

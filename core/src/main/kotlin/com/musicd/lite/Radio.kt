@@ -132,13 +132,13 @@ class Radio(private val app: MusicdLite) {
     }
 
     /**
-     * Prefer something the user has not heard lately, which is the whole point
-     * of the feature — falling back to the whole library rather than refusing to
-     * play when everything has been heard recently.
+     * Anything in the library, at random.
+     *
+     * This used to prefer albums not played in six months. It no longer can:
+     * the plays table holds only what this app watched happen and starts empty,
+     * so "not heard lately" was really "not heard by this app", which on a young
+     * install is the whole library and after that is still missing everything
+     * played from another remote.
      */
-    private fun pick(): AlbumRecord? {
-        val fresh = app.view.unplayed(6)
-        val pool = fresh.ifEmpty { app.index.albums }
-        return app.view.sample(pool, 1).firstOrNull()
-    }
+    private fun pick(): AlbumRecord? = app.view.sample(app.index.albums, 1).firstOrNull()
 }

@@ -50,8 +50,9 @@ import com.musicd.lite.Voice
  * THERE WAS A THIRD DOOR AND IT DID NOT WORK. A launcher entry whose name is
  * the command — "Ok Google, open Roulette" to start a random album — was built
  * on the one voice channel that is proven, opening an app by name. Said to a
- * phone, Gemini answered a question about the casino game. See VoiceName in
- * :core for why, and do not rebuild it without reading that first.
+ * phone, Gemini answered a question about the casino game. The four names
+ * that were tried, and how each failed, are recorded against app_name in
+ * res/values/strings.xml — read that before rebuilding this.
  *
  * No UI. The activity exists because MEDIA_PLAY_FROM_SEARCH is an activity
  * intent, and it finishes before it can be drawn — Theme.NoDisplay, and the

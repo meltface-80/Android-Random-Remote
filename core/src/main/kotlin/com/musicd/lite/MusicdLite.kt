@@ -592,15 +592,11 @@ class MusicdLite(
      *               any zone, when null.
      * @return what started playing, or null with a reason.
      */
-    fun playRandomAlbum(
-        zoneId: String? = null,
-        unheardOnly: Boolean = false
-    ): Result<AlbumRecord> {
+    fun playRandomAlbum(zoneId: String? = null): Result<AlbumRecord> {
         val zone = zoneId
             ?: activeZone()?.zoneId
             ?: return Result.failure(IllegalStateException("No zones available"))
-        val pool = if (unheardOnly) view.unplayed(6).ifEmpty { index.albums } else index.albums
-        val album = view.sample(pool, 1).firstOrNull()
+        val album = view.sample(index.albums, 1).firstOrNull()
             ?: return Result.failure(IllegalStateException("The library index is still building"))
         return runCatching {
             albums.open(album.offset, zone, "play_now", null, Albums.Expect(album.title, album.subtitle))

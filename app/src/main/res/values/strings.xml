@@ -1,40 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      THE LAUNCHER NAME IS A VOICE TARGET, AND THAT IS WHY IT LOOKS LIKE THIS.
+      THE APP'S NAME. It is back to what the project is actually called.
 
-      This is the name Google matches for "open X" and "play something on X".
-      Three attempts, each of which failed differently, and the rule is the
-      union of what they taught:
+      For a while this was a voice target and the name was chosen to survive
+      being said to a phone, which turned out to be its own small research
+      project. Four were tried and each failed differently:
 
-        "MusicD Remote Lite" came back as "Music d remote light". Three words
-        to say, and a trailing capital letter no speech model has a place for.
-        => ONE WORD, LETTERS ONLY, NO STRANDED CAPITAL.
+        "MusicD Remote Lite"  three words, and a trailing capital letter no
+                              speech model has a place for -> heard as
+                              "Music d remote light"
+        "Roon"                outside the speech lexicon    -> heard as "rune"
+        "Remote"              a Google feature              -> opened the TV
+                              remote instead of this app
+        "Jukebox"             worked
+        "Roulette"            (a second launcher entry, since removed) was
+                              heard perfectly and answered with facts about
+                              the casino game
 
-        "Roon" comes back as "rune". A name absent from the speech model's
-        lexicon is replaced by the nearest real word, and the request dies
-        before anything is matched.
-        => AN ORDINARY WORD, SPELLED THE WAY IT SOUNDS.
-
-        "Remote" transcribes perfectly and still opened nothing, because
-        "open remote" is how Google opens its own built-in TV remote. The
-        phrase reached the matcher intact and lost to a feature that was
-        already there.
-        => NOT A WORD GOOGLE HAS ALREADY CLAIMED.
-
-      "Jukebox" is the first name to clear all three: every speech model has
-      it, it is one plain word, and Google has no feature by that name to
-      intercept it.
-
-      AppNameTest asserts all of this, including the reserved list, so the
-      lessons cannot be quietly undone by someone typing a nicer product name
-      in here.
-
-      The project is still MusicD Remote Lite: the package, the repository and
-      the name Roon shows in Settings -> Extensions are all unchanged. This is
-      only what the launcher icon and the assistant call it.
+      None of that applies any more. Voice control beyond transport was
+      abandoned — Gemini declines to play anything in a third-party app, see
+      BrowserService — so the name no longer has to win an argument with a
+      speech model, and it can just be the product's name again. The rule that
+      used to guard it (VoiceName) went with the feature; this comment is what
+      is left, so the history is not rediscovered the hard way.
     -->
-    <string name="app_name">Jukebox</string>
+    <string name="app_name">MusicD Remote</string>
     <string name="dial_name">Dial for Roon</string>
 
     <string name="tile_random_album">Random album</string>

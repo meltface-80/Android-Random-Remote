@@ -155,13 +155,6 @@
           </svg>
         </button>
 
-        <button id="play-unheard-topbar" class="icon-btn" aria-label="Play something unheard">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="10"/>
-            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
-          </svg>
-        </button>
 
         <button id="refresh-btn" class="primary-btn" aria-label="Refresh">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -366,9 +359,13 @@
              list you reorder and the rows that render cannot drift apart.
              Reordering MOVES these nodes; it never rebuilds them from markup
              (CLAUDE.md pre-flight step 4). -->
-        <div class="home-section home-section-unplayed" data-row="unplayed">
-          <h2 class="home-section-title home-section-link" id="home-unplayed-title" role="button" tabindex="0">Not played in 6 months</h2>
-          <div id="home-unplayed" class="home-carousel"></div>
+        <!-- Album of the day. It used to be the first tile of a "Not played in
+             6 months" row; that row is gone, because the plays table only holds
+             what this app watched happen, so it could not answer the question
+             its title asked. The daily pick did not depend on any of that. -->
+        <div class="home-section home-section-aotd" data-row="aotd">
+          <h2 class="home-section-title" id="home-aotd-title">Album of the day</h2>
+          <div id="home-aotd" class="home-carousel"></div>
         </div>
         <!-- Recently played, newest first, one tile per album over 30 days.
              Hidden until there is a play to show, so a fresh install does not
