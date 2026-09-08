@@ -1,6 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">MusicD Remote Lite</string>
+    <!--
+      THE LAUNCHER NAME IS A VOICE TARGET, AND THAT IS WHY IT IS ONE WORD.
+
+      This is the name Google matches when somebody says "open X" or "play
+      something on X", and "MusicD Remote Lite" lost on every count: three
+      words to say, and a trailing capital letter that no speech model has a
+      place for. It came back as "Music d remote light" and resolved to
+      nothing. The rule the failure teaches is short, ordinary, and spelled
+      the way it sounds.
+
+      KNOWN COST, ACCEPTED DELIBERATELY. "Remote" is a common word, and other
+      things on a phone answer to something like it — Android TV Remote
+      Service, Roon's own app, whatever else is installed. An exact match
+      should win over those, but it is a gamble on Google's matcher rather
+      than a guarantee, and it was taken with that understood.
+
+      The project is still MusicD Remote Lite: the package, the repository and
+      the name Roon shows in Settings -> Extensions are all unchanged. This is
+      only what the launcher icon and the Assistant call it.
+    -->
+    <string name="app_name">Remote</string>
     <string name="dial_name">Dial for Roon</string>
     <string name="tile_random_album">Random album</string>
 

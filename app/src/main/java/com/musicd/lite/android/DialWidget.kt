@@ -110,7 +110,7 @@ class DialWidget : AppWidgetProvider() {
             val ids = widgetIds(context)
             if (ids.isEmpty()) return
             val cover = WidgetArtwork.cached(context, snapshot.imageKey)
-            val dial = WidgetDial.render(context, zone, statusFor(snapshot), cover)
+            val dial = WidgetDial.render(context, zone, statusFor(context, snapshot), cover)
             if (dial != null) WidgetDial.cache(context, dial)
             val manager = AppWidgetManager.getInstance(context)
             // Per widget, because each may be a different size and the tap
@@ -123,8 +123,9 @@ class DialWidget : AppWidgetProvider() {
             ensureArtwork(context, snapshot)
         }
 
-        private fun statusFor(snapshot: WidgetSnapshot): String =
-            if (snapshot.hasZone) "" else "Open MusicD Remote Lite to connect"
+        private fun statusFor(context: Context, snapshot: WidgetSnapshot): String =
+            // Named from the label so it matches the icon actually on screen.
+            if (snapshot.hasZone) "" else "Open ${context.getString(R.string.app_name)} to connect"
 
         /**
          * Fetches cover art off the main thread, then redraws once it lands.
@@ -144,7 +145,8 @@ class DialWidget : AppWidgetProvider() {
                 Handler(Looper.getMainLooper()).post {
                     val ids = widgetIds(context)
                     if (ids.isEmpty()) return@post
-                    val dial = WidgetDial.render(context, lastZone, statusFor(snapshot), cover)
+                    val dial =
+                        WidgetDial.render(context, lastZone, statusFor(context, snapshot), cover)
                         ?: return@post
                     WidgetDial.cache(context, dial)
                     val manager = AppWidgetManager.getInstance(context)
