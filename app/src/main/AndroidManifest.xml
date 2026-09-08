@@ -146,36 +146,6 @@
         </activity>
 
         <!--
-          A LAUNCHER ENTRY THAT IS A COMMAND, NOT A SCREEN.
-
-          Asked to play an album by name, Gemini answers "I cannot directly
-          control or trigger playback on your local devices or apps" — it
-          declines the category, so no media-app conformance reaches it. What
-          does work, measured on a phone, is opening an app by its name.
-
-          So this is an alias: a second entry in the drawer called Roulette,
-          pointing at the activity above. "Ok Google, open Roulette" plays a
-          random album in the active zone and finishes without drawing
-          anything, because Theme.NoDisplay and the finish() in onCreate are
-          already what that activity does.
-
-          The name, the class and the command it runs are three things that
-          must agree; VoiceVerbs in :core holds the table and its tests, and
-          VoiceVerbsManifestTest checks this declaration against it.
-        -->
-        <activity-alias
-            android:name=".verb.Roulette"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher"
-            android:label="@string/verb_roulette"
-            android:targetActivity=".VoiceIntentActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <!--
           A random album from the notification shade: pull down, tap, a record
           starts. The app's most-used action without opening the app.
         -->

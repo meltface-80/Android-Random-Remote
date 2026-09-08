@@ -17,9 +17,23 @@ package com.musicd.lite
  *   remote" is how Google opens its own TV remote. It reached the matcher
  *   intact and lost to a feature that was already there.
  *
+ *   "Roulette" was heard perfectly, is no Google feature, and was answered
+ *   with facts about the casino game. It lost to the assistant's general
+ *   knowledge, which is a bigger and vaguer opponent than a feature list.
+ *
+ * WHAT THIS CANNOT CHECK, AND IT IS THE THING THAT KILLED THE LAST ATTEMPT.
+ * The rules below are mechanical: length, spelling, a list of words Google
+ * answers to itself. None of them can tell whether an assistant would rather
+ * explain a word than open it, because that depends on how famous the word is,
+ * and no list of famous words can be written down. A name only passes for
+ * certain by being said to a phone.
+ *
+ * "Jukebox" was said to a phone and opens this app, which is why it is the
+ * label. That is the whole basis for it — not this rule, which "Roulette" also
+ * passed.
+ *
  * It lives in :core rather than beside the resource it checks because that is
- * the only place with tests that run without an Android device, and because it
- * now guards two things: the app's own label, and the name of every voice verb.
+ * the only place with tests that run without an Android device.
  */
 object VoiceName {
 

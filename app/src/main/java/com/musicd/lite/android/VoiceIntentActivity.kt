@@ -9,7 +9,6 @@ import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import com.musicd.lite.Voice
-import com.musicd.lite.VoiceVerbs
 
 /**
  * Playing something without opening anything: the app answered from outside.
@@ -48,18 +47,16 @@ import com.musicd.lite.VoiceVerbs
  * settings or anything on disk. The HTTP server stays shut to the world for
  * the reasons in CLAUDE.md; this is a narrower door on purpose.
  *
- * **A voice verb** is the third, and it is the one that actually answers
- * "Hey Google, <do the thing>". Gemini refuses to play an album by name in a
- * third-party app — "I cannot directly control or trigger playback on your
- * local devices or apps" — but it opens an app by name without complaint. So a
- * verb is a launcher entry whose NAME is the command: tapping, or saying, "open
- * Roulette" arrives here as a plain ACTION_MAIN and the component names the
- * verb. See VoiceVerbs in :core for the table.
+ * THERE WAS A THIRD DOOR AND IT DID NOT WORK. A launcher entry whose name is
+ * the command — "Ok Google, open Roulette" to start a random album — was built
+ * on the one voice channel that is proven, opening an app by name. Said to a
+ * phone, Gemini answered a question about the casino game. See VoiceName in
+ * :core for why, and do not rebuild it without reading that first.
  *
- * No UI, and that is what makes a verb possible. The activity exists because
- * MEDIA_PLAY_FROM_SEARCH is an activity intent, and it finishes before it can
- * be drawn — Theme.NoDisplay, and the answer arrives as a toast, which is what
- * the Quick Settings tile does for the same reason.
+ * No UI. The activity exists because MEDIA_PLAY_FROM_SEARCH is an activity
+ * intent, and it finishes before it can be drawn — Theme.NoDisplay, and the
+ * answer arrives as a toast, which is what the Quick Settings tile does for
+ * the same reason.
  */
 class VoiceIntentActivity : Activity() {
 
@@ -99,15 +96,6 @@ class VoiceIntentActivity : Activity() {
         val spoken = when (intent.action) {
             ACTION_VOICE_COMMAND ->
                 intent.getStringExtra(EXTRA_COMMAND)?.trim()?.takeIf { it.isNotEmpty() }
-
-            // A voice verb: a launcher entry whose NAME is the command, so
-            // "Ok Google, open Roulette" arrives here as an ordinary launch and
-            // the component says which verb was tapped. The table and the
-            // phrase it runs live in :core, where both are tested — a phrase
-            // the parser did not understand would be an icon that silently
-            // does nothing, which is the worst failure for something with no UI.
-            Intent.ACTION_MAIN ->
-                VoiceVerbs.forComponent(intent.component?.className)?.command
 
             MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH ->
                 // Every decision about what a media search MEANS is in :core,
