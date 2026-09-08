@@ -161,7 +161,7 @@ class RemoteService : Service() {
             startForeground(
                 NOTIFICATION_ID,
                 notification(
-                    status?.let { statusTitle(it) } ?: "MusicD Remote Lite",
+                    status?.let { statusTitle(it) } ?: getString(R.string.app_name),
                     status?.detail ?: ""
                 )
             )
@@ -209,7 +209,7 @@ class RemoteService : Service() {
             nowPlaying?.update(zone)
             val status = app?.roon?.status
             notify(
-                status?.let { statusTitle(it) } ?: "MusicD Remote Lite",
+                status?.let { statusTitle(it) } ?: getString(R.string.app_name),
                 status?.detail ?: ""
             )
         }
@@ -298,7 +298,12 @@ class RemoteService : Service() {
 
     private fun createChannel() {
         val channel = NotificationChannel(
-            CHANNEL_ID, "MusicD Remote status", NotificationManager.IMPORTANCE_LOW
+            CHANNEL_ID,
+            // Shown in the system's notification settings, under the app's own
+            // name — so it follows the label rather than repeating a spelling
+            // of it that a rename would leave behind.
+            "${getString(R.string.app_name)} status",
+            NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = "Shows whether the app is paired with your Roon Core."
             setShowBadge(false)

@@ -112,7 +112,7 @@ class VoiceIntentActivity : Activity() {
         if (app == null) {
             // Nothing is running, so there is no Core connection to act on.
             // Opening the app starts the service; saying so beats silence.
-            toast("MusicD isn't running yet")
+            toast("${getString(R.string.app_name)} isn't running yet")
             runCatching {
                 startActivity(
                     Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
