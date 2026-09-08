@@ -7326,8 +7326,24 @@
   let npBaseAt = 0;             // Date.now() when npBase was set
   let npWasPlaying = false;     // play state over the interval just elapsed
   let npSeekHold = 0;           // ignore server re-baselining until this time
+  // "Is audio actually advancing", which is NOT the same question as "should the
+  // button show a pause icon" — the two icon sites below deliberately still
+  // count `loading`, because somebody who pressed play wants to see that it
+  // took.
+  //
+  // `loading` USED TO COUNT HERE, and that was a bug worth naming: Roon reports
+  // `loading` while an endpoint is still getting a stream going, which on a
+  // resume-from-pause can be seconds. The clock ran through all of it, so the
+  // position climbed while the room was silent — the display asserting playback
+  // that had not started. It also hid the moment it DID start: loading -> playing
+  // was not a state change by this predicate, so the base was never reset and
+  // the bar stayed permanently ahead until the 3s reconcile yanked it back.
+  //
+  // Freezing while Roon says `loading` is the honest reading, and it makes both
+  // transitions into it and out of it re-baseline on the server's exact
+  // position.
   function npPlaying() {
-    return !!currentZone && (currentZone.state === "playing" || currentZone.state === "loading");
+    return !!currentZone && currentZone.state === "playing";
   }
   // Current position: the base, plus real time since it was taken.
   function npNow() {
