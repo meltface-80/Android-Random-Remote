@@ -6,7 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioAttributes
 import android.media.MediaMetadata
+import android.media.VolumeProvider
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Bundle
@@ -17,6 +19,7 @@ import android.util.Log
 import com.musicd.lite.MusicdLite
 import com.musicd.lite.Voice
 import com.musicd.lite.roon.Zone
+import com.musicd.lite.roon.ZoneVolume
 import java.util.concurrent.Executors
 
 /**
@@ -50,6 +53,19 @@ class NowPlayingSession(
 
         /** Big enough for a lock screen, small enough to decode without care. */
         const val ART_PX = 512
+
+        /**
+         * What the session says it is doing when volume goes back to the phone.
+         *
+         * setPlaybackToLocal takes AudioAttributes rather than a stream type —
+         * the compat class takes an int and the framework one does not, which
+         * is an easy way to write something that reads correctly and will not
+         * compile.
+         */
+        val LOCAL_AUDIO: AudioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
 
         /**
          * "Play <something> on MusicD", which is a different kind of thing from
@@ -140,6 +156,19 @@ class NowPlayingSession(
     /** The zone this session currently speaks for, so art is not re-fetched. */
     private var lastArtKey: String? = null
     private var lastArt: Bitmap? = null
+
+    /**
+     * What the volume keys and "Hey Google, turn it up" reach.
+     *
+     * Null until a zone with a volume control is being shown. Held so the zone
+     * feed can move the slider when the volume changes somewhere else — from
+     * the app, from Roon's own remote, from the knob on the amp — rather than
+     * only when this phone is the one turning it.
+     */
+    private var volume: ZoneVolumeProvider? = null
+
+    /** The scale the current provider was built for; a new one needs a new provider. */
+    private var volumeScale: ZoneVolume.Scale? = null
 
     val token: MediaSession.Token? get() = session?.sessionToken
 
@@ -236,8 +265,101 @@ class NowPlayingSession(
                     )
                     .build()
             )
+            trackVolume(s, zone)
         } catch (e: Exception) {
             Log.w(TAG, "could not update the session", e)
+        }
+    }
+
+    /**
+     * Points the volume keys at the zone, or hands them back to the phone.
+     *
+     * WHY THIS EXISTS. "Hey Google, turn it up" and the hardware rocker both go
+     * to the media session, and a session that has not declared a volume
+     * provider is treated as playing locally — so they moved the PHONE's media
+     * volume, which this app does not use for anything, and the room stayed
+     * exactly as loud as it was. Confirmed on a phone: next and pause worked,
+     * turn it up and turn it down did nothing.
+     *
+     * The provider is replaced rather than mutated when the SCALE changes,
+     * because Android reads the maximum once: moving from a -80..0 dB zone to
+     * one with a different range needs a new provider or the slider maps onto
+     * the wrong numbers. A mere change of position — somebody turning the knob
+     * on the amp, or the app's own dial — only needs the current value pushed,
+     * which is what keeps the system slider honest without churn.
+     *
+     * A zone with no volume control at all goes back to local, so the rocker
+     * does the ordinary thing rather than silently doing nothing.
+     */
+    private fun trackVolume(session: MediaSession, zone: Zone?) {
+        val scale = ZoneVolume.scaleOf(zone)
+        if (scale == null) {
+            if (volume != null) {
+                volume = null
+                volumeScale = null
+                runCatching { session.setPlaybackToLocal(LOCAL_AUDIO) }
+            }
+            return
+        }
+        // Only the shape needs a new provider; the position is pushed into it.
+        val sameShape = volumeScale?.steps == scale.steps &&
+            volumeScale?.relativeOnly == scale.relativeOnly
+        if (volume == null || !sameShape) {
+            val provider = ZoneVolumeProvider(scale)
+            volume = provider
+            volumeScale = scale
+            runCatching { session.setPlaybackToRemote(provider) }
+                .onFailure { Log.w(TAG, "could not hand volume to the zone", it) }
+        } else if (!scale.relativeOnly) {
+            runCatching { volume?.currentVolume = scale.position }
+        }
+    }
+
+    /**
+     * The volume keys, in Roon's terms.
+     *
+     * Every output in the zone moves together, which is what the app's own
+     * volume already does and what somebody adjusting "the kitchen" means by
+     * it. Off the caller's thread for the usual reason: changeVolume blocks
+     * until the Core answers and these arrive on the main one.
+     *
+     * Nothing is written back optimistically. Roon pushes the new value through
+     * the zone feed and [trackVolume] moves the slider from there, so the
+     * system UI can never show a level the Core did not agree to.
+     */
+    private inner class ZoneVolumeProvider(scale: ZoneVolume.Scale) : VolumeProvider(
+        if (scale.relativeOnly) VolumeProvider.VOLUME_CONTROL_RELATIVE
+        else VolumeProvider.VOLUME_CONTROL_ABSOLUTE,
+        scale.steps,
+        scale.position
+    ) {
+        // `position`, not `volume`: the outer class has a field of that name
+        // holding this very provider, and shadowing it here reads as a bug
+        // even when it is not one.
+        override fun onSetVolumeTo(position: Int) {
+            val zone = app.roon.zone(zoneId) ?: return
+            for (out in zone.volumeOutputs) {
+                val v = out.volume ?: continue
+                val target = ZoneVolume.valueAt(v, position)
+                send { app.roon.changeVolume(out.outputId, "absolute", target) }
+            }
+        }
+
+        override fun onAdjustVolume(direction: Int) {
+            if (direction == 0) return
+            val zone = app.roon.zone(zoneId) ?: return
+            for (out in zone.volumeOutputs) {
+                out.volume ?: continue
+                send {
+                    app.roon.changeVolume(out.outputId, "relative_step", direction.toDouble())
+                }
+            }
+        }
+
+        private fun send(body: () -> Unit) {
+            runCatching {
+                commands.execute { runCatching(body).onFailure { Log.w(TAG, "volume failed", it) } }
+            }.onFailure { Log.w(TAG, "could not queue a volume change", it) }
         }
     }
 
