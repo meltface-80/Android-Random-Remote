@@ -730,6 +730,64 @@ class RemoteApiTest {
         assertTrue(core.calls.any { it.startsWith("settings:z1:") && it.contains("loop_one") })
     }
 
+    // --------------------------------------------------------- asset caching
+
+    /**
+     * THE BUG THIS EXISTS FOR. The page used to go out with max-age=3600 and no
+     * validator. The WebView's cache is on disk and survives an app update, so
+     * for an hour after installing a new version it kept serving the OLD page
+     * — a feature would ship, be verified in the APK, and simply not be there
+     * on the phone, with nothing to say why.
+     *
+     * It only became visible when the port was fixed at 3450 for LAN access.
+     * Before that every launch got a different port, so nothing ever matched.
+     */
+    @Test
+    fun theBundledPageIsNeverServedFromCacheWithoutAsking() {
+        val headers = headersOf("/app.js")
+        assertEquals(
+            "a stored copy must be revalidated, not used on trust",
+            "no-cache", headers["cache-control"]?.firstOrNull()
+        )
+        assertTrue("revalidation needs a validator to compare", headers.containsKey("etag"))
+    }
+
+    @Test
+    fun theValidatorIsTheAppVersionSoANewBuildCannotBeMissed() {
+        assertEquals(""""v${app.version}"""", headersOf("/app.js")["etag"]?.firstOrNull())
+    }
+
+    /** Unchanged app, no bytes: revalidating must stay cheap. */
+    @Test
+    fun anUnchangedPageComesBackAsNotModified() {
+        val etag = headersOf("/app.js")["etag"]!!.first()
+        val conn = URL(app.rootUrl + "/app.js").openConnection() as HttpURLConnection
+        conn.setRequestProperty("If-None-Match", etag)
+        assertEquals(304, conn.responseCode)
+        conn.disconnect()
+    }
+
+    @Test
+    fun aStaleValidatorGetsTheWholePageBack() {
+        val conn = URL(app.rootUrl + "/app.js").openConnection() as HttpURLConnection
+        conn.setRequestProperty("If-None-Match", "\"v0.0.1-from-an-older-install\"")
+        assertEquals(200, conn.responseCode)
+        assertTrue(conn.inputStream.readBytes().isNotEmpty())
+        conn.disconnect()
+    }
+
+    private fun headersOf(path: String): Map<String, List<String>> {
+        val conn = URL(app.rootUrl + path).openConnection() as HttpURLConnection
+        conn.responseCode
+        // Header names are case-insensitive on the wire; normalise so the
+        // assertions do not depend on how they were spelled.
+        val out = conn.headerFields.entries
+            .filter { it.key != null }
+            .associate { it.key.lowercase() to it.value }
+        conn.disconnect()
+        return out
+    }
+
     // ------------------------------------------------------------ lan access
 
     /**

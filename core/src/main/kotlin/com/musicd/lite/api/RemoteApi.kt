@@ -123,13 +123,32 @@ class RemoteApi(
         val wanted = if (path == "/" || path.isEmpty()) "/index.html" else path
         val hit = assets.read(wanted) ?: assets.read("/index.html")
         ?: return Response.text(404, "The bundled front-end is missing from this build")
-        return Response.bytes(
-            200, hit.second, hit.first,
-            // The assets ship inside the APK and only change when the app does,
-            // so the WebView may hold them for the life of the process.
-            mapOf("Cache-Control" to "public, max-age=3600")
-        )
+
+        // REVALIDATE, DO NOT EXPIRE. These used to go out with max-age=3600 and
+        // no validator, on the reasoning that assets inside the APK only change
+        // when the app does. They do — but the WebView's cache is on DISK and
+        // outlives both the process and the update, so for an hour after
+        // installing a new version it kept serving the OLD page from the old
+        // one, with nothing to reveal it but the change not being there.
+        //
+        // It only started biting when the port was fixed at 3450 for LAN
+        // access. Before that the OS handed out a different port every launch,
+        // so the URL was new every time and nothing ever matched in the cache.
+        //
+        // no-cache does not mean "do not store": it means "ask before using
+        // what you stored". The version is the validator, so an unchanged app
+        // still gets a 304 and no bytes, and a new one cannot be missed.
+        val etag = "\"v${app.version}\""
+        if (request.headers["if-none-match"] == etag) {
+            return Response.bytes(304, hit.second, ByteArray(0), validatorHeaders(etag))
+        }
+        return Response.bytes(200, hit.second, hit.first, validatorHeaders(etag))
     }
+
+    private fun validatorHeaders(etag: String) = mapOf(
+        "Cache-Control" to "no-cache",
+        "ETag" to etag
+    )
 
     // ---------------------------------------------------------------- API
 
