@@ -6,13 +6,17 @@ import java.util.Locale
 /**
  * Links out to Qobuz and TIDAL for a record you have just read about.
  *
- * A SEARCH, NOT THE ALBUM, AND THAT IS NOT LAZINESS. Linking straight to an
- * album page needs that service's own id for it, and the only ways to get one
- * are the unofficial APIs whose terms forbid it — the same reason Qobuz and
- * TIDAL browsing are not in this build at all — or partner credentials this
- * project does not have. All that is actually known here is two strings off a
- * Pitchfork review, so what is offered is honest: the service's own search,
- * pre-filled, which lands one tap from the record.
+ * A SEARCH, NOT THE ALBUM. Linking straight to an album page needs that
+ * service's own id for it, and all that is actually known here is two strings
+ * off a Pitchfork review — so what these build is honest: the service's own
+ * search, pre-filled, which lands one tap from the record. Their APIs are not
+ * the way to do better; they want credentials this project does not have, which
+ * is the same reason Qobuz and TIDAL browsing are not in this build at all.
+ *
+ * For Qobuz there IS better, and [QobuzAlbum] does it from a public page with
+ * no API and no key. When it finds the record, the page shows its link instead
+ * of this one; when it does not, this is the fallback, and it says "Find on",
+ * not "Open in", because a search is all it is.
  *
  * Ordinary https links, deliberately, rather than qobuz:// or tidal:// custom
  * schemes. Android hands an https link to whichever app claims that domain, so
@@ -56,9 +60,9 @@ object StreamingLinks {
     private const val TIDAL = "https://tidal.com/search?q="
 
     fun qobuz(artist: String?, album: String, locale: Locale = Locale.getDefault()): String? =
-        query(artist, album)?.let { QOBUZ + storefront(locale) + "/search/?q=" + it }
+        searchQuery(artist, album)?.let { QOBUZ + storefront(locale) + "/search/?q=" + it }
 
-    fun tidal(artist: String?, album: String): String? = query(artist, album)?.let { TIDAL + it }
+    fun tidal(artist: String?, album: String): String? = searchQuery(artist, album)?.let { TIDAL + it }
 
     /**
      * The Qobuz storefront to search, for a device set to [locale].
@@ -93,7 +97,7 @@ object StreamingLinks {
      * search box anyway, so it is spent as a space before anything else
      * happens, and "AC DC Back in Black" finds the record.
      */
-    private fun query(artist: String?, album: String): String? {
+    internal fun searchQuery(artist: String?, album: String): String? {
         val words = "${artist.orEmpty()} $album".replace(SLASH, " ").trim().replace(WHITESPACE, " ")
         if (words.isEmpty()) return null
         return URLEncoder.encode(words, "UTF-8").replace("+", "%20")

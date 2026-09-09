@@ -132,7 +132,7 @@ are different claims.
   a PIN, and every request then passes `MusicdLite.guard()` before the API sees
   it. Loopback is allowed through untouched, which is why the app's own WebView
   is unaffected.
-  There are 79 `/api/` routes behind that socket, they control somebody's music
+  There are 80 `/api/` routes behind that socket, they control somebody's music
   system, and the settings store holds their Discogs token and fanart.tv key —
   so the gate is one chokepoint on purpose. **Do not add an authentication
   bypass per route**, and do not widen the bind address anywhere else. The

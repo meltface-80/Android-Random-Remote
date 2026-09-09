@@ -244,6 +244,7 @@ class RemoteApi(
 
             "/api/pitchfork/reviews" -> pitchforkReviews(request)
             "/api/pitchfork/review" -> pitchforkReview(request)
+            "/api/pitchfork/qobuz" -> pitchforkQobuz(request)
 
             "/api/shortcut/zones" -> zones()
             "/api/shortcut/play-random" -> shortcutPlay(request)
@@ -1518,6 +1519,23 @@ class RemoteApi(
                 .put("review", JSONObject.NULL)
                 .put("match", hit?.let { Json.album(it) } ?: JSONObject.NULL)
         )
+    }
+
+    /**
+     * The Qobuz deep link for one review's record, if Qobuz has it.
+     *
+     * Its own route rather than a field on /api/pitchfork/review, and that is
+     * deliberate. The review call answers from the local index and returns at
+     * once; this one reads a page off Qobuz and can take a second. Bundling
+     * them would hold the "Open in your library" button behind somebody else's
+     * server, so the page asks for both at the same time and each upgrades the
+     * actions when it lands.
+     */
+    private fun pitchforkQobuz(request: Request): Response {
+        val album = request.str("album")
+        if (album.isNullOrBlank()) return Json.error(400, "album is required")
+        val url = app.qobuz.deepLink(request.str("artist"), album)
+        return Json.obj(JSONObject().put("url", url ?: JSONObject.NULL))
     }
 
     /**

@@ -20,6 +20,7 @@ import com.musicd.lite.library.UserPlaylists
 import com.musicd.lite.meta.ImageCache
 import com.musicd.lite.meta.Metadata
 import com.musicd.lite.meta.Pitchfork
+import com.musicd.lite.meta.QobuzAlbum
 import com.musicd.lite.meta.Updater
 import com.musicd.lite.meta.metadataHttpClient
 import com.musicd.lite.roon.RoonApi
@@ -150,6 +151,7 @@ class MusicdLite(
     val metadata = Metadata(http, "MusicDRemoteLite/$version ( ${extension.website} )")
     val art = ImageCache(http, artDir)
     val pitchfork = Pitchfork(http, "MusicDRemoteLite/$version ( ${extension.website} )")
+    val qobuz = QobuzAlbum(http, "MusicDRemoteLite/$version ( ${extension.website} )")
 
     /**
      * The published manifest CI writes beside the APK. Read from the default
