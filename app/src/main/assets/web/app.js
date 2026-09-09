@@ -9788,6 +9788,14 @@
     setStatus("");
     listEl.innerHTML = "";
     listEl.classList.remove("pf-grouped");
+    // Set from here as well as from the stylesheet, and not for the sake of it:
+    // when the grouped markup arrived with a STALE style.css, the headings and
+    // the per-genre grids were laid out as cells of the ungrouped 3-column grid
+    // — headings stacked beside a squeezed column of tiles, thoroughly broken.
+    // The layout mode is not decoration here, it is a requirement of the shape
+    // this function builds, so it travels with the code that builds it and
+    // cannot be left behind by a cached stylesheet.
+    listEl.style.display = "";
     if (!items.length) {
       listEl.innerHTML = '<div class="pf-empty">No reviews to show right now.</div>';
       return;
@@ -9808,6 +9816,7 @@
     // and a heading inside the grid would be laid out as a cell. Per-genre
     // grids also restart the pattern, so every section opens with a big tile.
     listEl.classList.add("pf-grouped");
+    listEl.style.display = "block";
     for (const g of groups) {
       const head = document.createElement("h3");
       head.className = "pf-genre-head";
@@ -9820,6 +9829,9 @@
 
       const grid = document.createElement("div");
       grid.className = "pf-grid pf-genre-grid";
+      // Same reason: .pf-grid carries the scroller's own overflow, so without
+      // the .pf-genre-grid rule every section becomes a little scroll box.
+      grid.style.overflow = "visible";
       for (const it of g.items) grid.appendChild(buildCard(it));
       frag.appendChild(grid);
     }
