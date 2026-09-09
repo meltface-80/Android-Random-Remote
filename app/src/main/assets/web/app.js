@@ -9595,6 +9595,9 @@
   let activeTab = "latest";
   const listCache = { latest: null, best: null };  // per-tab items, cached for the session
 
+  // The sheet is what scrolls, not the grid inside it — see restoreListScroll.
+  const sheetEl = overlay.querySelector(".settings-sheet");
+
   const visible     = () => !overlay.classList.contains("hidden");
   const currentView = () => viewStack[viewStack.length - 1];
   const setStatus   = (m) => { if (statusEl) statusEl.textContent = m || ""; };
@@ -9644,15 +9647,39 @@
       listEl.classList.remove("hidden");
       if (tabsEl) tabsEl.classList.remove("hidden");   // tabs return with the list
       updateTabActive();
+      restoreListScroll();
       return;
     }
     render(currentView());
   });
 
   function pushView(view) {
+    // Remember where the list was before we cover it. This has to happen HERE,
+    // on the way out — by the time the detail is on screen the number is gone,
+    // because hiding the grid empties the sheet and the browser clamps a
+    // scrollTop that no longer has anything to scroll.
+    const from = currentView();
+    if (from && sheetEl) from.scrollTop = sheetEl.scrollTop;
     viewStack.push(view);
     history.pushState({ [HKEY]: viewStack.length }, "");
     render(view);
+  }
+
+  /**
+   * Put the list back where it was after Back from a review.
+   *
+   * Twice, deliberately. The assignment right after the grid is unhidden is the
+   * one that normally lands — reading or writing scrollTop flushes layout, so
+   * the sheet is already its full height again. The rAF is the belt: if
+   * anything inside the grid settles a frame later, the first write would have
+   * been clamped, and this one is not. Both are cheap and neither is visible.
+   */
+  function restoreListScroll() {
+    if (!sheetEl) return;
+    const view = currentView();
+    const top = view && typeof view.scrollTop === "number" ? view.scrollTop : 0;
+    sheetEl.scrollTop = top;
+    requestAnimationFrame(() => { sheetEl.scrollTop = top; });
   }
 
   // Leave the overlay entirely (unwinding its history entries) and then run a
