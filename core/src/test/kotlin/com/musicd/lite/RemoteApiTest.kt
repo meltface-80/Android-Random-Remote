@@ -171,6 +171,26 @@ class RemoteApiTest {
     }
 
     /**
+     * THE ONE THAT MATTERS, and the dial learned it the hard way. This endpoint
+     * resolves the id it is GIVEN and nothing else — RoonCore.zone(id) is
+     * zoneStore.byId(id), and byId(null) is null — so a request that names no
+     * zone answers "no zone" even while music is playing. There is no "the
+     * current zone" here to fall back on.
+     *
+     * The dial's first version asked without one and looked broken in a way
+     * that was hard to read: it opened on "No zone", a zone picked by hand
+     * worked, and then the next thing that moved — a pause, a volume nudge —
+     * bumped the revision, returned the waiting poll, and put it back to "No
+     * zone". Every client must name its zone on every request.
+     */
+    @Test
+    fun zoneStateWithoutAZoneAnswersNoZone() {
+        assertTrue(json("/api/zone-state").isNull("zone"))
+        // ...while the same request naming the zone answers with it.
+        assertEquals("z1", json("/api/zone-state?zone=z1").getJSONObject("zone").getString("zone_id"))
+    }
+
+    /**
      * THE ONE THAT MATTERS. Every unknown path falls through to the
      * single-page app, and that is a page which WORKS — so a /dial that was
      * not routed would show the remote instead, look like a working app, and

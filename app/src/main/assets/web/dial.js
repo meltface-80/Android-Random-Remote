@@ -45,11 +45,20 @@
   const SEND_INTERVAL_MS       = 60;
   const OPTIMISTIC_WINDOW_MS   = 900;
 
+  /**
+   * The same key the remote uses, deliberately. Same origin, so picking a zone
+   * in one and opening the other lands on the zone you just chose.
+   */
+  const ZONE_KEY = 'rra-zone';
+
+  let watchGen = 0;
+
   const canvas = document.getElementById('dial');
   const ctx    = canvas.getContext('2d');
 
   // ------------------------------------------------------------------ state
   let zone = null;            // the /api/zone-state "zone" object
+  let zoneId = null;          // ...and which zone that is. See watch().
   let revision = 0;
   let statusText = 'Connecting…';
   let art = null;             // an <img>, already decoded
@@ -484,19 +493,75 @@
     invalidate();
   }
 
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+  /**
+   * Which zone to open on, when nothing valid is remembered.
+   *
+   * The remembered id is checked against the live list rather than trusted,
+   * because zone ids do not survive a Core restart, a regroup or a rename —
+   * and Roon answers a command for an id it no longer knows by doing nothing
+   * at all, which would look exactly like a dial that had stopped working.
+   *
+   * Failing that: whatever is playing. A dial opened while music is on should
+   * be pointed at the music, not at whichever zone happens to sort first.
+   */
+  async function chooseZone() {
+    let zones = [];
+    try {
+      const r = await fetch('/api/zones', { cache: 'no-store' });
+      zones = (await r.json()).zones || [];
+    } catch (e) { return null; }
+    if (!zones.length) return null;
+    let remembered = null;
+    try { remembered = localStorage.getItem(ZONE_KEY); } catch (e) { /* private mode */ }
+    if (remembered && zones.some((z) => z.zone_id === remembered)) return remembered;
+    const playing = zones.find((z) => z.state === 'playing');
+    return (playing || zones[0]).zone_id;
+  }
+
+  function rememberZone(id) {
+    zoneId = id;
+    revision = 0;
+    try { localStorage.setItem(ZONE_KEY, id); } catch (e) { /* private mode */ }
+  }
+
   /**
    * The long poll. One request is outstanding at a time and it sleeps on the
    * server until the zone actually changes, so this is not a timer and does
    * not become one on failure: a failed request backs off before retrying.
+   *
+   * EVERY REQUEST NAMES THE ZONE, and the first version of this did not. The
+   * server does not pick one for you — /api/zone-state resolves the id it is
+   * given and nothing else, so a request without one answers {"zone": null},
+   * every time. The dial therefore opened on "No zone" with music playing,
+   * and any zone chosen by hand lasted exactly until the next thing that
+   * moved: pressing pause bumped the revision, the waiting poll returned, and
+   * the answer to a question that named no zone was no zone.
    */
   async function watch() {
+    const gen = ++watchGen;
     let backoff = 1000;
-    for (;;) {
+    while (gen === watchGen) {
+      if (!zoneId) {
+        const chosen = await chooseZone();
+        if (gen !== watchGen) return;
+        if (!chosen) {
+          statusText = 'No zones';
+          zone = null;
+          invalidate();
+          await sleep(3000);
+          continue;
+        }
+        rememberZone(chosen);
+      }
+
       const startedAt = Date.now();
       try {
-        const qs = new URLSearchParams();
+        const qs = new URLSearchParams({ zone: zoneId });
         if (revision) qs.set('wait_for', String(revision));
         const r = await fetch('/api/zone-state?' + qs, { cache: 'no-store' });
+        if (gen !== watchGen) return;            // a newer watcher owns the screen
         if (r.status === 401 || r.status === 403 || r.status === 404) {
           // The LAN gate has logged us out. Its own page knows what to do.
           location.reload();
@@ -504,22 +569,34 @@
         }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
+        if (gen !== watchGen) return;
         backoff = 1000;
         revision = data.revision || 0;
         zone = data.zone || null;
-        statusText = zone ? 'Nothing playing' : 'No zone';
-        loadArt(zone && zone.now_playing ? zone.now_playing.image_key : null);
+        if (!zone) {
+          // The id we asked for is gone: a Core restart, a regroup, a rename.
+          // Forget it and choose again rather than sitting on "No zone".
+          try { localStorage.removeItem(ZONE_KEY); } catch (e) { /* private mode */ }
+          zoneId = null;
+          statusText = 'No zone';
+          invalidate();
+          await sleep(1000);
+          continue;
+        }
+        statusText = 'Nothing playing';
+        loadArt(zone.now_playing ? zone.now_playing.image_key : null);
         invalidate();
         // A floor, not a timer. The request above is meant to SLEEP on the
         // server until the zone changes, so this normally adds nothing at all.
         // It is here for the case where it comes back instantly and keeps
         // doing so: without it that is not a poll, it is a request storm.
         const took = Date.now() - startedAt;
-        if (took < 200) await new Promise((res) => setTimeout(res, 200 - took));
+        if (took < 200) await sleep(200 - took);
       } catch (e) {
+        if (gen !== watchGen) return;
         statusText = 'Reconnecting…';
         invalidate();
-        await new Promise((res) => setTimeout(res, backoff));
+        await sleep(backoff);
         backoff = Math.min(backoff * 2, 15000);
       }
     }
@@ -554,19 +631,14 @@
       }
       btn.addEventListener('click', () => {
         zonesEl.classList.remove('open');
-        // Ask for that zone by name once; the watcher then follows it, because
-        // the server remembers what was last asked for. Zone ids do not survive
-        // a Core restart, so nothing is stored here.
-        revision = 0;
-        fetch('/api/zone-state?zone=' + encodeURIComponent(z.zone_id), { cache: 'no-store' })
-          .then((r) => r.json())
-          .then((data) => {
-            zone = data.zone || null;
-            revision = data.revision || 0;
-            loadArt(zone && zone.now_playing ? zone.now_playing.image_key : null);
-            invalidate();
-          })
-          .catch(() => { /* the watcher will catch up on its own */ });
+        // Restart the watcher on the new zone. Not a one-shot fetch: the poll
+        // already in flight is asking about the OLD zone and would land on top
+        // of the answer, so the generation counter orphans it instead.
+        rememberZone(z.zone_id);
+        zone = null;
+        statusText = 'Loading…';
+        invalidate();
+        watch();
       });
       listEl.appendChild(btn);
     }
