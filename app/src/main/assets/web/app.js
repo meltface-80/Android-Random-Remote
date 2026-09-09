@@ -9203,6 +9203,7 @@
   const lanEnabled = document.getElementById("lan-enabled");
   const lanDetails = document.getElementById("lan-details");
   const lanUrl     = document.getElementById("lan-url");
+  const lanDialUrl = document.getElementById("lan-dial-url");
   const lanPin     = document.getElementById("lan-pin");
   const lanNote    = document.getElementById("lan-note");
 
@@ -9219,6 +9220,13 @@
       lanUrl.textContent = addresses.length
         ? "http://" + addresses[0] + ":" + j.port
         : "This phone has no network address right now";
+    }
+    // The dial is the same server on the same code — a page, not a second
+    // thing to set up — so it is shown here rather than left to be guessed at.
+    if (lanDialUrl) {
+      lanDialUrl.textContent = addresses.length
+        ? "http://" + addresses[0] + ":" + j.port + "/dial"
+        : "—";
     }
     if (lanPin) lanPin.textContent = j.pin || "—";
     if (lanNote) {

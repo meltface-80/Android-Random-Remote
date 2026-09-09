@@ -60,7 +60,7 @@ API testable on a JVM with no emulator — see [Verification](#verification).
 
 ## Install
 
-**Download: [musicd-remote-lite-0.4.27.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.4.27.apk)**
+**Download: [musicd-remote-lite-0.4.28.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.4.28.apk)**
 
 Sideload it on Android 8.0 (API 26) or newer. The file in
 [`dist/`](dist/) is published by CI from the source in this repository, so it is
@@ -271,7 +271,7 @@ control every Roon zone in the house with nothing in front of it.
 LAN access on: the socket is rebuilt on `0.0.0.0`, a code is minted, and every
 request passes one gate before the API sees it — see `LanAccess` in `:core`. So
 the security half of this objection is answered, and other devices can open the
-app's own pages today.
+app's own pages today — the remote at `:3450`, and the dial at `:3450/dial`.
 
 The wall display itself is still not ported, and the second reason is why.
 

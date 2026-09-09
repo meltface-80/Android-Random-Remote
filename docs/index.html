@@ -196,7 +196,7 @@
      Docker container, no Node process and no server to keep running. Install the APK and it is
      the whole thing.</p>
   <div class="badges">
-    <span class="badge" id="ver-badge">v0.4.27</span>
+    <span class="badge" id="ver-badge">v0.4.28</span>
     <span class="badge plain">Android 8.0+</span>
     <span class="badge plain">MIT licence</span>
     <span class="badge plain">Pairs with your Roon Core over the network</span>
@@ -208,8 +208,8 @@
     <h2>Download</h2>
     <div class="dl">
       <a class="get" id="dl-link"
-         href="https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.4.27.apk">Download the APK</a>
-      <div class="filename" id="dl-name">musicd-remote-lite-0.4.27.apk</div>
+         href="https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.4.28.apk">Download the APK</a>
+      <div class="filename" id="dl-name">musicd-remote-lite-0.4.28.apk</div>
       <p class="sub">Android 8.0 (API 26) or newer. Your browser will warn you about downloading an
          APK, and Android will ask permission to install from this source — both are normal for an
          app that does not come from the Play Store.</p>
@@ -238,8 +238,10 @@
             <b>Settings &rarr; Network</b> and switch on <em>Open on other devices</em>. It shows
             an address like <code>http://192.168.0.42:3450</code> and an eight-character code.
             Open that address in a browser on the iPhone, iPad or laptop, enter the code once, and
-            that device stays signed in. On iOS, <b>Share &rarr; Add to Home Screen</b> gives it an
-            icon and opens it without browser chrome.
+            that device stays signed in. Add <code>/dial</code> to the same address for the dial
+            &mdash; <code>http://192.168.0.42:3450/dial</code> &mdash; which is the same control
+            surface as the dial app, in a page. On iOS, <b>Share &rarr; Add to Home Screen</b>
+            gives either of them an icon and opens it without browser chrome.
             <br><span style="color:var(--muted)">Off by default: while it is off, nothing on your
             network can reach the app at all. Give the phone a fixed address in your router, or
             the one you bookmarked will eventually move.</span></li>
@@ -290,7 +292,8 @@
            on.</p></div>
       <div class="card"><h3><span class="em">🎛️</span>The dial</h3>
         <p>A second launcher icon: a volume ring you sweep with your thumb, album art in the
-           middle, transport under it. One install, two icons, one Roon extension.</p></div>
+           middle, transport under it. One install, two icons, one Roon extension &mdash; and
+           on your other devices at <code>:3450/dial</code>.</p></div>
       <div class="card"><h3><span class="em">🕹️</span>The dial, on the home screen</h3>
         <p>The same dial drawn to your home screen, with the controls tappable and the two sides
            of the ring for volume. It is the app's own view, so the two cannot drift apart.</p></div>

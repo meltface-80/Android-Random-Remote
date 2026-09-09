@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#07080A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Dial</title>
+<style>
+  /* The dial is one canvas on a black field. No system font is downloaded:
+     this page has to work on a phone with no internet, which is the whole
+     point of it being served off the LAN. */
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #07080A; color: #F2F5F8; overflow: hidden;
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  #dial { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  /* Zone picker. A sheet rather than a page, so the dial stays behind it. */
+  #zones {
+    position: fixed; inset: 0; display: none;
+    background: rgba(4,6,9,.72); z-index: 2;
+    align-items: flex-end; justify-content: center;
+  }
+  #zones.open { display: flex; }
+  #zone-sheet {
+    width: 100%; max-width: 520px; max-height: 70%; overflow-y: auto;
+    background: #10151b; border-radius: 18px 18px 0 0;
+    padding: 10px 0 calc(14px + env(safe-area-inset-bottom));
+    box-shadow: 0 -12px 40px rgba(0,0,0,.6);
+  }
+  #zone-sheet h2 {
+    margin: 8px 20px 10px; font-size: 13px; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase; color: #98A3AF;
+  }
+  .zone-row {
+    display: block; width: 100%; box-sizing: border-box; text-align: left;
+    background: none; border: 0; color: #F2F5F8; font: inherit;
+    padding: 14px 20px; cursor: pointer;
+  }
+  .zone-row:active { background: rgba(255,255,255,.07); }
+  .zone-row.is-current { color: #7AC8FF; font-weight: 700; }
+  .zone-row small { display: block; color: #98A3AF; font-size: 12px; margin-top: 2px; }
+</style>
+</head>
+<body>
+  <canvas id="dial"></canvas>
+  <div id="zones" role="dialog" aria-modal="true" aria-label="Choose a zone">
+    <div id="zone-sheet"><h2>Play to</h2><div id="zone-list"></div></div>
+  </div>
+  <script src="/dial.js"></script>
+</body>
+</html>
