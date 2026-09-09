@@ -32,6 +32,7 @@ Run all of these before pushing. None is optional.
 node --check app/src/main/assets/web/app.js
 npx eslint -c tools/eslint.config.mjs app/src/main/assets/web/app.js
 node tools/verify-wire.js     # needs tools/node_modules; CI has it
+node tools/check-sharecard.js
 python3 tools/check-api-contract.py
 ```
 

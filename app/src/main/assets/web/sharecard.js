@@ -12,9 +12,18 @@
  *   |    | +--------+   RELEASED 2009                     |  |
  *   |    | | cover  |   Album Title                       |  |
  *   |    | | 424px  |   by Artist                         |  |
- *   |    | +--------+                          [MusicD]   |  |
+ *   |    | +--------+   PITCHFORK  8.7 [BEST NEW MUSIC]   |  |
+ *   |    | ----------------------------------------------- |  |
+ *   |    | the album's blurb, full width, every word of it  |  |
+ *   |    | Wikipedia                            [MusicD]   |  |
  *   |    +------------------------------------------------+  |
  *   +--------------------------------------------------------+
+ *
+ *  THE CARD IS 600 TALL UNTIL IT ISN'T. Everything above the rule is fixed
+ *  1200x600 and unchanged. A blurb makes the card GROW downward instead of
+ *  being squeezed or cut: the text is never ellipsized, because a share card
+ *  that ends mid-sentence is worse than a tall one. 600 is the floor, not the
+ *  height.
  *
  *  The card used to be a hard vertical split: art on the left half, a flat
  *  #0e1012 slab on the right. It now reads the way the app does — the artwork
@@ -58,6 +67,47 @@ const ShareCard = (() => {
   const GROUND    = '#12151a';
   const PANE_FILL = 'rgba(18,21,26,.5)';
   const PANE_EDGE = 'rgba(255,255,255,.14)';
+
+  // The app's own review language, lifted from style.css so the card and the
+  // screens say the same thing the same way: .pf-score is a dark pill with
+  // white tabular numerals, and Best New Music is this gold on near-black
+  // wherever it appears.
+  const BNM_BG = '#d4a017';
+  const BNM_FG = '#1a1000';
+
+  // Solved against the same worst case as the RELEASED line below: a white
+  // sleeve under the scrim and the pane flattens to rgb(83,85,88). #dfe4ea
+  // measures 5.85:1 there and #c2cad3 4.52:1 — the body text and the credit
+  // both clear AA at the sizes they are drawn.
+  const BIO_FG    = '#dfe4ea';
+  const CREDIT_FG = '#c2cad3';
+  const LABEL_FG  = '#9aa2ab';
+
+  const BIO_SIZE   = 24;
+  const BIO_LH     = 34;
+  const BIO_RULE_GAP = 30;   // pane content bottom -> the hairline
+  const BIO_TEXT_GAP = 26;   // hairline -> first line of blurb
+  const CREDIT_GAP = 16;     // last line of blurb -> the credit
+  const CREDIT_H   = 24;
+
+  const BNM_CHIP = { font: '800 18px "Manrope", sans-serif', bg: BNM_BG, fg: BNM_FG,
+                     padX: 12, h: 32, r: 8 };
+
+  function fmtScore(n) { return (n % 1 === 0) ? n.toFixed(1) : String(n); }
+
+  /** A filled pill of text. Returns the width it took. */
+  function pill(ctx, x, y, text, o) {
+    ctx.font = o.font;
+    const w = Math.round(ctx.measureText(text).width + o.padX * 2);
+    roundRectPath(ctx, x, y, w, o.h, o.r);
+    ctx.fillStyle = o.bg;
+    ctx.fill();
+    ctx.fillStyle = o.fg;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + o.padX, y + o.h / 2 + 1);
+    ctx.textBaseline = 'top';
+    return w;
+  }
 
   // A rounded rectangle path. roundRect() is still missing in enough shipping
   // browsers to be worth not depending on.
@@ -151,33 +201,49 @@ const ShareCard = (() => {
     const wm    = await loadImage(data.wordmarkUrl).catch(() => null);
 
     const canvas = document.createElement('canvas');
+
+    // Measured before the canvas is sized, because the blurb is what decides
+    // how tall the card is. wrapText is given a line limit no real extract can
+    // reach: every word is kept, and the card grows to hold them.
+    const measure = document.createElement('canvas').getContext('2d');
+    measure.font = `400 ${BIO_SIZE}px "Manrope", sans-serif`;
+    const bioText = String(data.bio || '').replace(/\s+/g, ' ').trim();
+    const bioLines = bioText
+      ? wrapText(measure, bioText, PANE_W - PANE_PAD * 2, 999).lines : [];
+    const grow = bioLines.length
+      ? BIO_RULE_GAP + BIO_TEXT_GAP + bioLines.length * BIO_LH + CREDIT_GAP + CREDIT_H
+      : 0;
+
+    const cardH = CARD_H + grow;
+    const paneH = PANE_H + grow;
+
     canvas.width  = CARD_W;
-    canvas.height = CARD_H;
+    canvas.height = cardH;
     const ctx = canvas.getContext('2d');
     ctx.textBaseline = 'top';
     ctx.textAlign    = 'left';
 
     // --- Ground: the cover again, softened, filling the card ---
     ctx.fillStyle = GROUND;
-    ctx.fillRect(0, 0, CARD_W, CARD_H);
+    ctx.fillRect(0, 0, CARD_W, cardH);
     if (cover) {
-      drawSoftened(ctx, cover, CARD_W, CARD_H);
+      drawSoftened(ctx, cover, CARD_W, cardH);
       // Two scrims over it, doing different jobs. The flat one sets the floor
       // for how light the ground can get behind the pane — a white sleeve would
       // otherwise leave the pane sitting on near-white. The gradient darkens the
       // bottom, where the wordmark sits.
       ctx.fillStyle = 'rgba(12,14,18,.44)';
-      ctx.fillRect(0, 0, CARD_W, CARD_H);
-      const vign = ctx.createLinearGradient(0, CARD_H * 0.45, 0, CARD_H);
+      ctx.fillRect(0, 0, CARD_W, cardH);
+      const vign = ctx.createLinearGradient(0, cardH * 0.45, 0, cardH);
       vign.addColorStop(0, 'rgba(8,10,13,0)');
       vign.addColorStop(1, 'rgba(8,10,13,.55)');
       ctx.fillStyle = vign;
-      ctx.fillRect(0, 0, CARD_W, CARD_H);
+      ctx.fillRect(0, 0, CARD_W, cardH);
     }
 
     // --- The pane ---
     ctx.save();
-    roundRectPath(ctx, PANE_X, PANE_Y, PANE_W, PANE_H, PANE_R);
+    roundRectPath(ctx, PANE_X, PANE_Y, PANE_W, paneH, PANE_R);
     ctx.fillStyle = PANE_FILL;
     ctx.fill();
     ctx.lineWidth = 1;
@@ -224,8 +290,17 @@ const ShareCard = (() => {
 
     const BLOCK_GAP  = 18;   // gap between title and artist
 
+    // The Pitchfork score, when the record has one. A number and a flag only:
+    // the written review is never carried, here or anywhere else in this app.
+    const hasScore  = typeof data.score === 'number' && !isNaN(data.score);
+    const bnm       = !!data.isBestNewMusic;
+    const showScore = hasScore || bnm;
+    const SCORE_GAP = 26;
+    const SCORE_H   = 90;
+
     // Total height of the text block
-    const blockH = (metaText ? META_H + META_GAP : 0) + titleH + BLOCK_GAP + artistH;
+    const blockH = (metaText ? META_H + META_GAP : 0) + titleH + BLOCK_GAP + artistH +
+                   (showScore ? SCORE_GAP + SCORE_H : 0);
 
     // Vertically centre the block in the pane, with a slight upward nudge
     // (optical centre sits a little above mathematical centre).
@@ -255,6 +330,57 @@ const ShareCard = (() => {
     ctx.fillStyle = '#cdd3d9';
     ctx.font = `400 ${artist.size}px "Manrope", sans-serif`;
     artist.lines.forEach((line, i) => ctx.fillText(line, TEXT_X, ry + i * artist.lh));
+    ry += artistH;
+
+    // --- The score, under the artist ---
+    if (showScore) {
+      const sy = ry + SCORE_GAP;
+      // A quiet label first, in the same voice as the RELEASED line, so the
+      // number is attributed without a logo and without shouting.
+      ctx.font = '700 18px "Manrope", sans-serif';
+      ctx.fillStyle = LABEL_FG;
+      ctx.fillText('PITCHFORK', TEXT_X, sy);
+
+      const ny = sy + 26;
+      let sx = TEXT_X;
+      if (hasScore) {
+        const txt = fmtScore(data.score);
+        ctx.font = '800 58px "Manrope", sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(txt, sx, ny);
+        const nw = ctx.measureText(txt).width;
+        ctx.font = '700 20px "Manrope", sans-serif';
+        ctx.fillStyle = LABEL_FG;
+        ctx.fillText('/10', sx + nw + 9, ny + 34);
+        sx += nw + 9 + ctx.measureText('/10').width + 24;
+      }
+      if (bnm) pill(ctx, sx, ny + Math.round((58 - BNM_CHIP.h) / 2), 'BEST NEW MUSIC', BNM_CHIP);
+    }
+
+    // --- The blurb, full width inside the pane, under everything above ---
+    if (bioLines.length) {
+      const ruleY = PANE_Y + PANE_H - PANE_PAD + BIO_RULE_GAP;
+      // A hairline at the pane's own edge weight, so the blurb reads as part of
+      // the pane rather than a second box stuck underneath it.
+      ctx.strokeStyle = 'rgba(255,255,255,.10)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(PANE_X + PANE_PAD, ruleY + 0.5);
+      ctx.lineTo(PANE_X + PANE_W - PANE_PAD, ruleY + 0.5);
+      ctx.stroke();
+
+      let by = ruleY + BIO_TEXT_GAP;
+      ctx.fillStyle = BIO_FG;
+      ctx.font = `400 ${BIO_SIZE}px "Manrope", sans-serif`;
+      bioLines.forEach((line, i) => ctx.fillText(line, PANE_X + PANE_PAD, by + i * BIO_LH));
+
+      by += bioLines.length * BIO_LH + CREDIT_GAP;
+      ctx.font = '600 18px "Manrope", sans-serif';
+      ctx.fillStyle = CREDIT_FG;
+      // Wikipedia's text is CC BY-SA. The credit is a licence condition on a
+      // picture that leaves this app, not a nicety — it does not get trimmed.
+      ctx.fillText(data.bioSource || 'Wikipedia', PANE_X + PANE_PAD, by);
+    }
 
     // --- Wordmark pinned bottom-right (only if a wordmark image was supplied) ---
     if (wm) {
@@ -263,7 +389,7 @@ const ShareCard = (() => {
       ctx.drawImage(
         wm,
         PANE_X + PANE_W - WORDMARK_PAD - WORDMARK_W,
-        PANE_Y + PANE_H - WORDMARK_PAD - wmH,
+        PANE_Y + paneH - WORDMARK_PAD - wmH,
         WORDMARK_W, wmH
       );
       ctx.globalAlpha = 1;

@@ -45,6 +45,12 @@ jobs:
           npm install --no-save --silent eslint
           npx eslint --config tools/eslint.config.mjs app/src/main/assets/web/*.js
 
+      # The share card is a canvas drawing with no browser in CI, so what is
+      # checked is the pair of promises that would break quietly: the blurb
+      # stays readable on a white sleeve, and it is never truncated.
+      - name: Check the share card's blurb
+        run: node tools/check-sharecard.js
+
       - name: Check the wire format against node-roon-api
         run: |
           git clone --depth 1 https://github.com/RoonLabs/node-roon-api /tmp/node-roon-api

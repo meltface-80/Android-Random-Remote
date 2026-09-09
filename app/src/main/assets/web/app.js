@@ -8439,6 +8439,26 @@
     return "";
   }
 
+  // Everything else the card draws, out of the SAME answer. None of this costs
+  // a request: /api/album/extras was already being fetched for the year and
+  // the rest of it thrown away — the blurb the album screen shows, and the
+  // Pitchfork score it already draws as a chip.
+  //
+  // The blurb is the album's and only the album's. An artist bio is in that
+  // payload too and is deliberately not used: this is a card about a record.
+  function extraOf(j) {
+    const a = (j && j.album) || null;
+    return {
+      release: yearOf(j),
+      bio: (a && a.description) || "",
+      bioSource: (a && a.source) || "",
+      score: a && typeof a.score === "number" ? a.score : null,
+      isBestNewMusic: !!(a && a.isBestNewMusic)
+    };
+  }
+
+  const EMPTY_EXTRA = { release: "", bio: "", bioSource: "", score: null, isBestNewMusic: false };
+
   // Bumped on every open(), so a late redraw cannot land on a card the user
   // has since closed or replaced with a different album's.
   let renderToken = 0;
@@ -8483,20 +8503,27 @@
       await ensureFont();
 
       const params = new URLSearchParams({ title, artist });
-      let releaseRaw = "";
+      let fastExtra = EMPTY_EXTRA;
       try {
         const r = await fetch("/api/album/extras?fast=1&" + params, { cache: "no-store" });
-        if (r.ok) releaseRaw = yearOf(await r.json());
+        if (r.ok) fastExtra = extraOf(await r.json());
       } catch { /* keep blank */ }
 
-      // Only worth asking the slow way when the fast answer had nothing. It
-      // also teaches the server the year, so the next card for this album is
-      // complete without any of this.
-      const late = releaseRaw ? null :
+      // Only worth asking the slow way when the fast answer was short of
+      // something. It also teaches the server the year, so the next card for
+      // this album is complete without any of this.
+      //
+      // The blurb is now part of "short of something", and it is the reason
+      // this fires more often than it used to: fast=1 answers from the caches
+      // only, so a card opened straight from the mini transport can have a
+      // year and no words. Opened from the album screen — which is where the
+      // Share button lives — both are already warm.
+      const wantLate = !fastExtra.release || !fastExtra.bio;
+      const late = !wantLate ? null :
         fetch("/api/album/extras?" + params, { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : null))
-          .then(yearOf)
-          .catch(() => "");
+          .then(extraOf)
+          .catch(() => EMPTY_EXTRA);
 
       // size=800 is the size the album modal and the now-playing screen ask
       // for, so the picture the card needs is already in the WebView's cache
@@ -8510,13 +8537,17 @@
         ? `/api/image/${encodeURIComponent(input.image_key)}?size=800`
         : "";
 
-      const paint = async (release) => {
+      const paint = async (extra) => {
         const blob = await ShareCard.render({
           coverUrl,
           wordmarkUrl: null,
           title,
           artist,
-          releaseRaw: release
+          releaseRaw: extra.release,
+          bio: extra.bio,
+          bioSource: extra.bioSource,
+          score: extra.score,
+          isBestNewMusic: extra.isBestNewMusic
         });
         // A card nobody is looking at any more is not worth showing, and the
         // actions below would hand Share the wrong picture.
@@ -8527,14 +8558,25 @@
         buildActions(blob, title, artist);
       };
 
-      await paint(releaseRaw);
+      await paint(fastExtra);
 
       if (late) {
-        late.then((year) => {
-          if (!year || year === releaseRaw) return;
+        late.then((full) => {
+          // Redraw only if the slow answer actually added something. A card
+          // that reflows for no visible change is worse than one that doesn't.
+          const better = (full.release && full.release !== fastExtra.release) ||
+                         (full.bio && full.bio !== fastExtra.bio) ||
+                         (full.score != null && full.score !== fastExtra.score);
+          if (!better) return;
           if (token !== renderToken || overlay.classList.contains("hidden")) return;
-          return paint(year);
-        }).catch(() => { /* the card without a date is already on screen */ });
+          return paint({
+            release: full.release || fastExtra.release,
+            bio: full.bio || fastExtra.bio,
+            bioSource: full.bioSource || fastExtra.bioSource,
+            score: full.score != null ? full.score : fastExtra.score,
+            isBestNewMusic: full.isBestNewMusic || fastExtra.isBestNewMusic
+          });
+        }).catch(() => { /* the card without it is already on screen */ });
       }
     } catch (e) {
       if (token !== renderToken) return;
