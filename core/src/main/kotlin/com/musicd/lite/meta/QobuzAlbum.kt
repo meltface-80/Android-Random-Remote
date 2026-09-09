@@ -132,6 +132,39 @@ class QobuzAlbum(private val http: OkHttpClient, private val userAgent: String) 
         /** The host that opens the app — see the class KDoc for why only this one. */
         const val OPEN = "https://open.qobuz.com/album/"
 
+        /**
+         * The same album as a `qobuzapp://` link, which is the door the Qobuz
+         * app's own redirector uses — or null if [url] is not one of ours.
+         *
+         * Handing Android the https link lets it decide, and it gives it to the
+         * Qobuz app because Qobuz claims every path on that host. That works,
+         * but not from cold: the app comes up on its Home screen with the album
+         * dropped, and only a second tap — with the app now running — lands on
+         * the record. open.qobuz.com's own page does not use the https route at
+         * all when it detects a phone. It builds
+         *
+         *     intent://album/<id>#Intent;scheme=qobuzapp;package=com.qobuz.music;…
+         *
+         * on Android and navigates to "qobuzapp://album/<id>" on iOS, so that
+         * scheme is the app's real front door and the https link is the web
+         * fallback around it. The caller tries this first and keeps the https
+         * link for when it fails, which is what happens on a phone with no
+         * Qobuz app installed.
+         *
+         * Deliberately strict. This string is handed to startActivity, so it is
+         * built from an id this app resolved itself and nothing else: the host,
+         * the path and the id shape all have to match, and a query string or a
+         * fragment — anything that could carry a second instruction — means no.
+         */
+        fun appUri(url: String?): String? {
+            val id = url?.removePrefix(OPEN)?.takeIf { it != url } ?: return null
+            return if (id.isNotEmpty() && id.all { it.isLetterOrDigit() && it.code < 128 }) {
+                "qobuzapp://album/$id"
+            } else {
+                null
+            }
+        }
+
         /** `href="/us-en/album/mezzanine-massive-attack/0724384559953"` */
         private val HREF =
             Regex("href=\"/([a-z]{2}-[a-z]{2})/album/([a-z0-9-]+)/([A-Za-z0-9]+)\"")
