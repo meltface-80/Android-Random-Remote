@@ -9928,15 +9928,32 @@
       'tap <strong>Read on Pitchfork</strong> to read it on pitchfork.com.</p>';
     buildActions(actEl, it, null);
 
-    try {
-      const qs = "?url=" + encodeURIComponent(it.url) +
-                 "&album="  + encodeURIComponent(it.album  || "") +
-                 "&artist=" + encodeURIComponent(it.artist || "");
-      const r = await fetch("/api/pitchfork/review" + qs);
-      if (mySeq !== reqSeq) return;
-      const data = await r.json();
-      if (r.ok && data.match) buildActions(actEl, it, data.match);
-    } catch (e) { /* library match is optional — the actions already shown work */ }
+    // Two independent lookups, fired together and never awaited in series: the
+    // library match is local and instant, the Qobuz id is a page off somebody
+    // else's server. Whichever lands first repaints the actions, so a slow
+    // Qobuz never holds up "Open in your library" — that is why these are two
+    // routes and not one.
+    let match = null;
+    const names = "album="  + encodeURIComponent(it.album  || "") +
+                  "&artist=" + encodeURIComponent(it.artist || "");
+    const repaint = () => { if (mySeq === reqSeq) buildActions(actEl, it, match); };
+
+    (async () => {
+      try {
+        const r = await fetch("/api/pitchfork/review?url=" +
+                              encodeURIComponent(it.url) + "&" + names);
+        const data = await r.json();
+        if (r.ok && data.match) { match = data.match; repaint(); }
+      } catch (e) { /* library match is optional — the actions already shown work */ }
+    })();
+
+    (async () => {
+      try {
+        const r = await fetch("/api/pitchfork/qobuz?" + names);
+        const data = await r.json();
+        if (r.ok && data.url) { it.qobuzApp = data.url; repaint(); }
+      } catch (e) { /* no id found is the normal case for a record Qobuz lacks */ }
+    })();
   }
 
   function buildActions(container, it, match) {
@@ -9969,22 +9986,27 @@
     // search pre-seeded. Neither browser is in this build — but the services'
     // own apps are one link away, so the affordance comes back in an honest
     // form. Android hands an https link to whichever app claims that domain,
-    // so these open IN Qobuz or Tidal when installed and the web player when
-    // not; the WebView already routes off-site links out through ACTION_VIEW.
+    // so these open IN Qobuz or Tidal when it claims the host, and in a
+    // browser when it does not; the WebView already routes off-site links out
+    // through ACTION_VIEW.
     //
-    // "Find on", not "Open": all that is known here is two strings off a
-    // review, so the link carries a SEARCH. Naming the album exactly would
-    // need that service's own id for it, which needs their API — see
-    // StreamingLinks in :core, which builds and encodes these.
+    // Qobuz gets two shapes, and the difference is what the label promises.
+    // "Open in Qobuz" is an open.qobuz.com/album/<id> link, which that app
+    // answers on the record — it only exists once /api/pitchfork/qobuz has
+    // found the id, so it appears a moment after the rest. "Find on Qobuz" is
+    // the fallback: the storefront search, in a browser, for a record Qobuz
+    // could not be shown to carry. Tidal is always the search — see
+    // StreamingLinks and QobuzAlbum in :core for both.
     for (const svc of [{ key: "qobuz", name: "Qobuz" }, { key: "tidal", name: "Tidal" }]) {
-      const href = it[svc.key];
+      const deep = svc.key === "qobuz" ? it.qobuzApp : null;
+      const href = deep || it[svc.key];
       if (!href) continue;
       const a = document.createElement("a");
       a.className = "pf-action pf-action-link";
       a.href = href;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
-      a.textContent = "Find on " + svc.name + " ↗";
+      a.textContent = (deep ? "Open in " : "Find on ") + svc.name + " ↗";
       container.appendChild(a);
     }
   }
