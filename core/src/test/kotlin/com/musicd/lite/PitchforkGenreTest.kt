@@ -5,9 +5,11 @@ import com.musicd.lite.meta.StreamingLinks
 import okhttp3.OkHttpClient
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Locale
 
 /**
  * Genres off a Pitchfork listing, and the links out from one.
@@ -96,10 +98,54 @@ class PitchforkGenreTest {
 
     @Test
     fun aSearchLinkCarriesTheArtistAndTheAlbum() {
-        val q = StreamingLinks.qobuz("Massive Attack", "Mezzanine")
-        assertEquals("https://open.qobuz.com/search?q=Massive%20Attack%20Mezzanine", q)
+        val q = StreamingLinks.qobuz("Massive Attack", "Mezzanine", Locale.UK)
+        assertEquals("https://www.qobuz.com/gb-en/search/?q=Massive%20Attack%20Mezzanine", q)
         val t = StreamingLinks.tidal("Massive Attack", "Mezzanine")
         assertEquals("https://tidal.com/search?q=Massive%20Attack%20Mezzanine", t)
+    }
+
+    /**
+     * 0.4.19's bug, pinned. open.qobuz.com is claimed path-for-path by the
+     * Qobuz app on both platforms — it published the assetlinks.json and the
+     * apple-app-site-association saying so — and the app has no search screen
+     * to answer with, so the link opened Discover and lost the record. Nothing
+     * here may point at that host again.
+     */
+    @Test
+    fun theQobuzLinkAvoidsTheHostTheAppSwallows() {
+        val url = StreamingLinks.qobuz("Massive Attack", "Mezzanine", Locale.US)!!
+        assertFalse("open.qobuz.com never reaches a browser: $url", url.contains("open.qobuz.com"))
+        assertTrue(url.startsWith("https://www.qobuz.com/"))
+    }
+
+    /**
+     * The storefront segment is not optional and cannot be invented: Qobuz
+     * answers /search/?q= with no country, and any country it does not sell
+     * in, with a 404.
+     */
+    @Test
+    fun theQobuzStorefrontIsOneQobuzActuallyHas() {
+        assertEquals("gb-en", StreamingLinks.storefront(Locale.UK))
+        assertEquals("us-en", StreamingLinks.storefront(Locale.US))
+        assertEquals("fr-fr", StreamingLinks.storefront(Locale.FRANCE))
+        assertEquals("jp-ja", StreamingLinks.storefront(Locale.JAPAN))
+        // No exact pair, but the country has a store: take that country's.
+        assertEquals("be-fr", StreamingLinks.storefront(Locale("en", "BE")))
+        // Countries Qobuz does not sell in, and a locale with no country at
+        // all, both fall back rather than building a 404.
+        assertEquals("us-en", StreamingLinks.storefront(Locale("en", "IN")))
+        assertEquals("us-en", StreamingLinks.storefront(Locale("en")))
+    }
+
+    /**
+     * Qobuz redirects "?q=…" into a path segment and decodes the %2F doing it,
+     * so an encoded slash still splits the path and 404s. It has to be gone,
+     * not merely escaped.
+     */
+    @Test
+    fun aSlashInTheNameIsSpentAsASpace() {
+        val url = StreamingLinks.qobuz("AC/DC", "Back in Black", Locale.US)!!
+        assertEquals("https://www.qobuz.com/us-en/search/?q=AC%20DC%20Back%20in%20Black", url)
     }
 
     /**
@@ -142,7 +188,10 @@ class PitchforkGenreTest {
     @Test
     fun theLinksReachThePageInTheJson() {
         val json = itemsOf(review("u", "Mezzanine", "Massive Attack", "[]"))[0].toJson()
-        assertTrue(json.getString("qobuz").startsWith("https://open.qobuz.com/search?q="))
+        assertTrue(json.getString("qobuz").matches(QOBUZ_SEARCH))
         assertTrue(json.getString("tidal").startsWith("https://tidal.com/search?q="))
     }
+
+    /** Whichever storefront this machine's locale picks. */
+    private val QOBUZ_SEARCH = Regex("https://www\\.qobuz\\.com/[a-z]{2}-[a-z]{2}/search/\\?q=.+")
 }
