@@ -76,15 +76,22 @@ const ShareCard = (() => {
   const BNM_FG = '#1a1000';
 
   // Solved against the same worst case as the RELEASED line below: a white
-  // sleeve under the scrim and the pane flattens to rgb(83,85,88). #dfe4ea
-  // measures 5.85:1 there and #c2cad3 4.52:1 — the body text and the credit
+  // sleeve under the scrim and the pane flattens to rgb(83,85,88). White
+  // measures 7.48:1 there and #c2cad3 4.52:1 — the body text and the credit
   // both clear AA at the sizes they are drawn.
-  const BIO_FG    = '#dfe4ea';
+  //
+  // The blurb is white, and its size and leading are not free choices: they
+  // are Roon's, measured off its own share card and scaled. Roon draws a
+  // 512-wide card with a 17px line pitch and a 12px glyph band in pure white;
+  // at 1200 that is a 39.8px pitch and a 28px band. This was 24/34 in a grey,
+  // which read as a caption beside Roon's paragraph. Weight, not colour, keeps
+  // it under the title — 28px regular against 56px bold.
+  const BIO_FG    = '#ffffff';
   const CREDIT_FG = '#c2cad3';
   const LABEL_FG  = '#9aa2ab';
 
-  const BIO_SIZE   = 24;
-  const BIO_LH     = 34;
+  const BIO_SIZE   = 28;
+  const BIO_LH     = 40;
   const BIO_RULE_GAP = 30;   // pane content bottom -> the hairline
   const BIO_TEXT_GAP = 26;   // hairline -> first line of blurb
   const CREDIT_GAP = 16;     // last line of blurb -> the credit
