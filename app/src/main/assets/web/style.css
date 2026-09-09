@@ -2865,6 +2865,31 @@ input.vol-range::-moz-range-thumb {
   overflow-y: auto;
   padding: 6px 0 12px;
 }
+
+/* Grouped by genre: the scroller stops being the grid and becomes a column of
+   headings and per-genre grids. It keeps the scrolling; the inner grids do the
+   laying out, which is what lets each section restart the woven mosaic. */
+#pitchfork-list.pf-grouped { display: block; }
+.pf-genre-grid { overflow: visible; padding: 0 0 4px; }
+
+.pf-genre-head {
+  display: flex; align-items: baseline; gap: 8px;
+  margin: 18px 0 2px;
+  font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-faint);
+  /* Sticks while you scroll a long genre, so it is always clear which one you
+     are in — the whole point of grouping. */
+  position: sticky; top: 0; z-index: 2;
+  /* The sheet's own background, not the page's — this sticks inside
+     .settings-sheet, which is --bg-elev. */
+  background: var(--bg-elev);
+  padding: 6px 0 4px;
+}
+#pitchfork-list.pf-grouped > .pf-genre-head:first-child { margin-top: 2px; }
+.pf-genre-count {
+  font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  color: var(--muted); text-transform: none;
+}
 .pf-card {
   background: none; border: none; padding: 0; margin: 0;
   cursor: pointer; text-align: left; color: var(--text); font-family: inherit;

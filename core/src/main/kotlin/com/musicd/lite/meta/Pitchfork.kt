@@ -34,7 +34,13 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
         val cover: String?,
         val score: Double?,
         val isBestNewMusic: Boolean,
-        val date: String?
+        val date: String?,
+        /**
+         * Pitchfork's own genres for this review, in its order and without
+         * repeats — it lists two or three for some records, and occasionally
+         * the same one twice.
+         */
+        val genres: List<String> = emptyList()
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("url", url)
@@ -44,6 +50,11 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
             .put("score", score ?: JSONObject.NULL)
             .put("isBestNewMusic", isBestNewMusic)
             .put("date", date ?: JSONObject.NULL)
+            .put("genres", JSONArray().also { a -> genres.forEach { a.put(it) } })
+            // A search, not the album — see StreamingLinks for why that is the
+            // most that can honestly be offered from two strings.
+            .put("qobuz", StreamingLinks.qobuz(artist, album) ?: JSONObject.NULL)
+            .put("tidal", StreamingLinks.tidal(artist, album) ?: JSONObject.NULL)
     }
 
     private val gate = RateGate(INTERVAL_MS)
@@ -184,7 +195,8 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
                                 score = score,
                                 isBestNewMusic = rating.optBoolean("isBestNewMusic") ||
                                     rating.optBoolean("isBestNewReissue"),
-                                date = node.str("pubDate").takeIf { it.isNotEmpty() }
+                                date = node.str("pubDate").takeIf { it.isNotEmpty() },
+                                genres = genresOf(node)
                             )
                         }
                     }
@@ -195,6 +207,23 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
             }
         }
         return out
+    }
+
+    /**
+     * Pitchfork's genres for one review, from `rubric`.
+     *
+     * A LinkedHashSet because the order is Pitchfork's own — the first is the
+     * one it leads with — and because a handful of reviews list the same genre
+     * twice, which would otherwise put the record in that section twice.
+     */
+    private fun genresOf(node: JSONObject): List<String> {
+        val rubric = node.optJSONArray("rubric") ?: return emptyList()
+        val out = LinkedHashSet<String>()
+        for (i in 0 until rubric.length()) {
+            val name = rubric.optJSONObject(i)?.str("name")?.trim().orEmpty()
+            if (name.isNotEmpty()) out += name
+        }
+        return out.toList()
     }
 
     /**
