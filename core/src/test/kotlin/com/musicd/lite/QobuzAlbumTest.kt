@@ -139,4 +139,50 @@ class QobuzAlbumTest {
     fun theDeepLinkPointsAtTheHostTheAppClaims() {
         assertEquals("https://open.qobuz.com/album/", QobuzAlbum.OPEN)
     }
+
+    // ------------------------------------------------- the app's own scheme
+
+    /**
+     * open.qobuz.com's own page does not use its https link when it detects a
+     * phone — it goes to qobuzapp://album/<id>. That is the app's front door,
+     * and the https link is the web fallback around it.
+     */
+    @Test
+    fun anAlbumLinkAlsoHasTheAppsOwnScheme() {
+        assertEquals(
+            "qobuzapp://album/0724384559953",
+            QobuzAlbum.appUri("https://open.qobuz.com/album/0724384559953")
+        )
+        assertEquals(
+            "qobuzapp://album/xx4tt0fxk187e",
+            QobuzAlbum.appUri("https://open.qobuz.com/album/xx4tt0fxk187e")
+        )
+    }
+
+    /**
+     * THE ONE THAT MATTERS. What comes back from here is handed to
+     * startActivity, so it may only ever be built out of an id this app
+     * resolved for itself. Another host, another path, a second path segment,
+     * or anything that could carry an instruction of its own — a query, a
+     * fragment, an @ — is not a Qobuz album link and gets no scheme.
+     */
+    @Test
+    fun nothingButOurOwnAlbumLinkGetsTurnedIntoAnIntent() {
+        for (bad in listOf(
+            null,
+            "",
+            "https://open.qobuz.com/album/",
+            "https://open.qobuz.com/artist/36819",
+            "https://open.qobuz.com/album/123/extra",
+            "https://open.qobuz.com/album/123?x=1",
+            "https://open.qobuz.com/album/123#Intent;package=com.example;end",
+            "https://evil.example/album/123",
+            "https://open.qobuz.com.evil.example/album/123",
+            "http://open.qobuz.com/album/123",
+            "https://www.qobuz.com/us-en/album/mezzanine-massive-attack/0724384559953",
+            "https://tidal.com/search?q=x"
+        )) {
+            assertNull("\"$bad\" must not become an app link", QobuzAlbum.appUri(bad))
+        }
+    }
 }
