@@ -64,7 +64,9 @@ class RemoteApiTest {
         private val files = mapOf(
             "/index.html" to ("<!doctype html><title>MusicD</title>" to "text/html"),
             "/app.js" to ("console.log('ui');" to "application/javascript"),
-            "/display.html" to ("<!doctype html><title>Wall</title>" to "text/html")
+            "/display.html" to ("<!doctype html><title>Wall</title>" to "text/html"),
+            "/dial.html" to ("<!doctype html><title>Dial</title>" to "text/html"),
+            "/dial.js" to ("console.log('dial');" to "application/javascript")
         )
 
         override fun read(path: String): Pair<ByteArray, String>? =
@@ -166,6 +168,25 @@ class RemoteApiTest {
         // just another unknown path.
         assertTrue(get("/library/albums").second.contains("MusicD"))
         assertTrue(get("/display").second.contains("MusicD"))
+    }
+
+    /**
+     * THE ONE THAT MATTERS. Every unknown path falls through to the
+     * single-page app, and that is a page which WORKS — so a /dial that was
+     * not routed would show the remote instead, look like a working app, and
+     * simply never be the dial. Nothing would appear broken.
+     */
+    @Test
+    fun theDialIsItsOwnPageAndNotTheAppAgain() {
+        for (path in listOf("/dial", "/dial/")) {
+            val (code, text) = get(path)
+            assertEquals(200, code)
+            assertTrue("$path served the app, not the dial: $text", text.contains("Dial"))
+        }
+        assertEquals(200, get("/dial.js").first)
+        // Still true of everything else, which is what makes the case above
+        // invisible without a test.
+        assertTrue(get("/dialogue").second.contains("MusicD"))
     }
 
     @Test
@@ -590,6 +611,29 @@ class RemoteApiTest {
             listOf("control:z1:playpause", "seek:z1:absolute:90", "volume:o1:absolute:-20.0", "pauseall"),
             core.calls
         )
+    }
+
+    /**
+     * THE ONE THAT MATTERS. The page has always sent {"mute": true} with no
+     * value, and this route checked for a value before it looked at anything
+     * else — so the mute button answered 400 and did nothing, in the app and
+     * on every LAN device. The dial has a mute tap too, which is how it
+     * surfaced.
+     */
+    @Test
+    fun muteCarriesNoValueAndIsStillAllowedThrough() {
+        assertEquals(200, post("/api/volume", """{"zone_or_output_id":"z1","mute":true}""").first)
+        assertEquals(200, post("/api/volume", """{"zone_or_output_id":"z1","mute":false}""").first)
+        assertEquals(listOf("mute:o1:mute", "mute:o1:unmute"), core.calls)
+    }
+
+    /** A request that is neither a mute nor a value is still a bad request. */
+    @Test
+    fun aVolumeRequestWithNothingToDoIsRefused() {
+        val (code, text) = post("/api/volume", """{"zone_or_output_id":"z1"}""")
+        assertEquals(400, code)
+        assertTrue(JSONObject(text).getString("error").contains("value is required"))
+        assertTrue(core.calls.isEmpty())
     }
 
     @Test

@@ -120,7 +120,18 @@ class RemoteApi(
         // still opens it. /display used to be its own page; the wall display is
         // not in this build, so that path falls through to the app like any
         // other unknown one.
-        val wanted = if (path == "/" || path.isEmpty()) "/index.html" else path
+        //
+        // /dial is the exception, and it has to be one: without this it would
+        // fall through to the app like every other unknown path, which is a
+        // page that works — so nothing would look broken and the dial would
+        // simply never appear. It is the same gate as everything else; static
+        // files are only reached once MusicdLite.guard() has allowed the
+        // request, so this adds a page, not a way in.
+        val wanted = when {
+            path == "/" || path.isEmpty() -> "/index.html"
+            path == "/dial" || path == "/dial/" -> "/dial.html"
+            else -> path
+        }
         val hit = assets.read(wanted) ?: assets.read("/index.html")
         ?: return Response.text(404, "The bundled front-end is missing from this build")
 
@@ -473,9 +484,6 @@ class RemoteApi(
      */
     private fun volume(request: Request): Response {
         val body = Json.body(request)
-        val how = body.str("how").ifEmpty { "absolute" }
-        val value = body.optDouble("value", Double.NaN)
-        if (value.isNaN()) return Json.error(400, "value is required")
 
         val outputId = body.str("output_id").takeIf { it.isNotEmpty() }
         val targets = if (outputId != null) {
@@ -486,6 +494,24 @@ class RemoteApi(
             zone.volumeOutputs
         }
         if (targets.isEmpty()) return Json.error(400, "that zone has no volume control")
+
+        // Mute carries no value, and this route used to demand one before it
+        // read anything else. The page's own mute button has been sending
+        // {"mute": true} and getting back "value is required" for its trouble,
+        // so muting from the front-end has never worked. Answered first, and
+        // before the value check, for exactly that reason.
+        if (body.has("mute")) {
+            val how = if (body.optBoolean("mute", false)) "mute" else "unmute"
+            for (out in targets) {
+                if (out.volume == null) continue
+                roon.mute(out.outputId, how)
+            }
+            return Json.ok()
+        }
+
+        val how = body.str("how").ifEmpty { "absolute" }
+        val value = body.optDouble("value", Double.NaN)
+        if (value.isNaN()) return Json.error(400, "value is required")
 
         for (out in targets) {
             val vol = out.volume ?: continue
