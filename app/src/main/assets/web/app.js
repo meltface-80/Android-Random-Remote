@@ -1714,10 +1714,8 @@
       // End of library = a short (or empty) page; no separate total bookkeeping.
       libWall.done = albums.length < LIB_PAGE;
       libWall.total = (j && typeof j.total === "number") ? j.total : libWall.offset;
-      if (firstPage) {
-        setCountText("Library · " + libWall.total.toLocaleString() +
-                     (libFocusCount() ? " matching" : "") + (libWall.total === 1 ? " album" : " albums"));
-        if (!albums.length) setBanner("Nothing matches this focus — try clearing a filter.", false);
+      if (firstPage && !albums.length) {
+        setBanner("Nothing matches this focus — try clearing a filter.", false);
       }
     } catch (e) {
       if (!libraryWallActive || mySeq !== libWall.seq) return;
@@ -4148,6 +4146,12 @@
 
   async function showLibraryWall() {
     const m = enterFullWall("Library");
+    // The library gets the same search as Home — same box, same results — and
+    // no header text. enterFullWall sets a breadcrumb, which a genre or label
+    // wall needs to say WHICH wall you are on; "Library" over the library is
+    // the one place it says nothing you did not already know.
+    setCountText("");
+    setTopbarNav(true, false, true);
     libraryWallActive = true;
     renderLibraryControls();
     libWall.seq++;

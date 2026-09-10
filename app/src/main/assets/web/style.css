@@ -206,18 +206,31 @@ button { font-family: inherit; }
 /* ------------------------------------------------------------------ */
 /*  Top bar                                                            */
 /* ------------------------------------------------------------------ */
+/* THE CHROME FLOATS. The bar used to be a translucent strip in the flex
+   column with a border under it, which drew a line across every screen. It is
+   now lifted out of the flow and made invisible: what you see are the round
+   buttons themselves, sitting over the content, and the page scrolling
+   underneath them — the same treatment the album panel gives its close and
+   share buttons.
+
+   Two things follow from that and neither is optional. The bar still spans the
+   full width, so it would swallow every scroll and tap in the empty space
+   between the buttons: pointer-events are off for the bar and back on for its
+   controls. And <main> now starts at the top of the screen, so it carries a
+   top padding the height of the bar — content scrolls UNDER the buttons, it
+   does not begin under them. */
 .topbar {
-  position: relative; z-index: 20;
-  flex: 0 0 auto;
+  position: absolute; top: 0; left: 0; right: 0;
+  z-index: 20;
   display: flex; flex-direction: column;
   gap: 10px;
   padding: 12px 14px;
   padding-top: calc(12px + env(safe-area-inset-top));
-  background: var(--bg-translucent);
-  backdrop-filter: saturate(160%) blur(14px);
-  -webkit-backdrop-filter: saturate(160%) blur(14px);
-  border-bottom: 1px solid var(--border);
+  background: none;
+  border-bottom: 0;
+  pointer-events: none;
 }
+.topbar-row > * { pointer-events: auto; }
 .topbar-row {
   display: flex; align-items: center; justify-content: flex-start;
   gap: 10px;
@@ -513,6 +526,8 @@ main {
   overflow-y: auto; -webkit-overflow-scrolling: touch;
   overscroll-behavior: none;         /* no bounce, no pull-to-refresh on any device */
   padding: 14px;
+  /* Room for the floating bar: 12 + 40 (--ctl-h) + 12, plus the notch. */
+  padding-top: calc(64px + env(safe-area-inset-top));
 }
 @media (min-width: 768px) { main { padding: 18px; } }
 @media (min-width: 1200px) { main { padding: 22px; } }
