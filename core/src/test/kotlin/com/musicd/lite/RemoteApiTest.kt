@@ -1,5 +1,6 @@
 package com.musicd.lite
 
+import com.musicd.lite.api.Settings
 import com.musicd.lite.api.StaticAssets
 import com.musicd.lite.roon.Zone
 import com.musicd.lite.store.MemoryStore
@@ -168,6 +169,41 @@ class RemoteApiTest {
         // just another unknown path.
         assertTrue(get("/library/albums").second.contains("MusicD"))
         assertTrue(get("/display").second.contains("MusicD"))
+    }
+
+    @Test
+    fun theArtistsEndpointPagesAndSorts() {
+        val az = json("/api/artists?sort=az&limit=3")
+        assertEquals("az", az.getString("sort"))
+        assertTrue(az.getInt("total") > 0)
+        val first = az.getJSONArray("artists")
+        assertTrue(first.length() in 1..3)
+        assertTrue(first.getJSONObject(0).has("name"))
+        assertTrue(first.getJSONObject(0).has("albums"))
+        assertTrue(first.getJSONObject(0).has("image_key"))
+
+        // Z-A is the same set read backwards, so the first name one way is the
+        // last name the other.
+        val za = json("/api/artists?sort=za").getJSONArray("artists")
+        val all = json("/api/artists?sort=az&limit=500").getJSONArray("artists")
+        assertEquals(all.getJSONObject(0).getString("name"),
+                     za.getJSONObject(za.length() - 1).getString("name"))
+
+        // A page is a window on that order, not a fresh answer. Offset 1 rather
+        // than a bigger number because the scripted Core's shelf is small.
+        val second = json("/api/artists?sort=az&limit=2&offset=1").getJSONArray("artists")
+        assertEquals(all.getJSONObject(1).getString("name"), second.getJSONObject(0).getString("name"))
+    }
+
+    /** The reshuffle changes the seed, and the seed is what changes the wall. */
+    @Test
+    fun theRandomSortFollowsItsSeed() {
+        fun order(seed: Int): List<String> {
+            val a = json("/api/artists?sort=random&seed=$seed&limit=500").getJSONArray("artists")
+            return (0 until a.length()).map { a.getJSONObject(it).getString("name") }
+        }
+        assertEquals(order(4), order(4))
+        assertNotEquals(order(4), order(5))
     }
 
     /**
@@ -940,7 +976,7 @@ class RemoteApiTest {
         val rows = json("/api/settings/home-rows").getJSONArray("rows")
         val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }
         assertEquals(
-            listOf("aotd", "history", "picks", "random", "library", "genres"),
+            listOf("aotd", "history", "picks", "random", "artists", "library", "genres"),
             ids
         )
         // The settings screen renders its list from this response, so a row
@@ -952,7 +988,7 @@ class RemoteApiTest {
         val (code, _) = post("/api/settings/home-rows", """{"rows":[{"id":"random","on":false}]}""")
         assertEquals(200, code)
         val repaired = json("/api/settings/home-rows").getJSONArray("rows")
-        assertEquals(6, repaired.length())
+        assertEquals(Settings.HOME_ROW_IDS.size, repaired.length())
         assertEquals("random", repaired.getJSONObject(0).getString("id"))
         assertFalse(repaired.getJSONObject(0).getBoolean("on"))
     }

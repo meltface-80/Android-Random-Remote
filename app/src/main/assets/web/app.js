@@ -329,6 +329,7 @@
   const homeSections = document.getElementById("home-sections");
   const homeAotd = document.getElementById("home-aotd");
   const homeRandom   = document.getElementById("home-random");
+  const homeArtists  = document.getElementById("home-artists");
   const homeLibrary  = document.getElementById("home-library");
   const homeLotw     = document.getElementById("home-lotw");
   const homePicks    = document.getElementById("home-picks");
@@ -367,6 +368,8 @@
       load: () => { loadHomeSmartPicks(); }, isFresh: () => homePicksDay === localDayKey() },
     { id: "random",   title: "Random albums",
       load: () => { loadHomeRandom(); }, isFresh: () => rowsTtlFresh() },
+    { id: "artists",  title: "Artists",
+      load: () => { loadHomeArtists(); }, isFresh: () => rowsTtlFresh() },
     { id: "library",  title: "Library",
       load: () => { loadHomeLibrary(); }, isFresh: () => homeLibraryLoaded },
     { id: "genres",   title: "Browse by genre",
@@ -454,6 +457,7 @@
   // Show the Home landing (hide the wall). The wall loads lazily when entered.
   function showHome() {
     { const c = document.getElementById("library-controls"); if (c) c.classList.add("hidden"); }
+    leaveArtistsWall();
     libraryWallActive = false;
     leavePlaylistScreens();
     if (window.__clearSearchIfActive) window.__clearSearchIfActive();  // drop stale search results
@@ -651,6 +655,93 @@
       if (albums.length) saveHomeCache({ random: albums, randomAt: Date.now() });
     } catch (e) {
       if (!rowHasContent(homeRandom)) homeRandom.innerHTML = '<div class="home-carousel-empty">Couldn’t load.</div>';
+      homeRowsLoadedAt = 0;   // retry on the next Home visit
+    }
+  }
+
+  // --------------------------------------------------------------- artists
+  //
+  // An artist is not a row in anything — it is derived from the albums, on the
+  // server, from the credits already on them (see Artists in :core). So the
+  // tile's picture is one of that artist's own covers rather than a portrait:
+  // it is already in the art cache, it costs no lookup, and it is a picture the
+  // library can always produce. fanart.tv portraits are a separate question and
+  // deliberately not this change.
+
+  function artistTile(a) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "artist-tile";
+    btn.setAttribute("aria-label",
+      `${a.name}, ${a.albums} album${a.albums === 1 ? "" : "s"}`);
+
+    const art = document.createElement("div");
+    art.className = "artist-tile-art";
+    if (a.image_key) {
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.alt = "";
+      img.src = `/api/image/${encodeURIComponent(a.image_key)}?size=${TILE_IMG_SIZE}`;
+      // A dead key leaves the initial behind rather than the broken-image glyph.
+      img.onerror = () => img.remove();
+      art.appendChild(img);
+    }
+    const initial = document.createElement("span");
+    initial.className = "artist-tile-initial";
+    initial.setAttribute("aria-hidden", "true");
+    initial.textContent = (a.name || "?").trim().charAt(0).toUpperCase();
+    art.appendChild(initial);
+    btn.appendChild(art);
+
+    const name = document.createElement("div");
+    name.className = "artist-tile-name";
+    name.textContent = a.name;
+    btn.appendChild(name);
+
+    const sub = document.createElement("div");
+    sub.className = "artist-tile-sub";
+    sub.textContent = a.albums + (a.albums === 1 ? " album" : " albums");
+    btn.appendChild(sub);
+
+    btn.addEventListener("click", () => {
+      if (window.__showArtistAlbums) window.__showArtistAlbums(a.name);
+    });
+    return btn;
+  }
+
+  function renderHomeArtists(artists) {
+    if (!homeArtists) return;
+    artists = artists || [];
+    homeArtists.innerHTML = "";
+    if (!artists.length) {
+      homeArtists.innerHTML = '<div class="home-carousel-empty">No artists.</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const a of artists) frag.appendChild(artistTile(a));
+    homeArtists.appendChild(frag);
+  }
+
+  // A different handful each visit, which is the point of the row: a fixed
+  // twenty would be twenty artists you stop seeing. The seed is minted here and
+  // thrown away — only the WALL keeps one, where it has to survive paging.
+  async function loadHomeArtists() {
+    if (!homeArtists) return;
+    if (!rowHasContent(homeArtists)) {
+      homeArtists.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
+    }
+    try {
+      const seed = (Date.now() / 1000) | 0;
+      const r = await fetch("/api/artists?sort=random&limit=20&seed=" + seed);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      const artists = (j && j.artists) || [];
+      renderHomeArtists(artists);
+      if (artists.length) saveHomeCache({ artists });
+    } catch (e) {
+      if (!rowHasContent(homeArtists)) {
+        homeArtists.innerHTML = '<div class="home-carousel-empty">Couldn\u2019t load.</div>';
+      }
       homeRowsLoadedAt = 0;   // retry on the next Home visit
     }
   }
@@ -1160,6 +1251,7 @@
   // active flags are reset here; the caller sets its own to true afterwards.
   function enterFullWall(title) {
     libraryWallActive = false;
+    leaveArtistsWall();
     // Cleared here as well as by the caller: every other wall's entry point must
     // orphan an in-flight playlist fetch, or its response paints into this one.
     leavePlaylistScreens();
@@ -4026,6 +4118,168 @@
   }
   window.__openDevicePowerSheet = openDevicePowerSheet;
 
+  // ---------------------------------------------------- the artists wall
+  //
+  // Three columns of artists, paged, with one control: the sort. It shares the
+  // album grid and the wall chrome — same back chevron, same scroll container —
+  // and marks the grid so the CSS can lay it out in three rather than the
+  // album wall's own count.
+
+  const ARTIST_SORTS = [
+    { id: "az",     label: "A \u2013 Z" },
+    { id: "za",     label: "Z \u2013 A" },
+    { id: "random", label: "Random" },
+  ];
+  const ARTISTS_PAGE = 120;
+  let artistsWallActive = false;
+  const artistsWall = { sort: "az", seed: 1, offset: 0, done: false, loading: false, seq: 0 };
+
+  function artistSortLabel() {
+    const o = ARTIST_SORTS.find(x => x.id === artistsWall.sort);
+    return o ? o.label : ARTIST_SORTS[0].label;
+  }
+
+  function renderArtistsControls() {
+    let bar = document.getElementById("artists-controls");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "artists-controls";
+      bar.className = "library-controls";
+      grid.parentNode.insertBefore(bar, grid);
+    }
+    bar.innerHTML = "";
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "lib-ctl lib-ctl-sort";
+    const text = document.createElement("span");
+    text.className = "lib-ctl-text";
+    text.textContent = artistSortLabel();
+    b.appendChild(text);
+    // Same parts as the album wall's sort button, so the two rows read alike:
+    // the glyph slot carries the reshuffle symbol for Random (which re-rolls
+    // when tapped again) and nothing for the alphabetical sorts, which have no
+    // direction to choose.
+    const arrow = document.createElement("span");
+    arrow.className = "lib-ctl-arrow";
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.textContent = artistsWall.sort === "random" ? "\u27f3" : "";
+    b.appendChild(arrow);
+
+    const caret = document.createElement("span");
+    caret.className = "lib-ctl-caret";
+    caret.setAttribute("aria-hidden", "true");
+    caret.textContent = "\u2304";
+    b.appendChild(caret);
+    b.setAttribute("aria-label", "Sort artists \u2014 " + artistSortLabel());
+    b.addEventListener("click", openArtistSortSheet);
+    bar.appendChild(b);
+    bar.classList.toggle("hidden", !artistsWallActive);
+  }
+
+  function openArtistSortSheet() {
+    openLibSheet("Sort by", (body, close) => {
+      for (const opt of ARTIST_SORTS) {
+        const on = artistsWall.sort === opt.id;
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "lib-sort-row" + (on ? " is-on" : "");
+        const label = document.createElement("span");
+        label.className = "lib-sort-label";
+        label.textContent = opt.label;
+        row.appendChild(label);
+        row.setAttribute("aria-label", opt.label + (on ? " \u2014 on" : ""));
+        row.addEventListener("click", () => {
+          // Re-tapping Random re-rolls, which is the only useful thing a
+          // second tap on the current sort can do — the same contract the
+          // album wall's Random has.
+          if (on && opt.id !== "random") { close(); return; }
+          artistsWall.sort = opt.id;
+          if (opt.id === "random") artistsWall.seed = (Date.now() / 1000) | 0;
+          close();
+          loadArtistsWall();
+        });
+        body.appendChild(row);
+      }
+    });
+  }
+
+  async function fetchArtistsPage(mySeq, firstPage) {
+    if (artistsWall.loading || artistsWall.done) return;
+    artistsWall.loading = true;
+    try {
+      const qs = new URLSearchParams({
+        sort: artistsWall.sort,
+        seed: String(artistsWall.seed),
+        offset: String(artistsWall.offset),
+        limit: String(ARTISTS_PAGE),
+      });
+      const r = await fetch("/api/artists?" + qs, { cache: "no-store" });
+      if (!artistsWallActive || mySeq !== artistsWall.seq) return;
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      if (!artistsWallActive || mySeq !== artistsWall.seq) return;
+      const list = (j && j.artists) || [];
+      if (firstPage) grid.innerHTML = "";
+      const frag = document.createDocumentFragment();
+      for (const a of list) frag.appendChild(artistTile(a));
+      grid.appendChild(frag);
+      artistsWall.offset += list.length;
+      artistsWall.done = list.length < ARTISTS_PAGE;
+      if (firstPage && !list.length) {
+        grid.innerHTML = '<div class="artist-view-empty">No artists yet \u2014 the library is still building.</div>';
+      }
+    } catch (e) {
+      if (!artistsWallActive || mySeq !== artistsWall.seq) return;
+      if (firstPage) { grid.innerHTML = ""; setBanner("Couldn\u2019t load: " + e.message, true); }
+    } finally {
+      artistsWall.loading = false;
+    }
+  }
+
+  function loadArtistsWall() {
+    artistsWall.seq++;
+    artistsWall.offset = 0;
+    artistsWall.done = false;
+    artistsWall.loading = false;
+    renderArtistsControls();
+    grid.innerHTML = "";
+    fetchArtistsPage(artistsWall.seq, true);
+  }
+
+  function showArtistsWall() {
+    enterFullWall("Artists");
+    artistsWallActive = true;
+    grid.classList.add("artists-grid");
+    setCountText("");
+    setTopbarNav(true, false, true);   // Back + the same search as everywhere
+    loadArtistsWall();
+  }
+
+  // Every screen that leaves this one has to say so, or the grid keeps its
+  // three-column class and the sort row stays over an album wall. Returns
+  // whether it WAS the screen, which is what the artist view parks and puts
+  // back — it borrows this same grid, so without the park its albums land in
+  // three columns under an Artists sort row, and the scroll handler below goes
+  // on appending artist tiles underneath them.
+  function leaveArtistsWall() {
+    const was = artistsWallActive;
+    if (!was) return false;
+    artistsWallActive = false;
+    grid.classList.remove("artists-grid");
+    const bar = document.getElementById("artists-controls");
+    if (bar) bar.classList.add("hidden");
+    return was;
+  }
+  window.__leaveArtistsWall = leaveArtistsWall;
+  window.__restoreArtistsWall = (was) => {
+    artistsWallActive = !!was;
+    if (!was) return;
+    grid.classList.add("artists-grid");
+    const bar = document.getElementById("artists-controls");
+    if (bar) bar.classList.remove("hidden");
+  };
+  window.__artistsWallSeq = () => artistsWall.seq;
+
   async function showLibraryWall() {
     const m = enterFullWall("Library");
     // The library gets the same search as Home — same box, same results — and
@@ -4060,10 +4314,14 @@
     const mainEl = document.querySelector("main");
     if (mainEl) {
       mainEl.addEventListener("scroll", () => {
-        if (!libraryWallActive || labelsActive || libWall.loading || libWall.done) return;
-        if (mainEl.scrollTop + mainEl.clientHeight >= mainEl.scrollHeight - 600) {
-          fetchLibraryPage(libWall.seq, false);
+        const near = mainEl.scrollTop + mainEl.clientHeight >= mainEl.scrollHeight - 600;
+        if (!near) return;
+        if (artistsWallActive) {
+          if (!artistsWall.loading && !artistsWall.done) fetchArtistsPage(artistsWall.seq, false);
+          return;
         }
+        if (!libraryWallActive || labelsActive || libWall.loading || libWall.done) return;
+        fetchLibraryPage(libWall.seq, false);
       }, { passive: true });
     }
   }
@@ -4083,6 +4341,7 @@
   // Label of the week → label view. Album of the day has no wall to open.
   {
     wireSectionHeader("home-random-title", () => { if (window.__applyFilter) window.__applyFilter(null); });
+    wireSectionHeader("home-artists-title", showArtistsWall);
     wireSectionHeader("home-library-title", showLibraryWall);
     wireSectionHeader("home-lotw-title", () => {
       const name = homeLotw && homeLotw.dataset.label;
@@ -4210,6 +4469,7 @@
     let painted = false;
     if (c.aotd && homeAotd) { renderHomeAotd(c.aotd.aotd); painted = rowHasContent(homeAotd) || painted; }
     if (c.random   && homeRandom)   { renderHomeRandom(c.random);                              painted = rowHasContent(homeRandom)   || painted; }
+    if (c.artists  && homeArtists)  { renderHomeArtists(c.artists);                            painted = rowHasContent(homeArtists)  || painted; }
     if (c.library  && homeLibrary)  { renderHomeLibrary(c.library); }
     if (c.lotw     && homeLotw)     { renderHomeLotw(c.lotw.label, c.lotw.albums); }
     if (c.history  && homeHistory)  { renderHomeHistory(c.history); }
@@ -10080,6 +10340,10 @@
       if (window.__restoreLibraryWall && saved.libraryWallSeq === libSeqNow) {
         window.__restoreLibraryWall(saved.libraryWallWasActive);
       }
+      const artSeqNow = window.__artistsWallSeq ? window.__artistsWallSeq() : 0;
+      if (window.__restoreArtistsWall && saved.artistsWallSeq === artSeqNow) {
+        window.__restoreArtistsWall(saved.artistsWallWasActive);
+      }
       if (window.__unparkLabels) window.__unparkLabels(saved.labels);
       // Land back where the user was, not at the top of the wall.
       const mainEl = document.querySelector("main");
@@ -10104,6 +10368,8 @@
     // Back) — park the library wall's infinite scroll so it can't append into
     // this view, remembering whether it was live so Back can re-arm it.
     const libraryWallWasActive = window.__leaveLibraryWall ? !!window.__leaveLibraryWall() : false;
+    const artistsWallWasActive = window.__leaveArtistsWall ? !!window.__leaveArtistsWall() : false;
+    const artistsWallSeq = window.__artistsWallSeq ? window.__artistsWallSeq() : 0;
     const libraryWallSeq = window.__libraryWallSeq ? window.__libraryWallSeq() : 0;
     // Same for the labels browser: park its chrome (bar, sheets, select modes)
     // but keep the mode/label it was showing so Back restores it whole.
@@ -10131,6 +10397,8 @@
       countNodes,
       libraryWallWasActive,
       libraryWallSeq,
+      artistsWallWasActive,
+      artistsWallSeq,
       labels,
       scrollTop:          mainEl ? mainEl.scrollTop : 0,
       gridHidden:         grid.classList.contains("hidden"),

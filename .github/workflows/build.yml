@@ -45,6 +45,14 @@ jobs:
           npm install --no-save --silent eslint
           npx eslint --config tools/eslint.config.mjs app/src/main/assets/web/*.js
 
+      # CSS has no errors to report: a rule the browser cannot parse is dropped
+      # in silence. 0.4.34 deleted a rule and took the "*/" of the comment
+      # above it, and the runaway comment swallowed .lib-ctl whole — so the
+      # Sort control shipped twice as the user-agent default, a white pill on
+      # a dark screen. Nothing else in this repo reads the stylesheet.
+      - name: Check the stylesheet parses as intended
+        run: node tools/check-css.js
+
       # The share card is a canvas drawing with no browser in CI, so what is
       # checked is the pair of promises that would break quietly: the blurb
       # stays readable on a white sleeve, and it is never truncated.
