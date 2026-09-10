@@ -369,7 +369,15 @@
     { id: "random",   title: "Random albums",
       load: () => { loadHomeRandom(); }, isFresh: () => rowsTtlFresh() },
     { id: "artists",  title: "Artists",
-      load: () => { loadHomeArtists(); }, isFresh: () => rowsTtlFresh() },
+      // It rides the daily-pick/random clock, but "fresh" has to mean THIS row
+      // holds something. rowsTtlFresh() asks whether those two rows have tiles,
+      // and on the build that introduced this one they always did — so a reopen
+      // inside the five minutes declared a row that had NEVER loaded fresh and
+      // left it empty, with not even a "Loading…" to say so. Reported from a
+      // phone, reproduced by reopening with a cache written before this row
+      // existed.
+      load: () => { loadHomeArtists(); },
+      isFresh: () => rowsTtlFresh() && rowHasContent(homeArtists) },
     { id: "library",  title: "Library",
       load: () => { loadHomeLibrary(); }, isFresh: () => homeLibraryLoaded },
     { id: "genres",   title: "Browse by genre",
@@ -394,7 +402,8 @@
     return id === "history" || id === "picks" || id === "lotw";
   }
   function rowHasAnyContent(sectionEl) {
-    return !!(sectionEl && sectionEl.querySelector(".album, .pick-card, .home-genre-tile"));
+    return !!(sectionEl &&
+      sectionEl.querySelector(".album, .pick-card, .home-genre-tile, .artist-tile"));
   }
 
   function applyHomeLayout() {
@@ -573,7 +582,10 @@
   // Smart Picks tiles are .pick-card, not .album — they carry no offset and are
   // never ordinary album tiles — so that class has to be named here or a
   // hydrated picks row reads as empty and gets blanked.
-  const rowHasContent = (el) => !!(el && el.querySelector(".album, .home-genre-card, .pick-card"));
+  // Artist tiles are .artist-tile and are not albums either — the same trap the
+  // paragraph above describes, sprung a second time by the Artists row.
+  const rowHasContent = (el) =>
+    !!(el && el.querySelector(".album, .home-genre-card, .pick-card, .artist-tile"));
 
   // Build a Home tile that always opens full-library (filter: null) so its
   // offset resolves even when a genre filter was last active.
