@@ -3324,9 +3324,7 @@ body.show-quality .album-quality { display: block; }
 }
 .library-controls .lib-ctl-sort { margin-left: auto; }
 /*  …except while the filter field is open, where the free space belongs to
-    the input rather than to the margin. An auto margin wins over flex-grow,
-    so it has to be released or the field opens at zero width.  */
-.library-controls.is-filtering .lib-ctl-sort { margin-left: 0; }
+    the input rather than to the margin. An auto margin wins over flex-grow{ margin-left: 0; }
 .library-controls.hidden { display: none; }
 .lib-ctl {
   display: flex; align-items: center; gap: 6px;
@@ -3343,14 +3341,9 @@ body.show-quality .album-quality { display: block; }
 .lib-ctl-text {
   min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* The chevron reads as "there is a screen behind this", matching
-   .home-section-link's treatment. */
-.lib-ctl-chevron { font-size: 19px; line-height: 1; color: var(--text-faint); }
-.lib-ctl-focus.is-active,
-.lib-ctl-focus.is-active .lib-ctl-chevron { color: var(--accent-text); }
+/* The chevron reads as "there is a screen behind this"{ font-size: 19px; line-height: 1; color: var(--text-faint); }
 /* How many filters are on. A count, not the filter names: two facets already
-   wrap onto a second line on a phone, and the sheet is where the detail lives. */
-.lib-ctl-badge {
+   wrap onto a second line on a phone{
   flex: 0 0 auto;
   min-width: 18px; padding: 0 5px; border-radius: 999px;
   background: var(--accent); color: var(--on-accent);
@@ -3699,33 +3692,7 @@ body.show-quality .album-quality { display: block; }
 /*  Library wall: the funnel text filter.
     Sits left of Focus and Sort in #library-controls, and expands in place
     rather than opening a sheet — the point is to type and watch the wall
-    narrow, which a sheet covering the wall would defeat.  */
-.lib-filter-wrap { display: flex; align-items: center; flex: 0 0 auto; }
-.library-controls.is-filtering .lib-filter-wrap { flex: 1 1 auto; min-width: 0; }
-.lib-filter-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: var(--tap-min); min-height: var(--tap-min);
-  background: none; border: 0; color: var(--text-dim);
-  cursor: pointer; padding: 0;
-}
-.lib-filter-btn.is-active { color: var(--accent-text); }
-.lib-filter-input {
-  flex: 1 1 auto; min-width: 0; width: 100%;
-  min-height: var(--ctl-h);
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--ctl-radius);
-  padding: 0 12px;
-  color: var(--text); font-size: 14px;
-  font-family: inherit;
-  -webkit-appearance: none; appearance: none;
-}
-.lib-filter-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.lib-filter-input::placeholder { color: var(--text-faint); }
+    narrow{ display: flex; align-items: center; flex: 0 0 auto; }
 
 /* ------------------------------------------------------------------ */
 /*  Network pane — an address to type and a code to copy               */
