@@ -525,7 +525,17 @@
   // they show Back but not Refresh.
   window.__setTopbarNav = setTopbarNav;
 
-  if (topbarBack)    topbarBack.addEventListener("click", showHome);
+  // The chevron is the one back control in the app now, so it has to mean
+  // "back from wherever you are" — the artist view used to carry its own
+  // "← Back" pill in the page, which scrolled under the floating hamburger and
+  // was a second style of the same button besides.
+  if (topbarBack) topbarBack.addEventListener("click", () => {
+    if (window.__artistViewActive && window.__artistViewActive()) {
+      window.__exitArtistView();
+      return;
+    }
+    showHome();
+  });
   if (topbarRefresh) topbarRefresh.addEventListener("click", () => loadRandom());
 
   // Home daily-pick/random rows are reused within this TTL instead of being
@@ -1272,7 +1282,13 @@
       const stale = saved.v !== LIB_VIEW_VERSION;
       const dirChangedMeaning = stale && LIB_V1_INVERTED_SORTS.indexOf(saved.sort) > -1;
       if (dirChangedMeaning) delete saved.dir;
-      libView = Object.assign(libView, saved, { v: LIB_VIEW_VERSION, prefix: "" });
+      libView = Object.assign(libView, saved, { v: LIB_VIEW_VERSION, prefix: "" },
+                              // The Focus button and the in-wall filter are
+                              // gone, so a facet or a `played` restriction left
+                              // in an older stored view would narrow the wall
+                              // with nothing on screen to say so and no way to
+                              // undo it. Sort, direction and seed survive.
+                              libEmptyFacets(), { played: "any" });
       if (dirChangedMeaning) libView.dir = libSortDefaultDir(libView.sort);
       // A blob is JSON, so it can be well-formed and still the wrong SHAPE —
       // a partial write or a synced/hand-edited value. Object.assign copies it
@@ -1315,22 +1331,6 @@
   // excluded ones, which are as much a filter as the included ones.
   // Only the facets the SERVER is currently publishing. With Labels off the
   // "Record label" facet is gone from the sheet, and counting a selection
-  // stored before the switch was flipped would show a filter the user can
-  // neither see nor clear.
-  // Seeded at boot from the Labels switch, not only when the Focus sheet is
-  // first opened. `/api/library/facets` is fetched on sheet open, so relying on
-  // it alone left the wall's "N matching albums" and the Focus badge counting a
-  // stored Record-label selection on every fresh load until the sheet had been
-  // opened once — which is exactly the invisible, unclearable filter this is
-  // meant to prevent.
-  let libAvailableFacets = LIB_FACET_IDS.slice();
-  window.__setLabelsFacetAvailable = (on) => {
-    libAvailableFacets = on ? LIB_FACET_IDS.slice()
-                            : LIB_FACET_IDS.filter(id => id !== "label");
-  };
-  const libFocusCount = () =>
-    libAvailableFacets.reduce((n, id) => n + (libView[id] || []).length, 0) +
-    (libView.played !== "any" ? 1 : 0);
   // Chip state, encoding Roon's tap-again-to-invert: a value prefixed with "!"
   // is EXCLUDED. Kept inside the value so the whole selection stays a plain
   // string array that saved playlists and the query string round-trip unchanged.
@@ -1765,7 +1765,6 @@
   // Whether the funnel's field is showing. Declared before renderLibraryControls
   // reads it: a `let` used above its declaration is a ReferenceError, which is
   // the v1.5.66 startup-crash class this project pre-flights for.
-  let libFilterOpen = false;
 
   function renderLibraryControls() {
     let bar = document.getElementById("library-controls");
@@ -1788,141 +1787,28 @@
     const refocus = act && bar.contains(act) && act.className
       ? (String(act.className).split(" ").find(c => c !== "lib-ctl" && c) || "lib-ctl")
       : null;
-    // Typing survives the rebuild applyLibView() does after every keystroke.
-    // `libFilterOpen` is the truth; the live node is only consulted for where
-    // the caret was.
-    const typing = bar.querySelector(".lib-filter-input");
-    const caret = typing ? typing.selectionStart : 0;
-
     bar.innerHTML = "";
-    // Roon's own order on this screen: Focus left, Sort right, then the
-    // magnifier that narrows the list. Matching it means the row reads the
-    // same way in both apps rather than being a third arrangement to learn.
-    bar.appendChild(buildLibFocusButton());
+    // Sort is the only control on this row now. Focus and the in-wall filter
+    // were removed at the owner's request — the chrome's own search covers
+    // finding a record, and neither of the other two was used.
     bar.appendChild(buildLibSortButton());
-    bar.appendChild(buildLibFilterControl(libFilterOpen));
     bar.classList.toggle("hidden", !libraryWallActive);
-    // Drives the layout: Sort's auto margin is released while the field is
-    // open so the input, not the margin, gets the row's free space.
-    bar.classList.toggle("is-filtering", libFilterOpen);
 
-    if (libFilterOpen) {
-      const again = bar.querySelector(".lib-filter-input");
-      if (again) {
-        again.focus();
-        try { again.setSelectionRange(caret, caret); }
-        catch (e) { /* type="search" refuses setSelectionRange on some engines */ }
-      }
-    } else if (refocus) {
+    if (refocus) {
       const again = bar.querySelector("." + refocus);
       if (again) again.focus();
     }
   }
 
-  // The funnel: a text filter that narrows the wall by the first letters of an
-  // album title OR an artist name.
+  // THE FOCUS BUTTON IS GONE, THE FOCUS SHEET IS NOT, and the difference
+  // matters. openLibFocusSheet is also the editor for Dynamic Playlists — a
+  // saved playlist IS a stored libView, and the sheet is where its facets are
+  // chosen. Removing the button removes the library wall's entry into it, as
+  // asked; removing the sheet would have taken Dynamic Playlists with it.
   //
-  // A user asked for an A-Z rail down the edge of the screen. That works only
-  // while the wall is sorted alphabetically, which is why it broke under the
-  // other sorts — a letter index means nothing when the order is by year or
-  // play count. Filtering is orthogonal to sorting, so this works under all of
-  // them, and it reaches artists as well as titles, which a rail cannot.
-  function buildLibFilterControl(open) {
-    const wrap = document.createElement("div");
-    wrap.className = "lib-filter-wrap";
-
-    if (!open) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "lib-filter-btn lib-ctl" + (libView.prefix ? " is-active" : "");
-      btn.setAttribute("aria-label", "Filter by name");
-      btn.setAttribute("aria-expanded", "false");
-      btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" ' +
-        'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
-        'aria-hidden="true"><circle cx="11" cy="11" r="7"/>' +
-        '<line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        libFilterOpen = true;
-        renderLibraryControls();
-      });
-      wrap.appendChild(btn);
-      return wrap;
-    }
-
-    const input = document.createElement("input");
-    input.type = "search";
-    input.className = "lib-filter-input";
-    input.value = libView.prefix || "";
-    input.placeholder = "Starts with…";
-    input.setAttribute("aria-label", "Filter albums and artists by first letters");
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    input.addEventListener("click", (e) => e.stopPropagation());
-    input.addEventListener("input", () => {
-      libView.prefix = input.value.trim();
-      applyLibView();
-    });
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeLibFilter();
-    });
-    wrap.appendChild(input);
-    return wrap;
-  }
-
-  // Tap away closes AND clears, the same contract the topbar search follows.
-  // A filter left applied behind a closed funnel is a wall that looks broken.
-  function closeLibFilter() {
-    if (!libFilterOpen) return;
-    libFilterOpen = false;
-    const had = !!libView.prefix;
-    libView.prefix = "";
-    if (had) applyLibView();
-    else renderLibraryControls();
-  }
-  document.addEventListener("click", (e) => {
-    if (!libFilterOpen) return;
-    if (e.target.closest && e.target.closest(".lib-filter-wrap")) return;
-    closeLibFilter();
-  });
-
-  // `› Focus`, with the number of active facets when there are any. The count
-  // is the only state this control carries — what those facets ARE is the
-  // sheet's job, and spelling them out here would wrap onto three lines on a
-  // phone the moment more than one is on.
-  function buildLibFocusButton() {
-    const n = libFocusCount();
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "lib-ctl lib-ctl-focus" + (n ? " is-active" : "");
-
-    const chev = document.createElement("span");
-    chev.className = "lib-ctl-chevron";
-    chev.setAttribute("aria-hidden", "true");
-    chev.textContent = "›";
-    b.appendChild(chev);
-
-    const text = document.createElement("span");
-    text.className = "lib-ctl-text";
-    text.textContent = "Focus";
-    b.appendChild(text);
-
-    if (n) {
-      const badge = document.createElement("span");
-      badge.className = "lib-ctl-badge";
-      badge.textContent = String(n);
-      b.appendChild(badge);
-    }
-    b.setAttribute("aria-label", n
-      ? "Focus — " + n + (n === 1 ? " filter active" : " filters active")
-      : "Focus");
-    // Wrapped, not passed by reference: the listener hands its callback an
-    // event, which would arrive as editTarget and be treated as a playlist to
-    // save over.
-    b.addEventListener("click", () => openLibFocusSheet(null));
-    return b;
-  }
-
+  // Because the button is what showed a focus was on, any facets left in the
+  // stored view would now filter the wall invisibly and unclearably. They are
+  // dropped on load — see the libView restore above.
   // `Album name ↑ ⌄`. The arrow is a LABEL here, not a control — it says which
   // way the current sort runs, and tapping anywhere on the button opens the
   // sheet where it can be changed.
@@ -2859,10 +2745,6 @@
     // The server decides the vocabulary — it drops "Record label" when Labels
     // is switched off — so the count badge follows what it publishes rather
     // than a list hardcoded here.
-    if (libFacets && Array.isArray(libFacets.facets)) {
-      const ids = libFacets.facets.map(x => x && x.id).filter(Boolean);
-      if (ids.length) libAvailableFacets = ids;
-    }
     const f = libFacets || { facets: [], coverage: {} };
     // Which sections are expanded. Held across repaints (a chip tap rebuilds
     // the body) but NOT across openings: a sheet that reopens half-collapsed
@@ -5881,10 +5763,15 @@
 
     function setStatus(msg) { statusEl.textContent = msg || ""; }
 
-    // Stop searching and restore the random wall, WITHOUT touching whether the
-    // bar itself is open. Used when the field is emptied (incl. the 1st X tap).
-    // Search lives on the Home screen. Clearing it drops the results grid and
-    // restores the Home sections (album of the day / genres) below the search box.
+    // Stop searching and put back WHATEVER WAS UNDERNEATH, without touching
+    // whether the bar itself is open. Used when the field is emptied (incl. the
+    // first X tap).
+    //
+    // It used to assume Home, because that is the only place search used to
+    // live. Now that the library wall has the same box, that assumption emptied
+    // the wall and un-hid #home-sections — a child of the hidden #home-view —
+    // so clearing a search on the library left a blank screen with no way back
+    // but leaving and returning.
     function stopSearch() {
       active = false;
       seq++;                                   // invalidate any pending response
@@ -5895,6 +5782,7 @@
       setStatus("");
       setBanner(null);
       grid.innerHTML = "";
+      if (libraryWallActive) { showLibraryWall(); return; }   // the wall, not Home
       grid.classList.add("hidden");
       const hs = document.getElementById("home-sections");
       if (hs) hs.classList.remove("hidden");
@@ -6129,10 +6017,12 @@
 
     // The X clears the text and keeps the field open, so a retype needs no
     // second tap on the glass. Closing is the tap-away gesture.
+    // The X does the whole job in one tap: drop the results, put back the
+    // screen underneath, and collapse the field to the glass. It used to clear
+    // and keep the caret, so a second tap was needed to close and the wall was
+    // left blank in between.
     clear.addEventListener("click", () => {
-      input.value = "";
-      stopSearch();
-      input.focus();
+      closeSearch();
     });
 
     // ---- Open / close --------------------------------------------------
@@ -7012,10 +6902,6 @@
     const picksItem  = document.getElementById("menu-item-picks");
     if (labelsItem && typeof state.labels === "boolean") {
       labelsItem.classList.toggle("hidden", !state.labels);
-      // The same switch decides whether the Library Focus vocabulary still
-      // contains "Record label", and the count badge has to agree with the
-      // sheet from the first paint, not from the first time it is opened.
-      if (window.__setLabelsFacetAvailable) window.__setLabelsFacetAvailable(state.labels);
     }
     if (picksItem && typeof state.picks === "boolean") {
       picksItem.classList.toggle("hidden", !state.picks);
@@ -10183,6 +10069,8 @@
       if (topbarBack)    topbarBack.classList.toggle("hidden", saved.topbarBackHidden);
       if (topbarRefresh) topbarRefresh.classList.toggle("hidden", saved.topbarRefreshHidden);
       if (topbarSearch)  topbarSearch.classList.toggle("hidden", saved.topbarSearchHidden);
+      { const b = document.getElementById("library-controls");
+        if (b) b.classList.toggle("hidden", saved.libControlsHidden); }
       // Re-arm the screens whose behaviour lives OUTSIDE the restored nodes:
       // the library wall's infinite scroll (parked on the way in, else it never
       // pages again) and the labels browser's chrome/mode.
@@ -10252,6 +10140,11 @@
       topbarBackHidden:    topbarBack    ? topbarBack.classList.contains("hidden")    : true,
       topbarRefreshHidden: topbarRefresh ? topbarRefresh.classList.contains("hidden") : true,
       topbarSearchHidden:  topbarSearch  ? topbarSearch.classList.contains("hidden")  : true,
+      // The wall's Sort row belongs to the wall. It is built lazily, so it is
+      // looked up rather than held: arriving here from the library left it on
+      // screen over an artist's albums, sorting nothing.
+      libControlsHidden:   (() => { const b = document.getElementById("library-controls");
+                                    return b ? b.classList.contains("hidden") : true; })(),
     };
     artistViewActive = true;
     // Reveal the shared album grid and leave the Home landing / search results.
@@ -10261,20 +10154,18 @@
     if (homeView)     homeView.classList.add("hidden");
     if (homeSections) homeSections.classList.add("hidden");
     grid.classList.remove("hidden");
-    // Hide the shared topbar nav — this view has its own "← Back" button in
-    // countBar, so leaving the shared Back/Refresh/Search visible (whatever the
-    // previous screen set them to) would show a second, redundant back control.
-    if (topbarBack)    topbarBack.classList.add("hidden");
+    // The shared chevron IS this view's back button — same glyph, same corner,
+    // same behaviour as every other screen. Refresh and Search belong to the
+    // screens that set them and are not this one's.
+    if (topbarBack)    topbarBack.classList.remove("hidden");
     if (topbarRefresh) topbarRefresh.classList.add("hidden");
     if (topbarSearch)  topbarSearch.classList.add("hidden");
+    { const b = document.getElementById("library-controls"); if (b) b.classList.add("hidden"); }
 
     // Show loading state
     if (countBar) {
       countBar.classList.remove("hidden");
-      countBar.innerHTML = `
-        <button class="artist-view-back" id="artist-back-btn">← Back</button>
-        <span class="count-text">Loading…</span>`;
-      document.getElementById("artist-back-btn").addEventListener("click", exitArtistView);
+      countBar.innerHTML = '<span class="count-text">Loading…</span>';
     }
     grid.innerHTML = "";
 
@@ -10285,10 +10176,8 @@
       const total = j.primary.length + j.featured.length;
 
       if (countBar) {
-        countBar.innerHTML = `
-          <button class="artist-view-back" id="artist-back-btn">← Back</button>
-          <span class="count-text">${total} album${total !== 1 ? "s" : ""} · ${artistName}</span>`;
-        document.getElementById("artist-back-btn").addEventListener("click", exitArtistView);
+        countBar.innerHTML =
+          `<span class="count-text">${total} album${total !== 1 ? "s" : ""} · ${artistName}</span>`;
       }
 
       if (!total) {
@@ -10330,10 +10219,8 @@
       renderArtistBioHead(artistName, bioAlbum);
     } catch (e) {
       if (countBar) {
-        countBar.innerHTML = `
-          <button class="artist-view-back" id="artist-back-btn">← Back</button>
-          <span class="count-text" style="color:var(--danger)">Error: ${e.message}</span>`;
-        document.getElementById("artist-back-btn").addEventListener("click", exitArtistView);
+        countBar.innerHTML =
+          `<span class="count-text" style="color:var(--danger)">Error: ${e.message}</span>`;
       }
     }
   }
