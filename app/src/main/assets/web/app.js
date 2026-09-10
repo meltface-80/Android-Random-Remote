@@ -338,7 +338,6 @@
   const topbarRefresh = document.getElementById("topbar-refresh");
   const topbarSearch  = document.getElementById("topbar-search");
   let homeSectionsLoaded = false;
-  let homeLotwLoaded = false;   // set once the label-of-the-week row populates
   let homeLibraryLoaded = false; // set once the Library row populates
   // Smart Picks are built once a day on the server. The row is retried on each
   // Home visit until it populates (the first build runs in the background and
@@ -1022,32 +1021,6 @@
     return true;
   }
 
-  async function loadHomeLabelOfWeek() {
-    if (!homeLotw) return;
-    if (!rowHasContent(homeLotw)) homeLotw.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
-    try {
-      const r = await fetch("/api/home/label-of-the-week");
-      const j = await r.json();
-      const albums = (j && j.albums) || [];
-      if (j && j.label && albums.length) {
-        renderHomeLotw(j.label, albums);
-        homeLotwLoaded = true;   // populated — stop retrying on future visits
-        saveHomeCache({ lotw: { label: j.label, albums } });
-      } else if (!rowHasContent(homeLotw)) {
-        // Empty 200 (labels index still building after a restart returns
-        // {label:null} — not a 503). Only hide the section when nothing is
-        // cached; otherwise keep the hydrated row rather than blanking it.
-        renderHomeLotw(null, []);
-      }
-    } catch (e) {
-      // Transient failure: keep any cached row rather than blanking it. Only
-      // hide the section when there's nothing cached to fall back on.
-      if (!rowHasContent(homeLotw)) {
-        const sec = homeLotw.closest(".home-section");
-        if (sec) sec.classList.add("hidden");
-      }
-    }
-  }
   // ---------------------------------------------------------------------
   // Overflow menu — Roon's three-dots-in-a-circle.
   //
@@ -2815,6 +2788,13 @@
             applyLibView();
           });
           body.appendChild(row);
+        }
+        // ...and put it back. The index was being taken and thrown away, so a
+        // reverse-in-place dropped focus to the top of the page and the row
+        // could not be pressed twice from a keyboard.
+        if (focused >= 0) {
+          const again = body.querySelectorAll(".lib-sort-row")[focused];
+          if (again) again.focus();
         }
       };
       paint();
@@ -5240,44 +5220,6 @@
     b.addEventListener("click", () => showTab(b.dataset.tab));
   });
 
-  async function fetchNowPlayingDetail(zoneId) {
-    const r = await fetch(`/api/album/now-playing?zone=${encodeURIComponent(zoneId)}`);
-    if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || `HTTP ${r.status}`);
-    }
-    const j = await r.json();
-    if (j.album) {
-      setModalSource(j.album);   // authoritative: the server resolved this album
-      if (j.album.title)    modalTitle.textContent = j.album.title;
-      if (j.album.subtitle) setModalArtist(j.album.subtitle);
-      if (j.album.image_key) {
-        modalImg.src = `/api/image/${encodeURIComponent(j.album.image_key)}?size=800`;
-        setModalAmbient(modalImg.src);
-      }
-    }
-    const wrap = document.querySelector(".track-list-wrap");
-    if ((j.tracks || []).length) {
-      wrap.classList.remove("hidden");
-      modalTracks.innerHTML = "";
-      for (const t of j.tracks) {
-        const li = document.createElement("li");
-        // Two-line rows (queue-tab style): title over the FULL artist credit,
-        // stacked in a .t-text column so multi-artist tracks aren't clipped.
-        const tx = document.createElement("div"); tx.className = "t-text";
-        const ti = document.createElement("span"); ti.className = "t-title";
-        ti.textContent = t.title || "";
-        const su = document.createElement("span"); su.className = "t-sub";
-        su.textContent = t.subtitle || "";
-        tx.appendChild(ti); tx.appendChild(su);
-        li.appendChild(tx);
-        modalTracks.appendChild(li);
-      }
-    } else {
-      wrap.classList.add("hidden");
-    }
-  }
-
   // A queue belongs to a ZONE, and the zone the user is pointed at can change
   // while this screen stays open. currentSourceZoneId is a snapshot taken in
   // openAlbum(), so reading it here showed the queue of whichever zone happened
@@ -6411,12 +6353,6 @@
     let _labelsScrollSaved = 0;    // restores position when returning from a label's album view
     let _labelsScrollTarget = null; // label name to scroll into view when arriving via a deep-link (album/search)
     const mainEl = document.querySelector("main");
-
-    const TAG_SVG =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" ' +
-      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-      '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>' +
-      '<line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
 
     let mode = null;           // null | "list" | "albums"
     let _lastLabelCount = -1;  // track last rendered count to avoid flicker on re-poll
@@ -8558,24 +8494,46 @@
         buildActions(blob, title, artist);
       };
 
-      await paint(fastExtra);
+      const merge = (a, b) => ({
+        release: b.release || a.release,
+        bio: b.bio || a.bio,
+        bioSource: b.bioSource || a.bioSource,
+        score: b.score != null ? b.score : a.score,
+        isBestNewMusic: b.isBestNewMusic || a.isBestNewMusic
+      });
+
+      // A SHORT HEAD START, NOT A WAIT. A blurb makes the card grow, so one
+      // that lands a beat after the first paint pushes the card taller while
+      // you are looking at it. Give the lookup a moment to win the race and
+      // the card is drawn once, at its final size.
+      //
+      // Bounded, because the other end is Wikipedia by way of somebody's
+      // phone: past this the spinner has been up too long and a card that
+      // reflows is better than no card. It only happens at all when the fast
+      // path came back short — from the album screen, where Share lives, the
+      // blurb is already cached and nothing is awaited.
+      let painted = fastExtra;
+      if (late) {
+        const headStart = await Promise.race([
+          late,
+          new Promise((res) => setTimeout(() => res(null), 600))
+        ]);
+        if (headStart) painted = merge(fastExtra, headStart);
+      }
+      await paint(painted);
 
       if (late) {
         late.then((full) => {
-          // Redraw only if the slow answer actually added something. A card
-          // that reflows for no visible change is worse than one that doesn't.
-          const better = (full.release && full.release !== fastExtra.release) ||
-                         (full.bio && full.bio !== fastExtra.bio) ||
-                         (full.score != null && full.score !== fastExtra.score);
+          // Redraw only if the slow answer adds something to what is ALREADY
+          // on screen — which, after a won head start, is usually nothing. A
+          // card that reflows for no visible change is worse than one that
+          // doesn't.
+          const better = (full.release && full.release !== painted.release) ||
+                         (full.bio && full.bio !== painted.bio) ||
+                         (full.score != null && full.score !== painted.score);
           if (!better) return;
           if (token !== renderToken || overlay.classList.contains("hidden")) return;
-          return paint({
-            release: full.release || fastExtra.release,
-            bio: full.bio || fastExtra.bio,
-            bioSource: full.bioSource || fastExtra.bioSource,
-            score: full.score != null ? full.score : fastExtra.score,
-            isBestNewMusic: full.isBestNewMusic || fastExtra.isBestNewMusic
-          });
+          return paint(merge(painted, full));
         }).catch(() => { /* the card without it is already on screen */ });
       }
     } catch (e) {
@@ -8642,10 +8600,6 @@
     b.type = "button";
     b.innerHTML = `${iconSvg}<span>${label}</span>`;
     return b;
-  }
-  function setLabel(btn, text) {
-    const s = btn.querySelector("span");
-    if (s) s.textContent = text;
   }
   function icon(name) {
     const I = {
@@ -10003,6 +9957,11 @@
     bodyEl.innerHTML =
       '<p class="pf-detail-note">The written review can’t be shown here — ' +
       'tap <strong>Read on Pitchfork</strong> to read it on pitchfork.com.</p>';
+    // Set BEFORE the first paint, not after the fetch is fired: the actions are
+    // drawn immediately, and a flag set a line later is a flag the first draw
+    // never saw. A previous visit to this same item may also have left the id
+    // on it, in which case there is nothing to wait for.
+    it.qobuzPending = !it.qobuzApp;
     buildActions(actEl, it, null);
 
     // Two independent lookups, fired together and never awaited in series: the
@@ -10024,12 +9983,18 @@
       } catch (e) { /* library match is optional — the actions already shown work */ }
     })();
 
+    // Pending until the id lands. Until then the Qobuz action says so and is
+    // not tappable: the two states go to DIFFERENT places — the app on the
+    // record, or a browser on a search — and a button that changes destination
+    // under your thumb is worse than one that briefly says "wait".
     (async () => {
       try {
         const r = await fetch("/api/pitchfork/qobuz?" + names);
         const data = await r.json();
-        if (r.ok && data.url) { it.qobuzApp = data.url; repaint(); }
+        if (r.ok && data.url) it.qobuzApp = data.url;
       } catch (e) { /* no id found is the normal case for a record Qobuz lacks */ }
+      it.qobuzPending = false;
+      repaint();
     })();
   }
 
@@ -10075,16 +10040,25 @@
     // could not be shown to carry. Tidal is always the search — see
     // StreamingLinks and QobuzAlbum in :core for both.
     for (const svc of [{ key: "qobuz", name: "Qobuz" }, { key: "tidal", name: "Tidal" }]) {
+      const pending = svc.key === "qobuz" && it.qobuzPending;
       const deep = svc.key === "qobuz" ? it.qobuzApp : null;
       const href = deep || it[svc.key];
-      if (!href) continue;
-      const a = document.createElement("a");
-      a.className = "pf-action pf-action-link";
-      a.href = href;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.textContent = (deep ? "Open in " : "Find on ") + svc.name + " ↗";
-      container.appendChild(a);
+      if (!href && !pending) continue;
+      // While the id is still being looked up the row is a disabled button
+      // rather than a link, so there is nothing to tap and nowhere wrong to go.
+      const el = document.createElement(pending ? "button" : "a");
+      el.className = "pf-action pf-action-link" + (pending ? " is-waiting" : "");
+      if (pending) {
+        el.type = "button";
+        el.disabled = true;
+        el.textContent = "Finding on " + svc.name + "…";
+      } else {
+        el.href = href;
+        el.target = "_blank";
+        el.rel = "noopener noreferrer";
+        el.textContent = (deep ? "Open in " : "Find on ") + svc.name + " ↗";
+      }
+      container.appendChild(el);
     }
   }
 

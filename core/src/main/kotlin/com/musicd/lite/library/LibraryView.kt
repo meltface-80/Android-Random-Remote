@@ -25,7 +25,6 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
 
         const val PREFIX_MAX = 40
         private const val DAY_MS = 24L * 60 * 60 * 1000
-        private const val MONTH_MS = 30 * DAY_MS
 
         /** FNV-1a, for the deterministic album-of-the-day pick. */
         fun fnv1a(s: String): Int {
