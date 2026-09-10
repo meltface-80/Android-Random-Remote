@@ -2056,7 +2056,6 @@ input.vol-range::-moz-range-thumb {
   gap: 2px; margin-top: 6px;
 }
 .artist-bio-src  { font-size: 12px; color: var(--text-faint); }
-/* Qobuz artist screen: bio sits under the compact avatar+name row{ margin-top: 10px; }
 .content-count {
   display: flex; align-items: center; padding: 8px 16px;
   font-size: 14px; color: var(--text-dim);
@@ -3285,36 +3284,26 @@ body.show-quality .album-quality { display: block; }
 .modal.np-mode.tab-queue .modal-info { max-width: none; }
 
 /* ------------------------------------------------------------------ */
-/*  Library wall — sort + focus                                        */
-/*  Two pills under the top bar, and bottom sheets built from the same  */
-/*  language as the filter/settings sheets. Roon's own Sort/Focus run   */
-/*  on a private API; these are computed from the extension's snapshot. */
+/*  Library wall — sort                                                 */
+/*  One text control under the top bar, opening a bottom sheet built    */
+/*  from the same language as the settings sheets. Roon's own Sort runs  */
+/*  on a private API; this one is computed from the snapshot.            */
 /* ------------------------------------------------------------------ */
-/* Sort pill | direction arrow | Focus pill. The arrow is sized to content so
-   the two pills stay equal width whatever the sort label says. */
-/* Roon's own phone header: Focus on the left, Sort on the right, nothing
-   between them and no boxes around either. The row used to be three heavy
-   pills in a grid — SORT | arrow | FOCUS — which is the part that did not
-   look like Roon. Text controls, one hairline, and the row recedes behind the
-   albums where it belongs. */
+/* The row was once three heavy pills in a grid — SORT | arrow | FOCUS — which
+   is the part that did not look like Roon. Then Focus and the funnel filter
+   went (nobody used them; search does the job), so what is left is one text
+   control, one hairline, and a row that recedes behind the albums. */
 .library-controls {
-  /*  Focus pinned LEFT, Sort and the magnifier grouped RIGHT.
-      justify-content: space-between put the middle child — Sort — in the
-      centre of the row once the filter became a third control, so it floated
-      away from the thing it belongs next to, and did so MORE the wider the
-      screen got.
-      The auto margin on .lib-ctl-sort below is what does the grouping, and it
-      does it alone: auto margins consume the free space before justify-content
-      is applied, so no justify-content value here can change the result. It is
-      left at the default rather than restated, so nothing in this rule claims
-      to be doing work it is not.  */
+  /*  Sort sits hard RIGHT, and the auto margin on .lib-ctl-sort below is what
+      puts it there — it does it alone: auto margins consume the free space
+      before justify-content is applied, so no justify-content value here can
+      change the result. It is left at the default rather than restated, so
+      nothing in this rule claims to be doing work it is not.  */
   display: flex; align-items: center; gap: 12px;
   margin: 0 0 12px; padding-bottom: 8px;
   border-bottom: 1px solid var(--panel-hairline);
 }
 .library-controls .lib-ctl-sort { margin-left: auto; }
-/*  …except while the filter field is open, where the free space belongs to
-    the input rather than to the margin. An auto margin wins over flex-grow{ margin-left: 0; }
 .library-controls.hidden { display: none; }
 .lib-ctl {
   display: flex; align-items: center; gap: 6px;
@@ -3330,14 +3319,6 @@ body.show-quality .album-quality { display: block; }
 .lib-ctl:active { opacity: .7; }
 .lib-ctl-text {
   min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-/* The chevron reads as "there is a screen behind this"{ font-size: 19px; line-height: 1; color: var(--text-faint); }
-/* How many filters are on. A count, not the filter names: two facets already
-   wrap onto a second line on a phone{
-  flex: 0 0 auto;
-  min-width: 18px; padding: 0 5px; border-radius: 999px;
-  background: var(--accent); color: var(--on-accent);
-  font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
 }
 /* A label, not a button: it says which way the current sort runs. The control
    that CHANGES it is the sort sheet, which the whole row opens. */
@@ -3679,11 +3660,6 @@ body.show-quality .album-quality { display: block; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/*  Library wall: the funnel text filter.
-    Sits left of Focus and Sort in #library-controls, and expands in place
-    rather than opening a sheet — the point is to type and watch the wall
-    narrow{ display: flex; align-items: center; flex: 0 0 auto; }
-
 /* ------------------------------------------------------------------ */
 /*  Network pane — an address to type and a code to copy               */
 /* ------------------------------------------------------------------ */
@@ -3704,3 +3680,46 @@ body.show-quality .album-quality { display: block; }
 }
 .lan-url { font-size: 1rem; }
 .lan-pin { font-size: 1.5rem; letter-spacing: .22em; text-align: center; }
+
+
+/* ------------------------------------------------------------------ */
+/*  Artists — the Home row and the wall                                */
+/*                                                                     */
+/*  Round, because an artist is not an album and the shapes should say  */
+/*  so at a glance: the picture on one IS a cover from the other, so a  */
+/*  square would make the two rows look like the same thing twice.      */
+/* ------------------------------------------------------------------ */
+.artist-tile {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 8px; padding: 0; min-width: 0;
+  background: none; border: 0; color: inherit; font: inherit;
+  cursor: pointer; text-align: center;
+}
+.artist-tile-art {
+  position: relative; width: 100%; padding-top: 100%;   /* square, pre-aspect-ratio */
+  border-radius: 50%; overflow: hidden;
+  background: var(--bg-elev-2);
+}
+.artist-tile-art img {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  width: 100%; height: 100%; object-fit: cover;
+}
+/* Behind the cover, so a dead image key leaves a letter rather than a hole. */
+.artist-tile-initial {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px; font-weight: 700; color: var(--text-dim);
+}
+.artist-tile-art img { z-index: 1; }
+.artist-tile-name {
+  font-size: 14px; font-weight: 600; line-height: 1.25;
+  width: 100%;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.artist-tile-sub { font-size: 12px; color: var(--text-dim); }
+.artist-tile:active .artist-tile-art { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Three columns at EVERY width. The album wall widens to five on a tablet,
+   which turns a wall of names into a hedge — and three is what was asked for. */
+.album-grid.artists-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

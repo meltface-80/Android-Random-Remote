@@ -36,7 +36,8 @@ class Settings(private val store: Store) {
         // "unplayed" was the "Not played in 6 months" row; it is gone, and the
         // album-of-the-day tile it used to carry now has the row to itself.
         // A stored order naming the old id is simply dropped by homeRows().
-        val HOME_ROW_IDS = listOf("aotd", "history", "picks", "random", "library", "genres")
+        val HOME_ROW_IDS =
+            listOf("aotd", "history", "picks", "random", "artists", "library", "genres")
 
         const val KEY_HOME_ROWS = "home_rows"
         const val KEY_SMART_PICKS = "smart_picks"

@@ -10,6 +10,7 @@ import com.musicd.lite.http.Network
 import com.musicd.lite.http.Request
 import com.musicd.lite.http.Response
 import com.musicd.lite.library.AlbumRecord
+import com.musicd.lite.library.Artists
 import com.musicd.lite.library.Albums
 import com.musicd.lite.library.UserPlaylists
 import com.musicd.lite.library.LibraryView
@@ -213,6 +214,7 @@ class RemoteApi(
                     .put("count", index.count)
             )
 
+            "/api/artists" -> artists(request)
             "/api/artist-albums" -> artistAlbums(request)
             "/api/artist-bio" -> artistBio(request)
 
@@ -1058,6 +1060,41 @@ class RemoteApi(
                 // Labels are not in this build; an empty array keeps the search
                 // sheet's label section collapsed rather than erroring.
                 .put("labels", JSONArray())
+        )
+    }
+
+    /**
+     * The library's artists, sorted and paged.
+     *
+     * Derived on every request rather than cached, because it is a walk over
+     * an index already in memory and the alternative is a second thing that
+     * can go stale when the library rebuilds. A library of ten thousand albums
+     * is a few milliseconds of work.
+     *
+     * `seed` only means anything to the random sort, and the page owns it: the
+     * reshuffle button changes the number, and the same number has to give the
+     * same wall or paging would show one artist twice and miss another.
+     */
+    private fun artists(request: Request): Response {
+        val sort = request.str("sort")?.takeIf { it.isNotEmpty() } ?: Artists.AZ
+        val seed = request.int("seed") ?: 1
+        val offset = (request.int("offset") ?: 0).coerceAtLeast(0)
+        val limit = (request.int("limit") ?: 120).coerceIn(1, 500)
+
+        val all = Artists.sorted(Artists.of(index.albums), sort, seed)
+        val page = all.drop(offset).take(limit)
+        return Json.obj(
+            JSONObject()
+                .put("total", all.size)
+                .put("offset", offset)
+                .put("sort", sort)
+                .put("seed", seed)
+                .put("artists", Json.arrayOf(page.map { a ->
+                    JSONObject()
+                        .put("name", a.name)
+                        .put("albums", a.albums)
+                        .put("image_key", a.imageKey ?: JSONObject.NULL)
+                }))
         )
     }
 
