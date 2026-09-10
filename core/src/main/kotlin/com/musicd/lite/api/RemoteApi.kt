@@ -16,6 +16,7 @@ import com.musicd.lite.library.LibraryView
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
 import com.musicd.lite.meta.Metadata
+import com.musicd.lite.meta.Pitchfork
 import com.musicd.lite.roon.AlbumFilter
 import com.musicd.lite.roon.BrowseException
 import com.musicd.lite.roon.MooSocket
@@ -252,6 +253,8 @@ class RemoteApi(
                 secret(request, post, Settings.KEY_DISCOGS_TOKEN, "token")
             "/api/settings/fanart-key" ->
                 secret(request, post, Settings.KEY_FANART_KEY, "key")
+
+            "/api/search/external" -> searchExternal(request)
 
             "/api/pitchfork/reviews" -> pitchforkReviews(request)
             "/api/pitchfork/review" -> pitchforkReview(request)
@@ -1557,6 +1560,40 @@ class RemoteApi(
      * server, so the page asks for both at the same time and each upgrades the
      * actions when it lands.
      */
+    /**
+     * What the search box can find beyond your own library.
+     *
+     * Pitchfork only — the Qobuz and TIDAL sections went with their browsers.
+     * It answers from the listings already cached and NEVER fetches on the way
+     * through: this runs on every keystroke, and Pitchfork is rate-gated to one
+     * request every 1.5s, so a fetch here would either stall the search box or
+     * hammer somebody else's server.
+     *
+     * The cache is warmed in the background instead when it is found empty, so
+     * the first search after a restart comes back empty and the next one works.
+     * That is the honest limit of this: what is searchable is the Latest and
+     * Best New Music listings, not everything Pitchfork has ever reviewed.
+     */
+    private fun searchExternal(request: Request): Response {
+        val q = request.str("q").orEmpty()
+        val cached = app.pitchfork.cachedReviews()
+        if (cached.isEmpty()) {
+            app.background {
+                for (type in Pitchfork.LIST_TYPES) runCatching { app.pitchfork.reviews(type) }
+            }
+        }
+        val hits = Pitchfork.search(cached, q)
+        return Json.obj(
+            JSONObject()
+                .put("pitchfork", Json.arrayOf(hits.map { it.toJson() }))
+                // The page reads only "pitchfork" now, but an older cached copy
+                // of it read these two — and an empty array is the answer that
+                // keeps such a page quiet rather than throwing.
+                .put("albums", JSONArray())
+                .put("artists", JSONArray())
+        )
+    }
+
     private fun pitchforkQobuz(request: Request): Response {
         val album = request.str("album")
         if (album.isNullOrBlank()) return Json.error(400, "album is required")
@@ -1835,10 +1872,6 @@ class RemoteApi(
             Json.error(501, STREAMING_UNAVAILABLE.format("Qobuz"))
         path.startsWith("/api/tidal") || path.startsWith("/api/settings/tidal") ->
             Json.error(501, STREAMING_UNAVAILABLE.format("TIDAL"))
-
-        // Pitchfork is the only external source here, and it has its own route.
-        path == "/api/search/external" ->
-            Json.obj(JSONObject().put("albums", JSONArray()).put("artists", JSONArray()))
 
         // Self-update on a host that cannot install an APK — the JVM tests.
         // "available: false" is the shape the update banner reads as "nothing

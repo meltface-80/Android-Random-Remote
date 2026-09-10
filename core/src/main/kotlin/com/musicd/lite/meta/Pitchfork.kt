@@ -91,6 +91,18 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
         }
     }
 
+    /**
+     * The listings already in hand, and nothing more.
+     *
+     * Search calls this on every keystroke, so it must never open a socket:
+     * [reviews] fetches, this one only reads what [reviews] has already left
+     * behind. An empty answer means nobody has opened the reviews screen yet
+     * this session — the caller warms the cache in the background and the next
+     * keystroke finds it.
+     */
+    fun cachedReviews(): List<Item> =
+        LIST_TYPES.flatMap { cache.peek(it).orEmpty() }.distinctBy { it.url }
+
     private fun build(type: String): List<Item> {
         if (type == "best") {
             return newestFirst(listing("/reviews/best/albums/").filter { it.album.isNotEmpty() })
@@ -394,6 +406,46 @@ class Pitchfork(private val http: OkHttpClient, private val userAgent: String) {
 
         /** Best New Music is a page-level flag, not part of the rating object. */
         private val BNM = Regex("best[ -]?new[ -]?music", RegexOption.IGNORE_CASE)
+
+        /** The two listings this build carries. */
+        val LIST_TYPES = listOf("latest", "best")
+
+        /**
+         * Reviews whose album or artist matches [query], best first.
+         *
+         * Folded through [Normalize.text] — the app's one matching rule — so
+         * "sault" finds "SAULT" and "bjork" finds "Björk". Every term has to
+         * appear somewhere in "album artist", which is what makes a two-word
+         * query narrow rather than widen the result.
+         *
+         * Ranked, not just filtered: the record you actually named comes
+         * first, then a title that STARTS with what was typed, then one that
+         * merely contains it, then a match on the artist alone. Typing an album
+         * name should not bury it under everything else that artist released —
+         * and "Blue" must not sit under "Blue Lines" just because that one was
+         * reviewed first.
+         */
+        fun search(items: List<Item>, query: String, limit: Int = 8): List<Item> {
+            val q = Normalize.text(query)
+            if (q.isEmpty()) return emptyList()
+            val terms = q.split(" ").filter { it.isNotEmpty() }
+
+            val scored = ArrayList<Pair<Int, Item>>()
+            for (item in items) {
+                val album = Normalize.text(item.album)
+                val artist = Normalize.text(item.artist.orEmpty())
+                val hay = "$album $artist"
+                if (!terms.all { hay.contains(it) }) continue
+                val rank = when {
+                    album == q -> 0            // you typed the record's name
+                    album.startsWith(q) -> 1
+                    album.contains(q) -> 2
+                    else -> 3                  // matched on the artist alone
+                }
+                scored += rank to item
+            }
+            return scored.sortedBy { it.first }.map { it.second }.take(limit)
+        }
 
         private const val TAG = "Pitchfork"
         private const val LIST_TTL_MS = 6L * 60 * 60 * 1000

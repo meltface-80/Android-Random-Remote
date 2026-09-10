@@ -171,6 +171,23 @@ class RemoteApiTest {
     }
 
     /**
+     * The search box's one outside source. It answered {albums:[],artists:[]}
+     * before, while the page read `pitchfork` off it — so the "Pitchfork
+     * reviews" section of search could never appear, and nothing looked wrong
+     * because an empty section simply does not draw.
+     *
+     * The key name is the contract; the content depends on what has been
+     * cached, and this test's HTTP client refuses outbound requests, so cold
+     * is the case it pins. Cold must be an empty list and not an absent field.
+     */
+    @Test
+    fun searchExternalAnswersWithAPitchforkList() {
+        val j = json("/api/search/external?q=mezzanine")
+        assertTrue("no `pitchfork` key: $j", j.has("pitchfork"))
+        assertEquals(0, j.getJSONArray("pitchfork").length())
+    }
+
+    /**
      * THE ONE THAT MATTERS, and the dial learned it the hard way. This endpoint
      * resolves the id it is GIVEN and nothing else — RoonCore.zone(id) is
      * zoneStore.byId(id), and byId(null) is null — so a request that names no

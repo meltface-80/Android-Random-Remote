@@ -8494,24 +8494,46 @@
         buildActions(blob, title, artist);
       };
 
-      await paint(fastExtra);
+      const merge = (a, b) => ({
+        release: b.release || a.release,
+        bio: b.bio || a.bio,
+        bioSource: b.bioSource || a.bioSource,
+        score: b.score != null ? b.score : a.score,
+        isBestNewMusic: b.isBestNewMusic || a.isBestNewMusic
+      });
+
+      // A SHORT HEAD START, NOT A WAIT. A blurb makes the card grow, so one
+      // that lands a beat after the first paint pushes the card taller while
+      // you are looking at it. Give the lookup a moment to win the race and
+      // the card is drawn once, at its final size.
+      //
+      // Bounded, because the other end is Wikipedia by way of somebody's
+      // phone: past this the spinner has been up too long and a card that
+      // reflows is better than no card. It only happens at all when the fast
+      // path came back short — from the album screen, where Share lives, the
+      // blurb is already cached and nothing is awaited.
+      let painted = fastExtra;
+      if (late) {
+        const headStart = await Promise.race([
+          late,
+          new Promise((res) => setTimeout(() => res(null), 600))
+        ]);
+        if (headStart) painted = merge(fastExtra, headStart);
+      }
+      await paint(painted);
 
       if (late) {
         late.then((full) => {
-          // Redraw only if the slow answer actually added something. A card
-          // that reflows for no visible change is worse than one that doesn't.
-          const better = (full.release && full.release !== fastExtra.release) ||
-                         (full.bio && full.bio !== fastExtra.bio) ||
-                         (full.score != null && full.score !== fastExtra.score);
+          // Redraw only if the slow answer adds something to what is ALREADY
+          // on screen — which, after a won head start, is usually nothing. A
+          // card that reflows for no visible change is worse than one that
+          // doesn't.
+          const better = (full.release && full.release !== painted.release) ||
+                         (full.bio && full.bio !== painted.bio) ||
+                         (full.score != null && full.score !== painted.score);
           if (!better) return;
           if (token !== renderToken || overlay.classList.contains("hidden")) return;
-          return paint({
-            release: full.release || fastExtra.release,
-            bio: full.bio || fastExtra.bio,
-            bioSource: full.bioSource || fastExtra.bioSource,
-            score: full.score != null ? full.score : fastExtra.score,
-            isBestNewMusic: full.isBestNewMusic || fastExtra.isBestNewMusic
-          });
+          return paint(merge(painted, full));
         }).catch(() => { /* the card without it is already on screen */ });
       }
     } catch (e) {
@@ -9935,6 +9957,11 @@
     bodyEl.innerHTML =
       '<p class="pf-detail-note">The written review can’t be shown here — ' +
       'tap <strong>Read on Pitchfork</strong> to read it on pitchfork.com.</p>';
+    // Set BEFORE the first paint, not after the fetch is fired: the actions are
+    // drawn immediately, and a flag set a line later is a flag the first draw
+    // never saw. A previous visit to this same item may also have left the id
+    // on it, in which case there is nothing to wait for.
+    it.qobuzPending = !it.qobuzApp;
     buildActions(actEl, it, null);
 
     // Two independent lookups, fired together and never awaited in series: the
@@ -9956,12 +9983,18 @@
       } catch (e) { /* library match is optional — the actions already shown work */ }
     })();
 
+    // Pending until the id lands. Until then the Qobuz action says so and is
+    // not tappable: the two states go to DIFFERENT places — the app on the
+    // record, or a browser on a search — and a button that changes destination
+    // under your thumb is worse than one that briefly says "wait".
     (async () => {
       try {
         const r = await fetch("/api/pitchfork/qobuz?" + names);
         const data = await r.json();
-        if (r.ok && data.url) { it.qobuzApp = data.url; repaint(); }
+        if (r.ok && data.url) it.qobuzApp = data.url;
       } catch (e) { /* no id found is the normal case for a record Qobuz lacks */ }
+      it.qobuzPending = false;
+      repaint();
     })();
   }
 
@@ -10007,16 +10040,25 @@
     // could not be shown to carry. Tidal is always the search — see
     // StreamingLinks and QobuzAlbum in :core for both.
     for (const svc of [{ key: "qobuz", name: "Qobuz" }, { key: "tidal", name: "Tidal" }]) {
+      const pending = svc.key === "qobuz" && it.qobuzPending;
       const deep = svc.key === "qobuz" ? it.qobuzApp : null;
       const href = deep || it[svc.key];
-      if (!href) continue;
-      const a = document.createElement("a");
-      a.className = "pf-action pf-action-link";
-      a.href = href;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.textContent = (deep ? "Open in " : "Find on ") + svc.name + " ↗";
-      container.appendChild(a);
+      if (!href && !pending) continue;
+      // While the id is still being looked up the row is a disabled button
+      // rather than a link, so there is nothing to tap and nowhere wrong to go.
+      const el = document.createElement(pending ? "button" : "a");
+      el.className = "pf-action pf-action-link" + (pending ? " is-waiting" : "");
+      if (pending) {
+        el.type = "button";
+        el.disabled = true;
+        el.textContent = "Finding on " + svc.name + "…";
+      } else {
+        el.href = href;
+        el.target = "_blank";
+        el.rel = "noopener noreferrer";
+        el.textContent = (deep ? "Open in " : "Find on ") + svc.name + " ↗";
+      }
+      container.appendChild(el);
     }
   }
 

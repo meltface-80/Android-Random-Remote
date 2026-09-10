@@ -2740,6 +2740,11 @@ input.vol-range::-moz-range-thumb {
 .pf-action:active { border-color: var(--accent); }
 .pf-action-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 .pf-action-link { color: var(--accent-text); background: none; border-color: transparent; }
+/* Still resolving the Qobuz album id. Dimmed and inert, because the two
+   settled states go to different places and a tap now would take the
+   wrong one. */
+.pf-action.is-waiting { color: var(--text-dim); cursor: default; }
+.pf-action.is-waiting:active { border-color: transparent; }
 
 /* ------------------------------------------------------------------ */
 /*  Old-Safari (<15) square-tile fallback                              */
