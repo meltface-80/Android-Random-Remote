@@ -2021,16 +2021,6 @@ input.vol-range::-moz-range-thumb {
 }
 .modal-artist-link:hover { opacity: .75; }
 .modal-subtitle-year { color: var(--text-dim); }
-
-/* Artist albums view */
-.artist-view-back {
-  min-height: var(--tap-min);
-  background: none; border: 1px solid var(--border); border-radius: 8px;
-  color: var(--text-dim); font-size: 13px; padding: 5px 12px;
-  cursor: pointer; margin-right: 10px; transition: color .15s, background .15s;
-  flex-shrink: 0;
-}
-.artist-view-back:hover { color: var(--text); background: var(--bg-elev); }
 .count-text { font-size: 13px; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artist-section-header {
   grid-column: 1 / -1;

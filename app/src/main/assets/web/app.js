@@ -525,7 +525,17 @@
   // they show Back but not Refresh.
   window.__setTopbarNav = setTopbarNav;
 
-  if (topbarBack)    topbarBack.addEventListener("click", showHome);
+  // The chevron is the one back control in the app now, so it has to mean
+  // "back from wherever you are" — the artist view used to carry its own
+  // "← Back" pill in the page, which scrolled under the floating hamburger and
+  // was a second style of the same button besides.
+  if (topbarBack) topbarBack.addEventListener("click", () => {
+    if (window.__artistViewActive && window.__artistViewActive()) {
+      window.__exitArtistView();
+      return;
+    }
+    showHome();
+  });
   if (topbarRefresh) topbarRefresh.addEventListener("click", () => loadRandom());
 
   // Home daily-pick/random rows are reused within this TTL instead of being
@@ -10059,6 +10069,8 @@
       if (topbarBack)    topbarBack.classList.toggle("hidden", saved.topbarBackHidden);
       if (topbarRefresh) topbarRefresh.classList.toggle("hidden", saved.topbarRefreshHidden);
       if (topbarSearch)  topbarSearch.classList.toggle("hidden", saved.topbarSearchHidden);
+      { const b = document.getElementById("library-controls");
+        if (b) b.classList.toggle("hidden", saved.libControlsHidden); }
       // Re-arm the screens whose behaviour lives OUTSIDE the restored nodes:
       // the library wall's infinite scroll (parked on the way in, else it never
       // pages again) and the labels browser's chrome/mode.
@@ -10128,6 +10140,11 @@
       topbarBackHidden:    topbarBack    ? topbarBack.classList.contains("hidden")    : true,
       topbarRefreshHidden: topbarRefresh ? topbarRefresh.classList.contains("hidden") : true,
       topbarSearchHidden:  topbarSearch  ? topbarSearch.classList.contains("hidden")  : true,
+      // The wall's Sort row belongs to the wall. It is built lazily, so it is
+      // looked up rather than held: arriving here from the library left it on
+      // screen over an artist's albums, sorting nothing.
+      libControlsHidden:   (() => { const b = document.getElementById("library-controls");
+                                    return b ? b.classList.contains("hidden") : true; })(),
     };
     artistViewActive = true;
     // Reveal the shared album grid and leave the Home landing / search results.
@@ -10137,20 +10154,18 @@
     if (homeView)     homeView.classList.add("hidden");
     if (homeSections) homeSections.classList.add("hidden");
     grid.classList.remove("hidden");
-    // Hide the shared topbar nav — this view has its own "← Back" button in
-    // countBar, so leaving the shared Back/Refresh/Search visible (whatever the
-    // previous screen set them to) would show a second, redundant back control.
-    if (topbarBack)    topbarBack.classList.add("hidden");
+    // The shared chevron IS this view's back button — same glyph, same corner,
+    // same behaviour as every other screen. Refresh and Search belong to the
+    // screens that set them and are not this one's.
+    if (topbarBack)    topbarBack.classList.remove("hidden");
     if (topbarRefresh) topbarRefresh.classList.add("hidden");
     if (topbarSearch)  topbarSearch.classList.add("hidden");
+    { const b = document.getElementById("library-controls"); if (b) b.classList.add("hidden"); }
 
     // Show loading state
     if (countBar) {
       countBar.classList.remove("hidden");
-      countBar.innerHTML = `
-        <button class="artist-view-back" id="artist-back-btn">← Back</button>
-        <span class="count-text">Loading…</span>`;
-      document.getElementById("artist-back-btn").addEventListener("click", exitArtistView);
+      countBar.innerHTML = '<span class="count-text">Loading…</span>';
     }
     grid.innerHTML = "";
 
@@ -10161,10 +10176,8 @@
       const total = j.primary.length + j.featured.length;
 
       if (countBar) {
-        countBar.innerHTML = `
-          <button class="artist-view-back" id="artist-back-btn">← Back</button>
-          <span class="count-text">${total} album${total !== 1 ? "s" : ""} · ${artistName}</span>`;
-        document.getElementById("artist-back-btn").addEventListener("click", exitArtistView);
+        countBar.innerHTML =
+          `<span class="count-text">${total} album${total !== 1 ? "s" : ""} · ${artistName}</span>`;
       }
 
       if (!total) {
@@ -10206,10 +10219,8 @@
       renderArtistBioHead(artistName, bioAlbum);
     } catch (e) {
       if (countBar) {
-        countBar.innerHTML = `
-          <button class="artist-view-back" id="artist-back-btn">← Back</button>
-          <span class="count-text" style="color:var(--danger)">Error: ${e.message}</span>`;
-        document.getElementById("artist-back-btn").addEventListener("click", exitArtistView);
+        countBar.innerHTML =
+          `<span class="count-text" style="color:var(--danger)">Error: ${e.message}</span>`;
       }
     }
   }
