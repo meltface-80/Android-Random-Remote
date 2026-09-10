@@ -338,7 +338,6 @@
   const topbarRefresh = document.getElementById("topbar-refresh");
   const topbarSearch  = document.getElementById("topbar-search");
   let homeSectionsLoaded = false;
-  let homeLotwLoaded = false;   // set once the label-of-the-week row populates
   let homeLibraryLoaded = false; // set once the Library row populates
   // Smart Picks are built once a day on the server. The row is retried on each
   // Home visit until it populates (the first build runs in the background and
@@ -1022,32 +1021,6 @@
     return true;
   }
 
-  async function loadHomeLabelOfWeek() {
-    if (!homeLotw) return;
-    if (!rowHasContent(homeLotw)) homeLotw.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
-    try {
-      const r = await fetch("/api/home/label-of-the-week");
-      const j = await r.json();
-      const albums = (j && j.albums) || [];
-      if (j && j.label && albums.length) {
-        renderHomeLotw(j.label, albums);
-        homeLotwLoaded = true;   // populated — stop retrying on future visits
-        saveHomeCache({ lotw: { label: j.label, albums } });
-      } else if (!rowHasContent(homeLotw)) {
-        // Empty 200 (labels index still building after a restart returns
-        // {label:null} — not a 503). Only hide the section when nothing is
-        // cached; otherwise keep the hydrated row rather than blanking it.
-        renderHomeLotw(null, []);
-      }
-    } catch (e) {
-      // Transient failure: keep any cached row rather than blanking it. Only
-      // hide the section when there's nothing cached to fall back on.
-      if (!rowHasContent(homeLotw)) {
-        const sec = homeLotw.closest(".home-section");
-        if (sec) sec.classList.add("hidden");
-      }
-    }
-  }
   // ---------------------------------------------------------------------
   // Overflow menu — Roon's three-dots-in-a-circle.
   //
@@ -2815,6 +2788,13 @@
             applyLibView();
           });
           body.appendChild(row);
+        }
+        // ...and put it back. The index was being taken and thrown away, so a
+        // reverse-in-place dropped focus to the top of the page and the row
+        // could not be pressed twice from a keyboard.
+        if (focused >= 0) {
+          const again = body.querySelectorAll(".lib-sort-row")[focused];
+          if (again) again.focus();
         }
       };
       paint();
@@ -5240,44 +5220,6 @@
     b.addEventListener("click", () => showTab(b.dataset.tab));
   });
 
-  async function fetchNowPlayingDetail(zoneId) {
-    const r = await fetch(`/api/album/now-playing?zone=${encodeURIComponent(zoneId)}`);
-    if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || `HTTP ${r.status}`);
-    }
-    const j = await r.json();
-    if (j.album) {
-      setModalSource(j.album);   // authoritative: the server resolved this album
-      if (j.album.title)    modalTitle.textContent = j.album.title;
-      if (j.album.subtitle) setModalArtist(j.album.subtitle);
-      if (j.album.image_key) {
-        modalImg.src = `/api/image/${encodeURIComponent(j.album.image_key)}?size=800`;
-        setModalAmbient(modalImg.src);
-      }
-    }
-    const wrap = document.querySelector(".track-list-wrap");
-    if ((j.tracks || []).length) {
-      wrap.classList.remove("hidden");
-      modalTracks.innerHTML = "";
-      for (const t of j.tracks) {
-        const li = document.createElement("li");
-        // Two-line rows (queue-tab style): title over the FULL artist credit,
-        // stacked in a .t-text column so multi-artist tracks aren't clipped.
-        const tx = document.createElement("div"); tx.className = "t-text";
-        const ti = document.createElement("span"); ti.className = "t-title";
-        ti.textContent = t.title || "";
-        const su = document.createElement("span"); su.className = "t-sub";
-        su.textContent = t.subtitle || "";
-        tx.appendChild(ti); tx.appendChild(su);
-        li.appendChild(tx);
-        modalTracks.appendChild(li);
-      }
-    } else {
-      wrap.classList.add("hidden");
-    }
-  }
-
   // A queue belongs to a ZONE, and the zone the user is pointed at can change
   // while this screen stays open. currentSourceZoneId is a snapshot taken in
   // openAlbum(), so reading it here showed the queue of whichever zone happened
@@ -6411,12 +6353,6 @@
     let _labelsScrollSaved = 0;    // restores position when returning from a label's album view
     let _labelsScrollTarget = null; // label name to scroll into view when arriving via a deep-link (album/search)
     const mainEl = document.querySelector("main");
-
-    const TAG_SVG =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" ' +
-      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-      '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>' +
-      '<line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
 
     let mode = null;           // null | "list" | "albums"
     let _lastLabelCount = -1;  // track last rendered count to avoid flicker on re-poll
@@ -8642,10 +8578,6 @@
     b.type = "button";
     b.innerHTML = `${iconSvg}<span>${label}</span>`;
     return b;
-  }
-  function setLabel(btn, text) {
-    const s = btn.querySelector("span");
-    if (s) s.textContent = text;
   }
   function icon(name) {
     const I = {
