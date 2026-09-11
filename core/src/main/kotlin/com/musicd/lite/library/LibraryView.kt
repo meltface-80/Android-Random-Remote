@@ -196,10 +196,25 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
 
     // ------------------------------------------------------------------ picks
 
-    /** [n] distinct albums drawn at random from [pool]. */
-    fun sample(pool: List<AlbumRecord>, n: Int): List<AlbumRecord> {
+    /**
+     * [n] distinct albums drawn at random from [pool].
+     *
+     * With a [seed] the draw is DETERMINISTIC: the same seed gives the same
+     * albums, in the same order, for as long as the library holds them. That
+     * is what lets a Home row show the same ten all day without the page
+     * having to remember which ten — it asks with today's date and gets
+     * today's answer, on any device, after any restart, with a cleared cache.
+     * Ordering by [seededRank] rather than seeding a Random because that is
+     * already the app's one stable-shuffle rule, tested, and used by the
+     * library wall's own random sort.
+     *
+     * Without a seed it is a fresh draw every call, which is what the reshuffle
+     * button wants.
+     */
+    fun sample(pool: List<AlbumRecord>, n: Int, seed: Int? = null): List<AlbumRecord> {
         if (pool.isEmpty()) return emptyList()
         val want = minOf(n, pool.size)
+        if (seed != null) return pool.sortedBy { seededRank(it.key, seed) }.take(want)
         if (want == pool.size) return pool.shuffled()
         val picked = LinkedHashSet<Int>(want * 2)
         val rnd = ThreadLocalRandom.current()

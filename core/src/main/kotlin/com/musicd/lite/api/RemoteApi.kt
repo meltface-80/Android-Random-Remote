@@ -621,6 +621,10 @@ class RemoteApi(
     private fun randomAlbums(request: Request): Response {
         val count = (request.int("count") ?: RANDOM_DEFAULT).coerceIn(1, 96)
         val filter = filterOf(request)
+        // Optional. Present, the same seed gives the same albums — which is how
+        // Home's row shows one set for the whole day and still costs nothing to
+        // ask for again. Absent, every call is a fresh draw.
+        val seed = request.int("seed")
 
         // Unfiltered picks come straight from the snapshot: the same shape the
         // browse path returns, with full-library offsets, so open and play work
@@ -638,7 +642,7 @@ class RemoteApi(
             if (pool.isEmpty() && !index.isBuilt) {
                 return Json.error(503, "The library is still being scanned")
             }
-            val picked = view.sample(pool, count)
+            val picked = view.sample(pool, count, seed)
             return Json.obj(
                 JSONObject()
                     .put("albums", Json.albums(picked))
@@ -1082,6 +1086,15 @@ class RemoteApi(
         val limit = (request.int("limit") ?: 120).coerceIn(1, 500)
 
         val all = Artists.sorted(Artists.of(index.albums), sort, seed)
+        // The same 503 the random row already answers with while the snapshot
+        // is still being scanned. Without it the page was told, truthfully and
+        // uselessly, that a library it had not finished reading has no artists
+        // in it — and painted "No artists." over the row for the rest of the
+        // session. Reported from a phone: the Home row said that while the
+        // artists screen, opened later, was full.
+        if (all.isEmpty() && !index.isBuilt) {
+            return Json.error(503, "The library is still being scanned")
+        }
         val page = all.drop(offset).take(limit)
         return Json.obj(
             JSONObject()
