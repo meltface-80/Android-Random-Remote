@@ -7,6 +7,7 @@ import com.musicd.lite.store.YearSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -177,6 +178,28 @@ class LibraryViewTest {
         build("Only One" to "Artist")
         assertEquals(1, view.sample(index.albums, 30).size)
         assertTrue(view.sample(emptyList(), 5).isEmpty())
+    }
+
+    // Home's Artists and Random rows show one set for the whole day. They get
+    // that by asking with the date as the seed, so these two are the promise:
+    // the same day is the same albums, and tomorrow is different ones.
+    @Test
+    fun aSeededSampleIsTheSameEveryTime() {
+        build(*(0 until 40).map { "Album $it" to "Artist" }.toTypedArray())
+        val a = view.sample(index.albums, 10, 20260910).map { it.key }
+        val b = view.sample(index.albums, 10, 20260910).map { it.key }
+        assertEquals(10, a.size)
+        assertEquals(a, b)
+    }
+
+    @Test
+    fun aDifferentSeedIsADifferentSample() {
+        build(*(0 until 40).map { "Album $it" to "Artist" }.toTypedArray())
+        val today    = view.sample(index.albums, 10, 20260910).map { it.key }
+        val tomorrow = view.sample(index.albums, 10, 20260911).map { it.key }
+        assertNotEquals(today, tomorrow)
+        // Distinct albums, same as the unseeded draw.
+        assertEquals(10, today.toSet().size)
     }
 
     @Test

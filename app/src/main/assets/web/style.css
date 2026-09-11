@@ -235,8 +235,28 @@ button { font-family: inherit; }
   display: flex; align-items: center; justify-content: flex-start;
   gap: 10px;
 }
-/* Refresh sits at the far right of the top bar. */
-#topbar-refresh { margin-left: auto; }
+/*  The right-hand end of the bar — reshuffle, Sort, search glass — as one
+    group, because they are now shown TOGETHER (an artists or library wall
+    carries Sort and the glass, and Random adds the reshuffle). Two separate
+    `margin-left: auto` controls only worked while exactly one of them was ever
+    visible: auto margins divide the free space between them, so the second one
+    to appear pushed the first away from the edge and left it floating in the
+    middle of the bar.  */
+.topbar-right {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 10px;
+  min-width: 0;
+}
+/*  The open search field claims the bar's width, so the group has to be able to
+    grow with it — and the two controls beside it get out of the way rather than
+    being overlapped by it, which is what they were before the field moved into
+    this group.  */
+.topbar-right.is-searching { flex: 1 1 auto; }
+.topbar-right.is-searching #topbar-sort,
+.topbar-right.is-searching #topbar-refresh { display: none; }
+/*  The wall's Sort control, in the bar. min-width so a long sort label
+    ellipsises inside the button instead of pushing the glass off the edge.  */
+.topbar-sort { display: flex; align-items: center; min-width: 0; }
 
 
 .album-count {
@@ -3011,13 +3031,11 @@ input.vol-range::-moz-range-thumb {
 #topbar-search {
   flex: 0 0 auto; min-width: 0;
   display: flex; align-items: center;
-  /* The glass rests at the RIGHT edge of the bar at every width. `margin-left`
-     rather than a `justify-content` on .topbar-row, because the row also holds
-     the hamburger and (when a selection exists) the actions menu, which must
-     keep their own edges. Search and #topbar-refresh are never shown together
-     — setTopbarNav() lights exactly one of them — so the two auto margins
-     cannot end up splitting the free space between them. */
-  margin-left: auto;
+  /* The glass rests at the RIGHT edge of the bar at every width. That is
+     .topbar-right's doing now, not this rule's: it used to carry its own
+     `margin-left: auto`, which was only safe while search and the reshuffle
+     were never on screen together. They are, on an artists wall sorted at
+     random, so the edge belongs to the group. */
 }
 /*  Only claim the bar's width once the field is actually open. Before this,
     the permanently-present box made .topbar-row 48px tall on Home and 40px
@@ -3291,20 +3309,11 @@ body.show-quality .album-quality { display: block; }
 /* ------------------------------------------------------------------ */
 /* The row was once three heavy pills in a grid — SORT | arrow | FOCUS — which
    is the part that did not look like Roon. Then Focus and the funnel filter
-   went (nobody used them; search does the job), so what is left is one text
-   control, one hairline, and a row that recedes behind the albums. */
-.library-controls {
-  /*  Sort sits hard RIGHT, and the auto margin on .lib-ctl-sort below is what
-      puts it there — it does it alone: auto margins consume the free space
-      before justify-content is applied, so no justify-content value here can
-      change the result. It is left at the default rather than restated, so
-      nothing in this rule claims to be doing work it is not.  */
-  display: flex; align-items: center; gap: 12px;
-  margin: 0 0 12px; padding-bottom: 8px;
-  border-bottom: 1px solid var(--panel-hairline);
-}
-.library-controls .lib-ctl-sort { margin-left: auto; }
-.library-controls.hidden { display: none; }
+   went (nobody used them; search does the job), leaving one text control alone
+   on a hairline row of its own — and then the row went too: the control lives
+   in the top bar now, beside the search glass, so a wall has one band of
+   floating chrome rather than two stacked ones. What is left here is the
+   control itself; #topbar-sort is where it is put. */
 .lib-ctl {
   display: flex; align-items: center; gap: 6px;
   /* Without this the flex item will not shrink below its content, so a long
@@ -3379,7 +3388,7 @@ body.show-quality .album-quality { display: block; }
 .sel-menu-wrap.hidden { display: none; }
 /* When both are present the shuffle button keeps its own right-edge anchor,
    so the pair sits together instead of splitting across the bar. */
-.sel-menu-wrap:not(.hidden) ~ #topbar-refresh { margin-left: 8px; }
+.sel-menu-wrap:not(.hidden) ~ .topbar-right { margin-left: 8px; }
 #select-menu-btn { display: flex; align-items: center; gap: 4px; width: auto; padding: 0 8px; }
 .sel-count {
   min-width: 20px; height: 20px; padding: 0 5px;

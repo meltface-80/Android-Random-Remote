@@ -361,23 +361,18 @@
   // ---------------------------------------------------------------------------
   const HOME_ROWS = [
     { id: "aotd",     title: "Album of the day",
-      load: () => { loadHomeAotd(); }, isFresh: () => rowsTtlFresh() },
+      load: () => { loadHomeAotd(); },
+      isFresh: () => homeAotdDay === localDayKey() && rowHasContent(homeAotd) },
     { id: "history",  title: "Recently played",
       load: () => { loadHomeHistory(); }, isFresh: () => homeHistoryLoaded },
     { id: "picks",    title: "Smart Picks",
       load: () => { loadHomeSmartPicks(); }, isFresh: () => homePicksDay === localDayKey() },
     { id: "random",   title: "Random albums",
-      load: () => { loadHomeRandom(); }, isFresh: () => rowsTtlFresh() },
+      load: () => { loadHomeRandom(); },
+      isFresh: () => homeRandomDay === localDayKey() && rowHasContent(homeRandom) },
     { id: "artists",  title: "Artists",
-      // It rides the daily-pick/random clock, but "fresh" has to mean THIS row
-      // holds something. rowsTtlFresh() asks whether those two rows have tiles,
-      // and on the build that introduced this one they always did — so a reopen
-      // inside the five minutes declared a row that had NEVER loaded fresh and
-      // left it empty, with not even a "Loading…" to say so. Reported from a
-      // phone, reproduced by reopening with a cache written before this row
-      // existed.
       load: () => { loadHomeArtists(); },
-      isFresh: () => rowsTtlFresh() && rowHasContent(homeArtists) },
+      isFresh: () => homeArtistsDay === localDayKey() && rowHasContent(homeArtists) },
     { id: "library",  title: "Library",
       load: () => { loadHomeLibrary(); }, isFresh: () => homeLibraryLoaded },
     { id: "genres",   title: "Browse by genre",
@@ -457,6 +452,26 @@
 
   // Topbar chrome per view: Back button (off Home), Refresh button (random /
   // genre grids), and the Search box (Home only, beside the hamburger).
+  // The Sort control's home: one slot in the top bar, filled by whichever wall
+  // is on screen. Every "leave this screen" path parks it, the same way it
+  // parked the row this replaced.
+  function topbarSortSlot() { return document.getElementById("topbar-sort"); }
+  function parkTopbarSort() {
+    const slot = topbarSortSlot();
+    if (slot) slot.classList.add("hidden");
+    // The reshuffle belongs to a Random sort, so it leaves with the sort. The
+    // random-album wall lights it again through setTopbarNav.
+    const r = document.getElementById("topbar-refresh");
+    if (r) r.classList.add("hidden");
+  }
+  window.__parkTopbarSort = parkTopbarSort;
+  // Random is the only sort with something to re-roll, so the button appears
+  // with it and only with it.
+  function showSortReshuffle(on) {
+    const r = document.getElementById("topbar-refresh");
+    if (r) r.classList.toggle("hidden", !on);
+  }
+
   function setTopbarNav(back, refresh, search) {
     if (topbarBack)    topbarBack.classList.toggle("hidden", !back);
     if (topbarRefresh) topbarRefresh.classList.toggle("hidden", !refresh);
@@ -465,7 +480,7 @@
 
   // Show the Home landing (hide the wall). The wall loads lazily when entered.
   function showHome() {
-    { const c = document.getElementById("library-controls"); if (c) c.classList.add("hidden"); }
+    parkTopbarSort();
     leaveArtistsWall();
     libraryWallActive = false;
     leavePlaylistScreens();
@@ -488,27 +503,19 @@
     setTopbarNav(false, false, true);   // Home: search box, no Back/Refresh
     const m = document.querySelector("main");
     if (m) m.scrollTop = 0;
-    // The album-of-the-day + random rows keep their tiles for 5 minutes: every Back tap
-    // lands here, and rebuilding ~60 fresh-random tiles each time re-fetched
-    // ~60 cover images through the Roon Core — the single biggest repeated cost
-    // in the app. Within the TTL the existing DOM (and the browser's image
-    // cache) is reused; after it, or if a load failed, both rows reload fresh.
-    // The daily pick and random rows share one TTL, so mark it before the loop
-    // rather than once per row.
-    if (!rowsTtlFresh()) homeRowsLoadedAt = Date.now();
+    // The three picked rows — the daily album, the random albums, the artists —
+    // hold their tiles for the DAY. Every Back tap lands here, and rebuilding
+    // them each time re-fetched their cover images through the Roon Core, the
+    // single biggest repeated cost in the app; a five-minute clock used to cap
+    // that. A day does it better and is also what the rows now promise: the
+    // same suggestions until tomorrow, rather than a reshuffle whenever five
+    // minutes had passed. Each row records the day it loaded, so a row that
+    // failed (or has never run) is simply not fresh and is loaded here.
     for (const row of HOME_ROWS) {
       if (!homeRowOn(row.id)) continue;   // off means the work does not run
       if (row.isFresh()) continue;
       row.load();
     }
-  }
-  // Shared freshness for the two rows that turn over on a clock rather than a
-  // flag: recheck every 5 minutes, but only when they actually hold tiles.
-  function rowsTtlFresh() {
-    return !!(homeRowsLoadedAt &&
-      (Date.now() - homeRowsLoadedAt) < HOME_ROWS_TTL_MS &&
-      homeAotd && homeAotd.querySelector(".album") &&
-      homeRandom && homeRandom.querySelector(".album"));
   }
   // Reveal the album wall. opts.loadIfEmpty loads a fresh wall only when it has
   // no content yet (so passive reveals — opening an overlay from the menu —
@@ -516,7 +523,7 @@
   // own content, e.g. labels/search).
   function showWall(opts) {
     leavePlaylistScreens();   // this screen owns the grid now
-    { const c = document.getElementById("library-controls"); if (c) c.classList.add("hidden"); }
+    parkTopbarSort();
     libraryWallActive = false;
     if (window.__clearSearchIfActive) window.__clearSearchIfActive();  // drop stale search results
     // Discard, don't restore: this function is establishing its own screen and
@@ -549,18 +556,34 @@
     }
     showHome();
   });
-  if (topbarRefresh) topbarRefresh.addEventListener("click", () => loadRandom());
+  // The random-album wall's shuffle AND the walls' Random re-roll: one button
+  // in one place, because to the user it is one thing. The wall on screen gets
+  // first refusal; the random wall is what is left.
+  if (topbarRefresh) topbarRefresh.addEventListener("click", () => {
+    if (window.__reshuffleActiveWall && window.__reshuffleActiveWall()) return;
+    loadRandom();
+  });
 
-  // Home daily-pick/random rows are reused within this TTL instead of being
-  // rebuilt (and re-randomised) on every visit — see showHome.
-  const HOME_ROWS_TTL_MS = 5 * 60 * 1000;
-  let homeRowsLoadedAt = 0;
+  // Which local day each of the picked rows last loaded for. Empty means never
+  // — so a row that has never run is never mistaken for a fresh one, which is
+  // exactly what a shared clock did to the Artists row the day it was added.
+  // Persisted with the rows themselves, so a reopen shows the same suggestions
+  // rather than drawing new ones.
+  let homeAotdDay    = "";
+  let homeRandomDay  = "";
+  let homeArtistsDay = "";
+  // Today, as the server's seeded draw wants it: 2026-09-10 -> 20260910. The
+  // same number all day on every device, so "the same ten albums until
+  // tomorrow" survives a restart, a reinstall and a cleared cache.
+  function daySeed() { return Number(localDayKey().replace(/-/g, "")); }
+  // How many tiles the two drawn rows carry. Ten, at the owner's asking: enough
+  // to be worth scrolling, few enough to be a suggestion rather than a wall.
+  const HOME_PICK_COUNT = 10;
 
   // --- Home content persistence (instant open) --------------------------
   // The in-memory rows above live only as long as the page's JS context, so a
-  // cold PWA open (the process is torn down when the app is backgrounded) reset
-  // homeRowsLoadedAt to 0 and reloaded — and re-randomised — the entire Home
-  // screen every single time. Persist the last rendered rows to localStorage
+  // cold PWA open (the process is torn down when the app is backgrounded) used
+  // to reload — and re-randomise — the entire Home screen every single time. Persist the last rendered rows to localStorage
   // and repaint them instantly on open, then revalidate in the background
   // (stale-while-revalidate). Covers come straight from the browser's HTTP
   // cache (the server sends them immutable for a week), so it's a flash-free
@@ -625,16 +648,22 @@
       const j = await r.json();
       const aotd = (j && j.album) ? j.album : null;
       renderHomeAotd(aotd);
-      if (aotd) saveHomeCache({ aotd: { aotd }, aotdAt: Date.now() });
+      if (aotd) {
+        homeAotdDay = localDayKey();
+        saveHomeCache({ aotd: { aotd }, aotdDay: homeAotdDay });
+      }
     } catch (e) {
       if (!rowHasContent(homeAotd)) homeAotd.innerHTML = '<div class="home-carousel-empty">Couldn\u2019t load.</div>';
-      homeRowsLoadedAt = 0;   // retry on the next Home visit
+      // The day is only stamped on success, so this retries on the next visit.
     }
   }
 
   // Random-albums row (reuses /api/random-albums, no filter → full library).
-  // Reloaded when the Home rows go stale (see showHome's TTL); tapping the
-  // header opens the full random wall (same as the hamburger "Random albums").
+  // TEN albums, and the same ten until tomorrow: the row is a suggestion, and a
+  // suggestion that has changed by the time you come back to it is not one. The
+  // date is the seed, so the set is the server's to draw and costs nothing to
+  // ask for twice. Tapping the header opens the full random wall (same as the
+  // hamburger "Random albums"), which is where a fresh shuffle lives.
   // One renderer for the plain album carousels (Random, Library) — same tiles,
   // same empty state, so the rows can't drift apart.
   function renderAlbumRow(rowEl, albums) {
@@ -655,19 +684,20 @@
     if (!homeRandom) return;
     if (!rowHasContent(homeRandom)) homeRandom.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
     try {
-      const r = await fetch("/api/random-albums?count=30");
+      const r = await fetch("/api/random-albums?count=" + HOME_PICK_COUNT + "&seed=" + daySeed());
       if (r.status === 503) {
         if (!rowHasContent(homeRandom)) homeRandom.innerHTML = '<div class="home-carousel-empty">Waiting for Roon Core…</div>';
-        homeRowsLoadedAt = 0;   // retry on the next Home visit
-        return;   // keep any cached tiles while the index builds
+        return;   // keep any cached tiles while the index builds; retried next visit
       }
       const j = await r.json();
       const albums = (j && j.albums) || [];
       renderHomeRandom(albums);
-      if (albums.length) saveHomeCache({ random: albums, randomAt: Date.now() });
+      if (albums.length) {
+        homeRandomDay = localDayKey();
+        saveHomeCache({ random: albums, randomDay: homeRandomDay });
+      }
     } catch (e) {
       if (!rowHasContent(homeRandom)) homeRandom.innerHTML = '<div class="home-carousel-empty">Couldn’t load.</div>';
-      homeRowsLoadedAt = 0;   // retry on the next Home visit
     }
   }
 
@@ -734,27 +764,39 @@
     homeArtists.appendChild(frag);
   }
 
-  // A different handful each visit, which is the point of the row: a fixed
-  // twenty would be twenty artists you stop seeing. The seed is minted here and
-  // thrown away — only the WALL keeps one, where it has to survive paging.
+  // Ten artists, and the same ten until tomorrow — the Random albums row's
+  // contract, for the same reason. Today's date is the seed, so the server
+  // draws the set and any device asking on the same day is shown the same one.
   async function loadHomeArtists() {
     if (!homeArtists) return;
     if (!rowHasContent(homeArtists)) {
       homeArtists.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
     }
     try {
-      const seed = (Date.now() / 1000) | 0;
-      const r = await fetch("/api/artists?sort=random&limit=20&seed=" + seed);
+      const r = await fetch("/api/artists?sort=random&limit=" + HOME_PICK_COUNT +
+                            "&seed=" + daySeed());
+      // 503 is "the library is still being read", NOT "there are no artists" —
+      // the difference this row got wrong on a phone, painting "No artists."
+      // over itself for the rest of the session while the artists screen,
+      // opened a minute later, was full of them. Keep what is there, try again.
+      if (r.status === 503) {
+        if (!rowHasContent(homeArtists)) {
+          homeArtists.innerHTML = '<div class="home-carousel-empty">Waiting for Roon Core…</div>';
+        }
+        return;
+      }
       if (!r.ok) throw new Error("HTTP " + r.status);
       const j = await r.json();
       const artists = (j && j.artists) || [];
       renderHomeArtists(artists);
-      if (artists.length) saveHomeCache({ artists });
+      if (artists.length) {
+        homeArtistsDay = localDayKey();
+        saveHomeCache({ artists, artistsDay: homeArtistsDay });
+      }
     } catch (e) {
       if (!rowHasContent(homeArtists)) {
         homeArtists.innerHTML = '<div class="home-carousel-empty">Couldn\u2019t load.</div>';
       }
-      homeRowsLoadedAt = 0;   // retry on the next Home visit
     }
   }
 
@@ -1268,7 +1310,7 @@
     // orphan an in-flight playlist fetch, or its response paints into this one.
     leavePlaylistScreens();
     // The library wall's sort/focus row belongs to that wall only.
-    { const c = document.getElementById("library-controls"); if (c) c.classList.add("hidden"); }
+    parkTopbarSort();
     exitAlbumSelectMode();   // a stale multi-select bar must not survive into a new wall
     if (window.__exitLabels) window.__exitLabels();
     if (activeFilter) {
@@ -1871,13 +1913,8 @@
   // the v1.5.66 startup-crash class this project pre-flights for.
 
   function renderLibraryControls() {
-    let bar = document.getElementById("library-controls");
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = "library-controls";
-      bar.className = "library-controls";
-      grid.parentNode.insertBefore(bar, grid);
-    }
+    const bar = topbarSortSlot();
+    if (!bar) return;
     // Both controls open a sheet rather than mutating the view in place, so a
     // rebuild can no longer land under the user's finger mid-interaction — but
     // applyLibView() still rebuilds this row while the sort sheet is open and
@@ -1897,6 +1934,9 @@
     // finding a record, and neither of the other two was used.
     bar.appendChild(buildLibSortButton());
     bar.classList.toggle("hidden", !libraryWallActive);
+    // Random's reshuffle is a button in the bar beside the control, not a glyph
+    // inside it: it is an action, and the label slot next to it is a label.
+    showSortReshuffle(libraryWallActive && libView.sort === "random");
 
     if (refocus) {
       const again = bar.querySelector("." + refocus);
@@ -1929,10 +1969,11 @@
     const arrow = document.createElement("span");
     arrow.className = "lib-ctl-arrow";
     arrow.setAttribute("aria-hidden", "true");
-    // Random has no direction to show, so the slot carries the reshuffle glyph
-    // instead — the same symbol the sort sheet's Random row re-taps to.
+    // Random has no direction to show, and its reshuffle is now the button
+    // beside this one rather than a glyph inside it — so the slot is simply
+    // empty there, instead of carrying an action that cannot be tapped.
     arrow.textContent = libSortHasDir(libView.sort)
-      ? (libView.dir === "desc" ? "↓" : "↑") : "⟳";
+      ? (libView.dir === "desc" ? "↓" : "↑") : "";
     b.appendChild(arrow);
 
     const caret = document.createElement("span");
@@ -4152,13 +4193,8 @@
   }
 
   function renderArtistsControls() {
-    let bar = document.getElementById("artists-controls");
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = "artists-controls";
-      bar.className = "library-controls";
-      grid.parentNode.insertBefore(bar, grid);
-    }
+    const bar = topbarSortSlot();
+    if (!bar) return;
     bar.innerHTML = "";
     const b = document.createElement("button");
     b.type = "button";
@@ -4167,16 +4203,8 @@
     text.className = "lib-ctl-text";
     text.textContent = artistSortLabel();
     b.appendChild(text);
-    // Same parts as the album wall's sort button, so the two rows read alike:
-    // the glyph slot carries the reshuffle symbol for Random (which re-rolls
-    // when tapped again) and nothing for the alphabetical sorts, which have no
-    // direction to choose.
-    const arrow = document.createElement("span");
-    arrow.className = "lib-ctl-arrow";
-    arrow.setAttribute("aria-hidden", "true");
-    arrow.textContent = artistsWall.sort === "random" ? "\u27f3" : "";
-    b.appendChild(arrow);
-
+    // No arrow slot: A–Z and Z–A say their direction in the label itself, and
+    // Random's reshuffle is the button beside this one.
     const caret = document.createElement("span");
     caret.className = "lib-ctl-caret";
     caret.setAttribute("aria-hidden", "true");
@@ -4186,7 +4214,27 @@
     b.addEventListener("click", openArtistSortSheet);
     bar.appendChild(b);
     bar.classList.toggle("hidden", !artistsWallActive);
+    showSortReshuffle(artistsWallActive && artistsWall.sort === "random");
   }
+
+  // Re-roll the wall that is showing, if its sort is Random. Returns whether it
+  // took the tap: the same button is the random-album wall's shuffle, and that
+  // wall has no sort control at all.
+  function reshuffleActiveWall() {
+    if (artistsWallActive && artistsWall.sort === "random") {
+      artistsWall.seed = libNextSeed(artistsWall.seed);
+      loadArtistsWall();
+      return true;
+    }
+    if (libraryWallActive && libView.sort === "random") {
+      libView.seed = libNextSeed(libView.seed);
+      renderLibraryControls();
+      applyLibView();
+      return true;
+    }
+    return false;
+  }
+  window.__reshuffleActiveWall = reshuffleActiveWall;
 
   function openArtistSortSheet() {
     openLibSheet("Sort by", (body, close) => {
@@ -4278,8 +4326,7 @@
     if (!was) return false;
     artistsWallActive = false;
     grid.classList.remove("artists-grid");
-    const bar = document.getElementById("artists-controls");
-    if (bar) bar.classList.add("hidden");
+    parkTopbarSort();
     return was;
   }
   window.__leaveArtistsWall = leaveArtistsWall;
@@ -4287,8 +4334,7 @@
     artistsWallActive = !!was;
     if (!was) return;
     grid.classList.add("artists-grid");
-    const bar = document.getElementById("artists-controls");
-    if (bar) bar.classList.remove("hidden");
+    renderArtistsControls();   // the slot is shared, so it is rebuilt, not unhidden
   };
   window.__artistsWallSeq = () => artistsWall.seq;
 
@@ -4466,12 +4512,11 @@
   // even reconnected to Roon. Returns true if it painted the main content, so
   // the boot path can reveal Home right away instead of a blank "Connecting…".
   // The live loaders (called by showHome once paired) then revalidate silently,
-  // swapping fresh data in without a "Loading…" flash. Seeding homeRowsLoadedAt
-  // lets the existing 5-minute TTL skip the daily-pick/random refetch entirely on
-  // a quick reopen — but only when BOTH rows are recent: it's seeded from the
-  // OLDER of the two per-row timestamps, so a stale sibling (e.g. the daily pick kept
-  // an old cache while random refreshed) forces a silent revalidation instead
-  // of riding the fresh row's freshness.
+  // swapping fresh data in without a "Loading…" flash. Restoring each drawn
+  // row's DAY along with its tiles is what makes a reopen free: the row is
+  // already showing today's draw, so showHome finds it fresh and asks for
+  // nothing. A row cached on an earlier day (or by a build that did not store
+  // the day) is not fresh, and reloads.
   function hydrateHomeFromCache() {
     const c = readHomeCache();
     if (!c) return false;
@@ -4487,9 +4532,12 @@
     if (c.history  && homeHistory)  { renderHomeHistory(c.history); }
     if (c.genres   && homeGenres)   { renderHomeGenres(c.genres); }
     if (!painted) return false;
-    if (typeof c.aotdAt === "number" && typeof c.randomAt === "number") {
-      homeRowsLoadedAt = Math.min(c.aotdAt, c.randomAt);   // honour the TTL across reopens
-    }
+    // Which day each cached row was drawn for. A cache written before these
+    // were stored (or on an earlier day) simply leaves them empty, and the row
+    // reloads — which is the correct answer to both.
+    homeAotdDay    = typeof c.aotdDay    === "string" ? c.aotdDay    : "";
+    homeRandomDay  = typeof c.randomDay  === "string" ? c.randomDay  : "";
+    homeArtistsDay = typeof c.artistsDay === "string" ? c.artistsDay : "";
     // Reveal Home so the cached content is actually on screen while we reconnect.
     if (homeView)     homeView.classList.remove("hidden");
     if (homeSections) homeSections.classList.remove("hidden");
@@ -6310,9 +6358,15 @@
     const openBtn = document.getElementById("search-open");
 
     const searchWrap = document.getElementById("topbar-search");
+    // The field opens to the full width of the bar, and Sort and the reshuffle
+    // share that end of it. Reported: "when the search bar opens it goes over
+    // the top of sortby". They step aside for it — a class on the group rather
+    // than :has(), so the rule is one the CSS check can see.
+    const rightGroup = document.getElementById("topbar-right");
     function openSearch() {
       row.classList.add("open");
       if (searchWrap) searchWrap.classList.add("is-open");
+      if (rightGroup) rightGroup.classList.add("is-searching");
       if (openBtn) {
         openBtn.classList.add("hidden");
         openBtn.setAttribute("aria-expanded", "true");
@@ -6326,6 +6380,7 @@
       input.blur();
       row.classList.remove("open");
       if (searchWrap) searchWrap.classList.remove("is-open");
+      if (rightGroup) rightGroup.classList.remove("is-searching");
       if (openBtn) {
         openBtn.classList.remove("hidden");
         openBtn.setAttribute("aria-expanded", "false");
@@ -10341,8 +10396,8 @@
       if (topbarBack)    topbarBack.classList.toggle("hidden", saved.topbarBackHidden);
       if (topbarRefresh) topbarRefresh.classList.toggle("hidden", saved.topbarRefreshHidden);
       if (topbarSearch)  topbarSearch.classList.toggle("hidden", saved.topbarSearchHidden);
-      { const b = document.getElementById("library-controls");
-        if (b) b.classList.toggle("hidden", saved.libControlsHidden); }
+      { const b = document.getElementById("topbar-sort");
+        if (b) b.classList.toggle("hidden", saved.sortSlotHidden); }
       // Re-arm the screens whose behaviour lives OUTSIDE the restored nodes:
       // the library wall's infinite scroll (parked on the way in, else it never
       // pages again) and the labels browser's chrome/mode.
@@ -10420,10 +10475,12 @@
       topbarBackHidden:    topbarBack    ? topbarBack.classList.contains("hidden")    : true,
       topbarRefreshHidden: topbarRefresh ? topbarRefresh.classList.contains("hidden") : true,
       topbarSearchHidden:  topbarSearch  ? topbarSearch.classList.contains("hidden")  : true,
-      // The wall's Sort row belongs to the wall. It is built lazily, so it is
-      // looked up rather than held: arriving here from the library left it on
-      // screen over an artist's albums, sorting nothing.
-      libControlsHidden:   (() => { const b = document.getElementById("library-controls");
+      // The Sort control belongs to the wall, not to this screen: arriving here
+      // from the library left it in the bar over an artist's albums, sorting
+      // nothing. Its slot is shared and filled by whichever wall is showing, so
+      // what is put back is the wall's own control, rebuilt — see the artists
+      // wall's unpark, which the restore below runs.
+      sortSlotHidden:      (() => { const b = document.getElementById("topbar-sort");
                                     return b ? b.classList.contains("hidden") : true; })(),
     };
     artistViewActive = true;
@@ -10440,7 +10497,7 @@
     if (topbarBack)    topbarBack.classList.remove("hidden");
     if (topbarRefresh) topbarRefresh.classList.add("hidden");
     if (topbarSearch)  topbarSearch.classList.add("hidden");
-    { const b = document.getElementById("library-controls"); if (b) b.classList.add("hidden"); }
+    if (window.__parkTopbarSort) window.__parkTopbarSort();
 
     // Show loading state
     if (countBar) {

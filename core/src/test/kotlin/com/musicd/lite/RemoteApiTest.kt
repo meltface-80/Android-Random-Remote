@@ -323,6 +323,30 @@ class RemoteApiTest {
         assertTrue("no streaming service is connected, so no source badge", first.isNull("source"))
     }
 
+    // Home's Random and Artists rows show one set for the whole day, and get it
+    // by asking with the date as the seed.
+    @Test
+    fun aSeededDrawIsTheSameEveryTimeAndDiffersByDay() {
+        fun titles(path: String) = json(path).getJSONArray("albums").let { arr ->
+            (0 until arr.length()).map { arr.getJSONObject(it).getString("title") }
+        }
+        val today = titles("/api/random-albums?count=3&seed=20260910")
+        assertEquals(3, today.size)
+        assertEquals(today, titles("/api/random-albums?count=3&seed=20260910"))
+        assertNotEquals(today, titles("/api/random-albums?count=3&seed=20260911"))
+    }
+
+    // An empty artist list from a library that has not finished being read is
+    // not an answer. The page paints "No artists." on one and keeps its tiles
+    // (and retries) on the other, so the difference has to reach it.
+    @Test
+    fun artistsSayNotYetWhileTheLibraryIsStillBeingScanned() {
+        app.index.clear()
+        val (code, text) = get("/api/artists")
+        assertEquals(503, code)
+        assertTrue(JSONObject(text).getString("error").isNotEmpty())
+    }
+
     @Test
     fun aGenreFilterWalksRoonsOwnList() {
         val body = json("/api/random-albums?count=10&filter_type=genre&filter_value=Trip-Hop")
