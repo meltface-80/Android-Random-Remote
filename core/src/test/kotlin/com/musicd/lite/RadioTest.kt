@@ -168,6 +168,90 @@ class RadioTest {
         assertEquals(listOf("z1"), app.radio.zonesToStart(zones, 6_000))
     }
 
+    // ------------------------------------------------- a clock of its own
+    //
+    // THE BUG THE OWNER REPORTED: nothing is ever queued. Every test above
+    // hands the radio its second reading of the stop, and that is exactly what
+    // real life does not do. Roon's zone subscription is an event feed: it
+    // reports the end of a queue in a short burst and then, with nothing
+    // playing anywhere, says nothing at all. The settle needs a reading FOUR
+    // SECONDS after the first one, and no such reading arrives — so the radio
+    // sat at "one stop seen, waiting for the next" forever. It only ever fired
+    // when some OTHER zone was playing, because that zone's seek ticks are
+    // what kept calling the gate.
+
+    /** Records what was asked for instead of waiting for it. */
+    private class FakeDelay : Radio.Delay {
+        val pending = ArrayList<Pair<Long, () -> Unit>>()
+        override fun after(ms: Long, task: () -> Unit) { pending += ms to task }
+        fun runAll() {
+            val due = ArrayList(pending)
+            pending.clear()
+            due.forEach { it.second() }
+        }
+    }
+
+    @Test
+    fun theEndOfAQueueArmsARecheck() {
+        val delay = FakeDelay()
+        var nowMs = 1_000_000L
+        val radio = Radio(app, clock = { nowMs }, delay = delay)
+        radio.setEnabled("z1", true)
+
+        // The end of a queue as Roon actually reports it: a burst, then silence.
+        radio.onZones(listOf(zone("z1", "stopped")))
+        nowMs += 200
+        radio.onZones(listOf(zone("z1", "stopped")))
+        nowMs += 700
+        radio.onZones(listOf(zone("z1", "stopped")))
+
+        // The burst is all inside the settle, so nothing has started — right so
+        // far. What matters is that something is going to look again.
+        assertEquals("the radio is waiting for a reading that will never come",
+            1, delay.pending.size)
+        assertTrue("it must wait out the settle, not less",
+            delay.pending[0].first >= 4_000L)
+    }
+
+    @Test
+    fun theRecheckIsWhatStartsTheAlbum() {
+        val delay = FakeDelay()
+        var nowMs = 1_000_000L
+        val radio = Radio(app, clock = { nowMs }, delay = delay)
+        core.zonesList = listOf(zone("z1", "stopped"))
+        radio.setEnabled("z1", true)
+        radio.onZones(core.zonesList)
+        assertTrue("nothing may start on the first reading of a stop", core.invoked.isEmpty())
+
+        // Roon has sent nothing since. The settle elapses anyway.
+        nowMs += 5_000
+        delay.runAll()
+
+        val deadline = System.currentTimeMillis() + 5_000
+        while (core.invoked.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        assertTrue("no album was ever put on the zone: " + core.invoked,
+            core.invoked.any { it.startsWith("play_now") && it.endsWith("@z1") })
+    }
+
+    @Test
+    fun aZoneThatStartsPlayingAgainStopsBeingWatched() {
+        val delay = FakeDelay()
+        var nowMs = 1_000_000L
+        val radio = Radio(app, clock = { nowMs }, delay = delay)
+        radio.setEnabled("z1", true)
+        radio.onZones(listOf(zone("z1", "stopped")))
+        assertEquals(1, delay.pending.size)
+
+        // The user pressed play. The armed recheck still runs — it was already
+        // scheduled — but it finds a playing zone, does nothing, and arms
+        // nothing further.
+        nowMs += 5_000
+        core.zonesList = listOf(zone("z1", "playing"))
+        delay.runAll()
+        assertTrue("a playing zone must not be watched", delay.pending.isEmpty())
+        assertTrue(core.invoked.isEmpty())
+    }
+
     @Test
     fun switchingRadioOffForgetsTheZonesProgress() {
         app.radio.setEnabled("z1", true)
