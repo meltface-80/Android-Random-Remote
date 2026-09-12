@@ -779,4 +779,16 @@ class MusicdLite(
     fun background(body: () -> Unit) {
         runCatching { jobs.execute { runCatching(body) } }
     }
+
+    /**
+     * Run [body] once, [delayMs] from now.
+     *
+     * One-shot only, deliberately: this is not a place to hang a timer that
+     * ticks forever. Random Album Radio uses it to wait out a zone's settle,
+     * because Roon stops sending updates about a zone at the exact moment the
+     * radio is waiting to hear about one.
+     */
+    fun schedule(delayMs: Long, body: () -> Unit) {
+        runCatching { jobs.schedule({ runCatching(body) }, delayMs, TimeUnit.MILLISECONDS) }
+    }
 }
