@@ -63,18 +63,43 @@ pinned in `tools/dial-upstream.json`. The difference is a declared list of
 string substitutions and nothing else.
 
 **Never edit a synced file here.** The next sync would undo it silently, so CI
-runs `--check` and fails if one has been touched. Fix it upstream and re-pin,
-or take the file out of the manifest and adapt it by hand — either is fine, but
-a file cannot be both synced and locally patched.
+runs `--check` and fails if one has been touched. Take the file out of the
+manifest and adapt it by hand if you need to own it — but a file cannot be both
+synced and locally patched.
+
+**Upstream is gone.** meltface-80/dial-for-Roon was removed from the account in
+September 2026. It is not private, it is not renamed as far as this repo can
+tell — it is simply not there, so the pinned commit cannot be fetched by anyone,
+with any credential. That took CI down on every PR, including ones nowhere near
+the dial, because `--check` used to re-fetch and regenerate before it could say
+anything at all.
+
+So `--check` no longer touches the network. The sync records a sha256 of every
+file it writes in `tools/dial-upstream.json`, and the check compares the tree
+against those. It still fails on a hand-edited file, a deleted one, a manifest
+edited without a re-sync — that last one is new; the old check regenerated from
+whatever the manifest said and so could never disagree with it — and on a
+`strings.xml` entry the dial needs going missing.
+
+What this costs: nothing now re-derives these files from source, so "match
+upstream" has become "match what the last sync wrote". The digests in the
+manifest were taken from the tree at 36f5a60, the last commit CI verified
+against the real upstream, and no ported file has changed since.
+
+If the repository comes back, or you have a clone of it, everything still works
+— pass `--source` and the full regeneration comparison runs as it always did.
+If it never comes back, these files are ours now, and the honest move is to take
+them out of the manifest and say so.
 
 `DialActivity.kt` and `DialWidget.kt` are ours, and are where the dial meets
 this app's Roon client. When upstream grows a new callback or expects a new
 resource, that is where to answer it.
 
 ```bash
-tools/sync-dial.py --latest                  # has upstream moved?
-tools/sync-dial.py --write --commit <sha>    # bring it in
-tools/sync-dial.py --check                   # what CI runs
+tools/sync-dial.py --check                   # what CI runs; no network
+tools/sync-dial.py --check --source <dir>    # also regenerate and compare
+tools/sync-dial.py --write --source <dir>    # regenerate and re-record digests
+tools/sync-dial.py --latest                  # has upstream moved? (needs it back)
 ```
 
 ## The honesty rule about Android code
