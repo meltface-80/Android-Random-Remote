@@ -16,9 +16,8 @@ companion service on another machine.
 The interface is not a lookalike: it is MusicD-Remote's own `public/` directory,
 copied unmodified into the APK. What changed is everything underneath. The
 13,000-line Node server it used to talk to is now Kotlin running in the same
-process, speaking Roon's protocols natively — the approach
-[Display-extension-apk](https://github.com/meltface-80/Display-extension-apk)
-established, applied to a much larger app.
+process, speaking Roon's protocols natively — the approach the earlier
+Display-extension-apk established, applied to a much larger app.
 
 **"Lite" means one thing above all: no record labels.** That feature is most of
 the original's weight and it cannot work on a phone at all — details in
@@ -113,27 +112,37 @@ Until it does, the app's notification tells you exactly what it is waiting for.
 Everything below works against your library through Roon's browse API, with the
 original's screens unchanged:
 
-- **Discovery** — a wall of random albums, filtered by genre, tag or decade;
-  Album of the Day; a "not played in N months" row; recently played.
-- **Smart Picks** — a handful of albums a day you have not played in six
-  months, drawn from your own library, with a "not for me" that keeps one from
-  coming back.
-- **Play Unheard** — one button in the topbar, straight to a record you have
-  never played.
-- **The whole library** — a paged, sortable grid (title, artist, year, added,
-  play count, last played, or a stable shuffle) with focus facets.
+- **A Home screen of rows you choose.** Album of the day, Recently played,
+  Smart Picks, Random albums, Artists, Library and Browse by genre — each one
+  can be reordered or switched off in Settings → Home Screen, and a row that is
+  off is not loaded at all rather than merely hidden.
+- **Discovery** — a wall of random albums, filtered by genre, tag or decade, and
+  Album of the Day: the same record for everyone until local midnight, withdrawn
+  once you have actually played it.
+- **Smart Picks** — a set of albums drawn from your library each day and steady
+  until tomorrow, with a "not for me" that blocks that artist from coming back.
+- **The whole library** — a paged grid, sorted by title, artist, year, added,
+  play count, last played or a stable shuffle, with facets for decade, genre and
+  whether you have ever played it.
 - **Instant search** over the whole library, matched locally on every keystroke:
   prefix-aware, out-of-order (`dark moon` → *Dark Side of the Moon*) and
-  typo-tolerant.
+  typo-tolerant. Artists are matched too, and have their own pages.
 - **Album pages** — track list, release year, album and artist write-ups,
   linkable artist credits, play / queue / play-next / start-radio.
 - **Playback** — zones and grouping, transport, per-output volume and mute,
   shuffle / repeat / Roon Radio, the queue, play-from-here, zone transfer,
   standby and convenience-switch on source-controlled devices.
-- **Multi-select** — queue many albums in one go.
+- **Multi-select** — play, queue or add many albums at once.
+- **Playlists you make yourself.** Roon's extension API cannot write a playlist
+  — there is no verb for it — so these are kept by the app: an entry names an
+  album and a position in it, and playing one opens each album on the Core and
+  invokes the track. Up to 50 lists of 500 tracks.
 - **Random Album Radio** — when a zone's queue runs dry, another album goes on.
-- **Play history** — kept locally, and what "unheard" and "rediscover" are built
-  from. This is the feature that gets better the longer the app is installed.
+  Per zone, and it turns Roon's own radio off for that zone so the two cannot
+  both fire.
+- **Play history** — kept locally, and what the play-count and last-played sorts
+  and the "never played" facet are built from. This is the feature that gets
+  better the longer the app is installed.
 - **Pitchfork** — the Latest and Best New Music listings, with scores, covers
   and links out to pitchfork.com. No review text is served, here or upstream:
   the writing is Pitchfork's and the app links to it.
@@ -142,6 +151,10 @@ original's screens unchanged:
   uploaded anywhere to make one.
 - **Updates in the app** — Settings checks for a newer APK and offers it.
   Android's installer still asks; this only saves finding the download.
+- **Your other devices, if you ask for them.** Settings → Network rebinds the
+  server on `0.0.0.0` and mints a code; the remote is then at `:3450` and the
+  dial at `:3450/dial` from anything on the same Wi-Fi. Off by default, and
+  every request passes one gate before the API sees it.
 
 Release years come from MusicBrainz and the write-ups from Wikipedia. Both are
 free and need no key.
@@ -210,23 +223,49 @@ the whole reason for the port:
   streaming services rather than from whatever is installed. The
   `MEDIA_PLAY_FROM_SEARCH` filter is a standing offer Google may never take up;
   everything that is not Google can use it today.
+- **What the assistant actually does reach.** The app declares a
+  `MediaBrowserService`, which is the ordinary media-app integration every
+  player on Android implements and what Android requires before an assistant may
+  send commands to a media session. Measured on one phone with Gemini, rather
+  than assumed:
+
+  | Said | Result |
+  |---|---|
+  | "pause", "next track" | works — routed to the media session, and on to Roon |
+  | "open *&lt;app name&gt;*" | works — a plain launch by name |
+  | volume rocker | works — volume keys reach the zone, not the phone |
+  | "turn up the volume" | **fails** — moves the phone's own stream |
+  | "play *&lt;album&gt;* on *&lt;app&gt;*" | **fails** — declined outright |
+
+  The last one is why the service is documented the way it is in
+  `BrowserService.kt`: it was added to make that work, it does not, and no
+  amount of further conformance will. The two that do work depend on it, so it
+  stays — but the dial's own microphone and the `VOICE_COMMAND` intent above are
+  the routes that actually answer "play this record".
 - **The dial as a widget too.** The same view drawn to an image, so the two
   cannot drift apart, with tap targets laid over the controls it drew. The ring
   cannot be swept there — a drag on the home screen belongs to the launcher —
   so its two sides are volume instead.
 
-The dial is not this project's code. It is ported from
-[Dial for Roon](https://github.com/meltface-80/dial-for-Roon) by
+The dial is not this project's code. It was ported from Dial for Roon by
 `tools/sync-dial.py`, from the commit pinned in `tools/dial-upstream.json`, and
 the whole difference between that code and the copy here is a declared list of
-string substitutions. CI regenerates it and fails on any difference, so the
-port cannot quietly diverge; a weekly job asks whether upstream has moved.
+string substitutions.
+
+That upstream repository was removed from its account in September 2026, so the
+pinned commit can no longer be fetched by anyone and nothing re-derives these
+files from source. The guard that stopped the port quietly diverging still runs:
+`tools/sync-dial.py --check` compares every ported file against a sha256
+recorded in the manifest, so a hand-edit, a deletion or a manifest changed
+without a re-sync still fails the build — offline, and without depending on a
+second repository being alive. If a clone of the upstream turns up, `--source`
+restores the full regeneration comparison.
 
 Not here, and removed from the interface rather than left as controls that
-cannot work: Qobuz and Tidal, label browsing, playlists, the wall display, and
-sharing a card as a link. Where a screen remains, the API answers "not in this
-build" in the shape the front-end already understands, so it shows its own
-empty state instead of an error.
+cannot work: Qobuz and Tidal, label browsing, Roon's own and dynamic playlists,
+the wall display, and sharing a playlist as a link. Where a screen remains, the
+API answers "not in this build" in the shape the front-end already understands,
+so it shows its own empty state instead of an error.
 
 Speech recognition is Android's own and the matching is this app's library
 index, so "dark side of the moon" finds the record. Nothing about what was said
@@ -251,7 +290,7 @@ instead of an error.
 | **Qobuz and TIDAL** browsing, favourites, external search | Both logins drive unofficial APIs those services' own terms forbid, and they buy catalogue browsing only: Roon streams from either through its own account regardless. Removed rather than deferred. |
 | **The wall display** — the `/display` page | Not ported. Serving pages to other devices is possible now (Settings → Network), but a wall display also means the phone staying awake to render one. See [Why there is no wall display](#why-there-is-no-wall-display). |
 | Quality badges (sample rate / bit depth) and source badges | Read from file tags on the mounted music directory. Same missing input as labels. |
-| Playlists, smart playlists, import | Self-contained features, not yet ported. |
+| **Roon's playlists**, Dynamic Playlists, and importing or sharing a playlist as a link | Playlists you make yourself **are** here — see [What's here](#whats-here). What is not is reading Roon's own playlists, the dynamic/smart kind, and the share-a-link import: those screens remain and show their empty state. |
 | **Queue editing** — remove, reorder, clear | Not a lite limitation. Roon's extension API has no verb for it: `play_from_here` is the only queue mutation it exposes, and that works. |
 
 Apart from queue editing, nothing on that list is a protocol limitation.
@@ -322,9 +361,9 @@ Needs JDK 17+, Android SDK platform 36 and build-tools 36.0.0. Output lands in
 
 ## Verification
 
-**136 unit tests, all passing.** They run on a plain JVM, which is the point of
-splitting `:core` out: the parts most worth testing are tested without an
-emulator in the loop.
+**389 unit tests, all passing** — 368 in `:core` on a plain JVM, and 21 in
+`:app` under Robolectric. Splitting `:core` out is what makes the first number
+possible: the parts most worth testing are tested with no emulator in the loop.
 
 - **Wire format, checked against Roon's own code.** `tools/verify-wire.js` feeds
   the frames the Kotlin encoder produces to `node-roon-api`'s own `moo.js`, and
@@ -377,9 +416,21 @@ emulator in the loop.
   This is the only Android code here with a test behind it rather than just a
   compiler.
 
-- **The API, end to end over a real socket.** 29 tests drive the shipping HTTP
+- **The API, end to end over a real socket.** 79 tests drive the shipping HTTP
   server and router — the JSON the unmodified front-end reads, `409` on a moved
   album, `503` when unpaired, and the "feature is off" shapes.
+
+- **What the library view costs the database.** Every per-album read is a real
+  SQLite round trip on a phone, and the view runs over the whole snapshot — so a
+  filter that asks for one album's year at a time is one query per album, and a
+  sort that asks inside its comparator is one per *comparison*. A counting store
+  fails the build when the number of reads scales with the library, which is the
+  same "assert the calls that are NOT made" trick the outbound HTTP client uses.
+
+- **A feed read while it is written.** The outputs feed is written by the Roon
+  socket thread and read by every HTTP worker; the test drives three readers
+  against a writer and fails, on the unguarded version, with a real
+  `ConcurrentModificationException`.
 
 **Not yet verified against a live Roon Core.** There is no Core in the build
 environment. The protocol layer is checked against Roon's own code and the API
