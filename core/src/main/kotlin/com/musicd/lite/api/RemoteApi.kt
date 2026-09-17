@@ -69,6 +69,12 @@ class RemoteApi(
         /** Distinguishes a blocked ARTIST from the album keys once stored. */
         const val BLOCKED_ARTIST_PREFIX = "artist:"
 
+        /** The renderings Roon's image service accepts. */
+        val IMAGE_SCALES = setOf("fit", "fill", "stretch")
+
+        /** Roon writes a genre's size into its subtitle, and nowhere else. */
+        val GENRE_ALBUM_COUNT = Regex("(\\d[\\d,]*)\\s*albums?", RegexOption.IGNORE_CASE)
+
         /**
          * How long a zone-state request may wait for news. Comfortably inside
          * the HTTP read timeout, so a quiet system answers rather than hangs
@@ -429,15 +435,13 @@ class RemoteApi(
     private fun artistLinks(credit: String): JSONArray {
         val names = Normalize.splitArtists(credit)
         if (names.isEmpty()) return JSONArray()
-        val known = index.albums.mapTo(HashSet()) { it.nArtist }
-        val perName = HashSet<String>()
-        for (al in index.albums) for (a in al.artistNames) perName += a.normalized
+        val known = index.artistKeys
         return JSONArray().also { arr ->
             for (n in names) {
                 arr.put(
                     JSONObject()
                         .put("name", n.name)
-                        .put("linkable", n.normalized in known || n.normalized in perName)
+                        .put("linkable", n.normalized in known)
                 )
             }
         }
@@ -634,8 +638,10 @@ class RemoteApi(
             val pool = if (filter == null) index.albums else {
                 val decade = filter.value.removeSuffix("s").toIntOrNull()
                     ?: return Json.error(400, "unrecognised decade ${filter.value}")
+                // One read of the years table, not a query per album.
+                val years = store.albumYears()
                 index.albums.filter {
-                    val y = view.albumYearOf(it)
+                    val y = years[it.key]
                     y != null && y >= decade && y < decade + 10
                 }
             }
@@ -716,7 +722,11 @@ class RemoteApi(
             .map { JSONObject().put("id", it.key).put("label", it.key).put("count", it.value) }
 
         val everPlayed = view.playedTitlesSince(0)
-        val played = index.albums.count { it.title.lowercase().trim() in everPlayed }
+        // view.playKey's rule rather than a second copy of it. The two folds
+        // agree today; keeping them as one is what stops the count and the
+        // list from drifting apart later, which is what the note above is
+        // about.
+        val played = index.albums.count { view.playKey(it) in everPlayed }
 
         val playedChips = listOf(
             JSONObject().put("id", "never").put("label", "Never played").put("count", index.count - played),
@@ -1258,7 +1268,7 @@ class RemoteApi(
             emptyList()
         }
         val counted = items.filter { it.hint != "header" }.map {
-            it to (Regex("(\\d[\\d,]*)\\s*albums?", RegexOption.IGNORE_CASE)
+            it to (GENRE_ALBUM_COUNT
                 .find(it.subtitle)?.groupValues?.get(1)?.replace(",", "")?.toIntOrNull() ?: 0)
         }.sortedByDescending { it.second }
         val groups = counted.take(24).map { (item, n) ->
@@ -1356,8 +1366,10 @@ class RemoteApi(
                 (BLOCKED_ARTIST_PREFIX + Normalize.text(album.subtitle)) !in blocked
         }
         // Seeded by the day so the row does not reshuffle on every Home visit.
-        val seed = LibraryView.fnv1a(day)
-        val picks = pool.sortedBy { LibraryView.seededRank(it.key, seed) }.take(count)
+        // Through view.sample because that IS this draw — the same seededRank
+        // order over the same pool — and having it in one place means it is
+        // ranked once per album rather than once per comparison.
+        val picks = view.sample(pool, count, LibraryView.fnv1a(day))
         return Json.obj(
             base
                 .put("enabled", true)
@@ -1674,7 +1686,7 @@ class RemoteApi(
         val size = request.int("size")
         val width = (size ?: request.int("width") ?: request.int("w") ?: 512).coerceIn(32, 2048)
         val height = (size ?: request.int("height") ?: request.int("h") ?: width).coerceIn(32, 2048)
-        val scale = request.str("scale")?.takeIf { it in setOf("fit", "fill", "stretch") } ?: "fit"
+        val scale = request.str("scale")?.takeIf { it in IMAGE_SCALES } ?: "fit"
 
         val url = roon.imageUrl(key, width, height, scale)
             ?: return Json.error(503, "Not paired with a Roon Core")

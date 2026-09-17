@@ -63,6 +63,8 @@ class ImageCache(
          */
         const val PRUNE_EVERY_BYTES = 8L * 1024 * 1024
 
+        private const val HEX = "0123456789abcdef"
+
         private fun httpFetcher(http: OkHttpClient) = Fetcher { url ->
             try {
                 http.newCall(Request.Builder().url(url).build()).execute().use { response ->
@@ -105,7 +107,16 @@ class ImageCache(
      */
     private fun fileName(cacheKey: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(cacheKey.toByteArray())
-        return digest.joinToString("") { "%02x".format(it) } + ".jpg"
+        // Hand-rolled hex, not "%02x".format per byte. This runs on every
+        // request that misses the memory tier — a wall of sixty tiles on a warm
+        // disk cache is sixty of these — and String.format reparses its format
+        // string and consults the locale for each of the 32 bytes.
+        val sb = StringBuilder(digest.size * 2 + 4)
+        for (b in digest) {
+            val v = b.toInt() and 0xff
+            sb.append(HEX[v ushr 4]).append(HEX[v and 0x0f])
+        }
+        return sb.append(".jpg").toString()
     }
 
     @Synchronized

@@ -7,6 +7,7 @@ import com.musicd.lite.store.YearSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -210,6 +211,35 @@ class LibraryViewTest {
         val c = view.select(view.sanitize("random", null, null, null, null, null, "43")).map { it.title }
         assertEquals(a, b)
         assertTrue("a different seed should reorder", a != c)
+    }
+
+    /**
+     * A stored zero is the first-scan marker, not a date: it says "already here
+     * the first time this app looked". Dating the original library at the epoch
+     * would file all of it as the oldest thing ever added, which is exactly the
+     * "recently added means everything" problem the marker exists to avoid.
+     *
+     * [MemoryStore] did not apply the rule that the SQLite store does, so the
+     * one case the marker exists for was the one case these tests could not
+     * see — and the sort read the table per album, so nothing forced the two
+     * to agree.
+     */
+    @Test
+    fun theFirstScanMarkerIsNotADate() {
+        build("Old Hand" to "Nobody", "New Arrival" to "Somebody", "Never Dated" to "Anyone")
+        val marker = index.albums.first { it.title == "Old Hand" }
+        val dated = index.albums.first { it.title == "New Arrival" }
+        store.recordFirstSeen(mapOf(marker.key to 0L, dated.key to 1_700_000_000_000L))
+
+        assertNull("a zero is a marker, not an epoch date", view.albumAddedOf(marker))
+        assertEquals(1_700_000_000_000L, view.albumAddedOf(dated))
+
+        // Oldest first. The only album with a real date leads; the marker and
+        // the never-dated album share the undated tail.
+        val oldestFirst = view.select(view.sanitize("added", "asc", null, null, null, null, null))
+            .map { it.title }
+        assertEquals("New Arrival", oldestFirst.first())
+        assertEquals(setOf("Old Hand", "Never Dated"), oldestFirst.drop(1).toSet())
     }
 
     @Test

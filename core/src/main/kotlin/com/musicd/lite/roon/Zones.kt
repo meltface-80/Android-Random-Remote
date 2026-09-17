@@ -393,11 +393,23 @@ class ZoneStore {
  * that are not currently part of any zone the user is looking at.
  */
 class OutputStore {
+    /**
+     * Guards [outputs], for the same reason [ZoneStore] has one.
+     *
+     * This feed is written by the MOO socket thread and read by every HTTP
+     * worker answering /api/outputs, and it was an unguarded LinkedHashMap
+     * across those threads — the exact race the zone feed was given a lock
+     * for, left behind on the outputs feed. Sorting the values while the
+     * socket thread put one in throws ConcurrentModificationException, and a
+     * put landing mid-resize can corrupt the map outright.
+     */
+    private val lock = Object()
     private val outputs = LinkedHashMap<String, Output>()
 
     fun applySubscribed(body: JSONObject) {
-        outputs.clear()
-        body.optJSONArray("outputs")?.let { arr ->
+        synchronized(lock) {
+            outputs.clear()
+            val arr = body.optJSONArray("outputs") ?: return
             for (i in 0 until arr.length()) {
                 val o = Output.parse(arr.getJSONObject(i))
                 outputs[o.outputId] = o
@@ -405,7 +417,7 @@ class OutputStore {
         }
     }
 
-    fun applyChanged(body: JSONObject) {
+    fun applyChanged(body: JSONObject) = synchronized(lock) {
         body.optJSONArray("outputs_removed")?.let { arr ->
             for (i in 0 until arr.length()) outputs.remove(arr.getString(i))
         }
@@ -419,11 +431,13 @@ class OutputStore {
         }
     }
 
-    fun clear() = outputs.clear()
+    fun clear() = synchronized(lock) { outputs.clear() }
 
-    fun all(): List<Output> = outputs.values.sortedBy { it.displayName.lowercase() }
+    fun all(): List<Output> = synchronized(lock) {
+        outputs.values.sortedBy { it.displayName.lowercase() }
+    }
 
-    fun isEmpty(): Boolean = outputs.isEmpty()
+    fun isEmpty(): Boolean = synchronized(lock) { outputs.isEmpty() }
 }
 
 /** One entry of a zone's play queue, as the UI's queue sheet renders it. */

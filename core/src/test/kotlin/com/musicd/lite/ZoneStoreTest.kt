@@ -156,4 +156,58 @@ class ZoneStoreTest {
         assertEquals("Deck 2", outputs.all()[0].displayName)
         assertNotNull(outputs.all()[0])
     }
+
+    /**
+     * The outputs feed is written by the MOO socket thread and read by every
+     * HTTP worker answering /api/outputs. Unguarded, sorting the values while
+     * the writer puts one in throws ConcurrentModificationException — the same
+     * race [ZoneStore] was given a lock for, which the outputs feed did not
+     * get. Reading is what must survive; the counts are the writer's business.
+     */
+    @Test
+    fun outputStoreSurvivesTheSocketThreadWritingWhileHttpReads() {
+        val outputs = OutputStore()
+        outputs.applySubscribed(
+            JSONObject("""{"outputs":[{"output_id":"seed","display_name":"Seed"}]}""")
+        )
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        val writer = Thread {
+            try {
+                var n = 0
+                while (!stop.get()) {
+                    val id = "out-${n++ % 64}"
+                    outputs.applyChanged(
+                        JSONObject("""{"outputs_changed":[{"output_id":"$id","display_name":"Out $n"}]}""")
+                    )
+                    outputs.applyChanged(JSONObject("""{"outputs_removed":["$id"]}"""))
+                }
+            } catch (t: Throwable) {
+                failure.compareAndSet(null, t)
+            }
+        }
+        val readers = (1..3).map {
+            Thread {
+                try {
+                    repeat(3_000) {
+                        outputs.isEmpty()
+                        // The sort is the part that iterates, so it is the part
+                        // a concurrent put or remove trips over.
+                        outputs.all().forEach { o -> o.displayName.length }
+                    }
+                } catch (t: Throwable) {
+                    failure.compareAndSet(null, t)
+                }
+            }
+        }
+
+        writer.start()
+        readers.forEach { it.start() }
+        readers.forEach { it.join(30_000) }
+        stop.set(true)
+        writer.join(30_000)
+
+        failure.get()?.let { throw AssertionError("a concurrent read of the outputs feed threw", it) }
+    }
 }
