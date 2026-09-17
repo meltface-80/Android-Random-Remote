@@ -143,5 +143,32 @@
       "widget_volume_up",
       "widget_volume_down"
     ]
-  }
+  },
+  "_digests_comment": [
+    "sha256 of every ported file, as the last sync wrote it. tools/sync-dial.py",
+    "--check compares the tree against these, which is how the build answers",
+    "'has anyone hand-edited the dial?' without reaching for a second repository.",
+    "",
+    "BASELINE, NOT A REGENERATION. meltface-80/dial-for-Roon is gone, so these",
+    "could not be produced by re-running the sync. They are the bytes already in",
+    "this tree at commit 36f5a60 \u2014 the last commit whose CI run did the full",
+    "upstream comparison and passed, on 15 September 2026. No ported file has",
+    "changed since. Anything written by a real --write from a real --source",
+    "replaces them, and agrees with them if that source is the pinned commit."
+  ],
+  "digests": {
+    "app/src/main/java/com/musicd/lite/android/dial/DialView.kt": "95a222f54ea530c59a0e8e7da6dfcfd8a0253359659e6cc35fbe12788a45876a",
+    "app/src/main/java/com/musicd/lite/android/dial/VoiceInput.kt": "31279d3289d32c4a14fe400c2fa6901932ad515c389c951525b1185d58d113d5",
+    "app/src/main/java/com/musicd/lite/android/dial/WidgetGeometry.kt": "373c2ef1e29115a358e4c3ebf06594b9287798cc7844fa994eea8fc0ab5099a6",
+    "app/src/main/java/com/musicd/lite/android/dial/WidgetDial.kt": "94612a76f66d2f2fed39090733d079b125cc44c623e91c2a43e743e70817a1ce",
+    "app/src/main/java/com/musicd/lite/android/dial/WidgetSnapshot.kt": "81f1540b96fc0e35bb6b024421a579b72fff72936030d37fb04ff6fe1fbce43c",
+    "app/src/main/java/com/musicd/lite/android/dial/WidgetArtwork.kt": "ba0c6d7490e781e38278e6387b4a889a1080961e633f5099701238d72a68ecac",
+    "app/src/test/java/com/musicd/lite/android/dial/DialViewTest.kt": "c3a486e2d55a6c5bccaacc5add4bfb84ce36893e5c25622d35142b2d9adb3a3d",
+    "app/src/test/java/com/musicd/lite/android/dial/WidgetGeometryTest.kt": "71d91f7e8d692062cf508d1da3fed9e4b73fa8b716af6f9b95ea2de9433c4d58",
+    "app/src/main/res/layout/widget_dial.xml": "e2eaaeca08c448b6fd77d1b7cd1e1d30c7adf9e0cabb31585b0a07ad1e27c16c",
+    "app/src/main/res/xml/widget_dial_info.xml": "4d40f1808ba4e781139bb95d36de39952646b84132743dca55a99088174d9736",
+    "app/src/main/res/drawable/dial_widget_background.xml": "2933fa592201e8bb9d0409e489fe4ef7d6cc54b997cbd0e5c1614cd54d3fb4cb",
+    "app/src/main/res/drawable/ic_dial_foreground.xml": "743dee948707b09a25ce54b46b7aea88dd6abad463eb3f6e1252952c9b9bc41c"
+  },
+  "inputs": "d0fca718bd5c2a63ed64c5534918828b3fc5c7b0ef4b4547d5f080435c887678"
 }

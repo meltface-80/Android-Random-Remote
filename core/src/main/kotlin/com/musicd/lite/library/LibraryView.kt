@@ -68,13 +68,29 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
         fun prefix(raw: String?): String = Normalize.text(raw).take(PREFIX_MAX)
     }
 
-    /** Play history is keyed by album title alone, exactly as the table records it. */
-    private fun playKey(al: AlbumRecord): String = al.title.lowercase(Locale.ROOT).trim()
+    /**
+     * Play history is keyed by album title alone, exactly as the table records
+     * it. Public because the facet counts have to fold the identical way the
+     * filter does — a second copy of this rule is how a chip ends up promising
+     * a number the list does not deliver.
+     */
+    fun playKey(al: AlbumRecord): String = al.title.lowercase(Locale.ROOT).trim()
 
     fun albumYearOf(al: AlbumRecord): Int? = store.albumYear(al.key)
 
     /** Epoch millis the album first appeared in the library, or null. */
     fun albumAddedOf(al: AlbumRecord): Long? = store.firstSeen(al.key)
+
+    /**
+     * Every first-seen date in one read, with the first-scan marker dropped.
+     *
+     * A stored zero means "was already there when this app first looked", which
+     * is not a date — [Store.firstSeen] answers null for it, and reading the
+     * whole table in bulk has to apply the same rule or a sort by "recently
+     * added" would file the entire original library at the epoch.
+     */
+    private fun firstSeenDates(): Map<String, Long> =
+        store.firstSeenAll().filterValues { it > 0L }
 
     /**
      * Does this album start with the typed text, by title or by artist?
@@ -132,17 +148,25 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
     fun select(q: Query): List<AlbumRecord> {
         var list: List<AlbumRecord> = index.albums
 
+        // Narrow on the free text FIRST. It is the only filter that needs no
+        // side table, and everything below is proportional to what survives it.
         if (q.prefix.isNotEmpty()) list = list.filter { matchesPrefix(it, q.prefix) }
 
+        // ONE read of each side table, not one per album. These used to be
+        // store.albumYear(key) and store.albumGenres(key) inside the filter,
+        // which is a SQLite round trip per album — fifty thousand of them to
+        // draw one page of a large library.
         if (q.decade != null) {
             val from = q.decade
-            list = list.filter { val y = albumYearOf(it); y != null && y >= from && y < from + 10 }
+            val years = store.albumYears()
+            list = list.filter { val y = years[it.key]; y != null && y >= from && y < from + 10 }
         }
 
         if (q.genre != null) {
             val want = Normalize.text(q.genre)
+            val genres = store.albumGenresAll()
             list = list.filter { al ->
-                store.albumGenres(al.key).any { Normalize.text(it) == want }
+                genres[al.key]?.any { Normalize.text(it) == want } == true
             }
         }
 
@@ -164,13 +188,18 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
         // Roon publishes no import date at all, so on an established library
         // the undated set starts out large.
         if (q.sort == "year" || q.sort == "added") {
-            val dateOf: (AlbumRecord) -> Long? =
-                if (q.sort == "year") { a -> albumYearOf(a)?.toLong() } else { a -> albumAddedOf(a) }
+            // Read the table ONCE and resolve every date up front. This was a
+            // lambda that hit SQLite per call and was then handed to a
+            // comparator, so a sort did a database round trip per COMPARISON —
+            // n log n queries to order n albums.
+            val dates: Map<String, Long> =
+                if (q.sort == "year") store.albumYears().mapValues { it.value.toLong() }
+                else firstSeenDates()
             val known = ArrayList<AlbumRecord>(list.size)
             val unknown = ArrayList<AlbumRecord>()
-            for (al in list) (if (dateOf(al) == null) unknown else known) += al
+            for (al in list) (if (dates[al.key] == null) unknown else known) += al
             known.sortWith(
-                compareBy<AlbumRecord> { dateOf(it) ?: 0L }.thenBy { it.sortTitle }
+                compareBy<AlbumRecord> { dates[it.key] ?: 0L }.thenBy { it.sortTitle }
             )
             if (q.desc) known.reverse()
             unknown.sortBy { it.sortTitle }
@@ -184,7 +213,14 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
             "artist" -> compareBy<AlbumRecord> { it.nArtist }.thenBy { it.sortTitle }
             "plays" -> compareBy<AlbumRecord> { counts[it.key] ?: 0 }.thenBy { it.sortTitle }
             "lastplayed" -> compareBy<AlbumRecord> { lastPlayed[it.key] ?: 0L }.thenBy { it.sortTitle }
-            "random" -> compareBy { seededRank(it.nTitle + it.nArtist, q.seed) }
+            // Precomputed, because a comparator selector runs per COMPARISON:
+            // inline, this concatenated two strings and re-hashed every
+            // character of the result some n log n times.
+            "random" -> {
+                val ranks = HashMap<String, Int>(list.size * 2)
+                for (al in list) ranks[al.key] = seededRank(al.nTitle + al.nArtist, q.seed)
+                compareBy { ranks[it.key] ?: 0 }
+            }
             else -> compareBy<AlbumRecord> { it.sortTitle }.thenBy { it.nArtist }
         }
         val out = list.sortedWith(cmp)
@@ -214,7 +250,15 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
     fun sample(pool: List<AlbumRecord>, n: Int, seed: Int? = null): List<AlbumRecord> {
         if (pool.isEmpty()) return emptyList()
         val want = minOf(n, pool.size)
-        if (seed != null) return pool.sortedBy { seededRank(it.key, seed) }.take(want)
+        if (seed != null) {
+            // Ranked once each, THEN sorted. sortedBy runs its selector on
+            // every comparison, so hashing the key inline re-walked every
+            // album's characters some n log n times to hand back ten tiles.
+            return pool.map { seededRank(it.key, seed) to it }
+                .sortedBy { it.first }
+                .take(want)
+                .map { it.second }
+        }
         if (want == pool.size) return pool.shuffled()
         val picked = LinkedHashSet<Int>(want * 2)
         val rnd = ThreadLocalRandom.current()
@@ -266,9 +310,12 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
 
     /** Decades that actually hold albums, newest first. */
     fun decades(): List<Pair<Int, Int>> {
+        // One read of the years table. Per album it was a query each, and the
+        // facet sheet asks for this every time it opens.
+        val years = store.albumYears()
         val counts = HashMap<Int, Int>()
         for (al in index.albums) {
-            val y = albumYearOf(al) ?: continue
+            val y = years[al.key] ?: continue
             val d = (y / 10) * 10
             counts[d] = (counts[d] ?: 0) + 1
         }

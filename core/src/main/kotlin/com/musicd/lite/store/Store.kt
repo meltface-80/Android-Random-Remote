@@ -58,7 +58,15 @@ interface Store {
 
     // ------------------------------------------------------- album metadata
 
-    /** When an album was first seen in the library — the "recently added" clock. */
+    /**
+     * When an album was first seen in the library — the "recently added" clock.
+     *
+     * A stored ZERO is the first-scan marker, not a date: it says the album was
+     * already there the first time this app looked, and dating the whole
+     * library at once would make "recently added" mean "everything". [firstSeen]
+     * answers null for it. [firstSeenAll] returns the table as stored, markers
+     * and all, so a bulk reader has to drop them itself.
+     */
     fun firstSeen(albumKey: String): Long?
     fun recordFirstSeen(entries: Map<String, Long>)
     fun firstSeenAll(): Map<String, Long>

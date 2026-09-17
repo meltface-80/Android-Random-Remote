@@ -81,7 +81,10 @@ class MemoryStore : Store {
         synchronized(plays) { plays.removeAll { it.at < before } }
     }
 
-    override fun firstSeen(albumKey: String): Long? = firstSeen[albumKey]
+    // The zero filter is the SQLite store's rule too. Without it here the JVM
+    // tests answered "the epoch" where a device answers "no date", so the one
+    // case the marker exists for was the one case the tests could not see.
+    override fun firstSeen(albumKey: String): Long? = firstSeen[albumKey]?.takeIf { it > 0L }
 
     override fun recordFirstSeen(entries: Map<String, Long>) {
         for ((k, v) in entries) firstSeen.putIfAbsent(k, v)
