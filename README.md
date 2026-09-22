@@ -453,9 +453,13 @@ launched the app on a device.
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE).
+MusicD Remote Lite (Android) is copyright (c) 2026 Lewis Menzies (Music Duck /
+MusicD) and is released under the MIT License — the full text is in
+[LICENSE](LICENSE). In short: do what you like with it, as long as the copyright
+notice and the licence travel with it. It comes with no warranty.
 
-The front-end in `app/src/main/assets/web/` is MusicD Remote's, copyright (c)
-2026 Lewis Menzies (Music Duck / MusicD), MIT — see the `NOTICE` beside it.
+The front-end in `app/src/main/assets/web/` is
+[MusicD Remote's](https://github.com/meltface-80/MusicD-Remote) — same copyright
+holder, same licence, see the `NOTICE` beside it.
 
 Not affiliated with or endorsed by Roon Labs. "Roon" is their trademark.
