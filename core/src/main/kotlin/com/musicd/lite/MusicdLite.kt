@@ -157,6 +157,9 @@ class MusicdLite(
 
     val settings = Settings(store) { live.bump("settings") }
 
+    /** What each zone has played, for the Queue's "played earlier" — see QueueHistory. */
+    val queueHistory = QueueHistory()
+
     /** Albums put aside to play another time — see ListenLater. */
     val listenLater = ListenLater(store, index) { live.bump("later") }
     val view = LibraryView(index, store)
@@ -564,12 +567,14 @@ class MusicdLite(
         }
 
         override fun onZonesChanged(zones: List<Zone>) {
+            runCatching { queueHistory.observe(zones) }
             for (zone in zones) recordIfChanged(zone)
             runCatching { radio.onZones(zones) }
         }
 
         override fun onDisconnected() {
             synchronized(lastRecorded) { lastRecorded.clear() }
+            queueHistory.clear()
         }
     }
 

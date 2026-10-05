@@ -3,6 +3,7 @@ package com.musicd.lite.api
 import com.musicd.lite.str
 import com.musicd.lite.strOrNull
 import com.musicd.lite.LiveState
+import com.musicd.lite.QueueHistory
 import com.musicd.lite.Log
 import com.musicd.lite.MusicdLite
 import com.musicd.lite.http.HttpServer
@@ -190,6 +191,8 @@ class RemoteApi(
             "/api/outputs" -> outputs()
             "/api/zone-state" -> zoneState(request)
             "/api/queue" -> queue(request)
+            "/api/queue/play-history-next" -> requirePost(post) { playHistoryNext(request) }
+            "/api/queue/history-multi" -> requirePost(post) { historyMulti(request) }
             "/api/control" -> control(request)
             "/api/seek" -> seek(request)
             "/api/volume" -> volume(request)
@@ -516,8 +519,123 @@ class RemoteApi(
     private fun queue(request: Request): Response {
         val zoneId = request.str("zone") ?: return Json.error(400, "zone is required")
         val items = roon.queue(zoneId)
-        return Json.obj(JSONObject().put("items", Json.arrayOf(items.map { it.toJson() })))
+        return Json.obj(
+            JSONObject()
+                .put("items", Json.arrayOf(items.map { it.toJson() }))
+                // What already played, newest first — the "played earlier"
+                // fold-out above the Now playing divider.
+                .put("history", Json.arrayOf(app.queueHistory.recent(zoneId).map { it.toJson() }))
+        )
     }
+
+    /**
+     * The library album a departed track came from, or null.
+     *
+     * By NAME, because that is all a departed track leaves behind: the album
+     * title it played under (the zone's line3) resolved against the snapshot,
+     * with the credit to tell two same-titled albums apart. A stream, a radio
+     * track Roon added from outside the library, or an album since removed
+     * resolves to nothing — an outcome the page explains, not a failure.
+     *
+     * Rouen also tries a track-title index when the album does not resolve;
+     * that needs a reverse index of every album's tracks this build does not
+     * keep, so a track whose album title Roon reported differently from the
+     * library's is unresolved here.
+     */
+    private fun resolvePlayedTrack(album: String, artist: String): AlbumRecord? {
+        if (album.isBlank()) return null
+        return index.relocate(album, artist)
+            ?: Normalize.splitArtists(artist).firstNotNullOfOrNull { index.relocate(album, it.name) }
+            ?: index.relocate(album, null)?.takeIf { artist.isBlank() }
+    }
+
+    /**
+     * Play a track from the zone's played-earlier list, NEXT. Not "play from
+     * here": a played track is gone from Roon's queue, its queue_item_id is
+     * spent, and rebuilding the queue around it would be hundreds of Core
+     * calls behind a play_now that destroys the live queue first. Inserting
+     * the one track after the current one is a single browse navigation, and
+     * honest about being a different thing.
+     */
+    private fun playHistoryNext(request: Request): Response {
+        val body = Json.body(request)
+        val zone = body.strOrNull("zone_or_output_id") ?: return Json.error(400, "zone_or_output_id required")
+        val title = body.str("track").trim()
+        if (title.isEmpty()) return Json.error(400, "track required")
+        val hit = resolvePlayedTrack(body.str("album").trim(), body.str("artist"))
+            ?: return Json.obj(
+                JSONObject().put("error", "Couldn't find that track in your library to play it again")
+                    .put("unresolved", true),
+                404
+            )
+        val (invoked, track) = app.albums.invokeTrack(
+            hit.offset, 0, title, zone, "play_next", null, Albums.Expect(hit.title, hit.subtitle)
+        )
+        return Json.ok(JSONObject().put("action", invoked).put("track", track).put("album", hit.title))
+    }
+
+    /**
+     * Several played tracks at once, in the order they were picked. Every track
+     * is resolved BEFORE the Core is touched, so a selection with an
+     * unplayable track in it says so instead of leaving the queue holding an
+     * arbitrary prefix of what was asked for. One refusal does not abandon the
+     * rest. One run per zone at a time: two interleaved runs would shuffle
+     * each other's inserts.
+     */
+    private fun historyMulti(request: Request): Response {
+        val body = Json.body(request)
+        val zone = body.strOrNull("zone_or_output_id") ?: return Json.error(400, "zone_or_output_id required")
+        val kind = body.str("kind")
+        if (kind != "play_next" && kind != "queue") return Json.error(400, "kind must be play_next or queue")
+        val tracks = body.optJSONArray("tracks")
+        if (tracks == null || tracks.length() == 0) return Json.error(400, "tracks required")
+        if (tracks.length() > QueueHistory.MULTI_MAX) {
+            return Json.error(400, "at most ${QueueHistory.MULTI_MAX} tracks at a time")
+        }
+        val resolved = ArrayList<Pair<String, AlbumRecord>>()
+        val unresolved = ArrayList<String>()
+        for (i in 0 until tracks.length()) {
+            val t = tracks.optJSONObject(i) ?: continue
+            val title = t.str("track").trim()
+            if (title.isEmpty()) continue
+            val hit = resolvePlayedTrack(t.str("album").trim(), t.str("artist"))
+            if (hit != null) resolved += title to hit else unresolved += title
+        }
+        if (resolved.isEmpty()) {
+            return Json.obj(
+                JSONObject().put("error", "None of those are in your library to play again")
+                    .put("unresolved", Json.strings(unresolved)).put("queued", 0),
+                404
+            )
+        }
+        if (!historyZones.add(zone)) return Json.error(409, "Still adding the last selection to this zone")
+        var queued = 0
+        var firstError: String? = null
+        val failed = ArrayList<String>()
+        try {
+            for ((title, hit) in QueueHistory.sendOrderFor(kind, resolved)) {
+                try {
+                    app.albums.invokeTrack(hit.offset, 0, title, zone, kind, null, Albums.Expect(hit.title, hit.subtitle))
+                    queued++
+                } catch (e: Exception) {
+                    failed += title
+                    if (firstError == null) firstError = e.message
+                }
+            }
+        } finally {
+            historyZones.remove(zone)
+        }
+        val out = JSONObject().put("kind", kind).put("queued", queued)
+            .put("failed", Json.strings(failed)).put("unresolved", Json.strings(unresolved))
+        if (queued == 0) return Json.obj(out.put("error", firstError ?: "Roon refused those tracks"), 500)
+        firstError?.let { out.put("error", it) }
+        return Json.ok(out)
+    }
+
+    /** Zones with a played-earlier run in flight — see historyMulti. */
+    private val historyZones = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    )
 
     // ------------------------------------------------------------ transport
 
