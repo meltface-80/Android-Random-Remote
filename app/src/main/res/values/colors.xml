@@ -4,9 +4,9 @@
          different colour behind the page while it loads. -->
     <color name="app_background">#FF17191C</color>
     <!-- Rouen's icon is drawn on its own graphite ground (#17191c, the
-         page's --bg), and the foreground layer is that whole square, so the
-         background behind it must be the same colour or the launcher's
-         parallax shows a seam at the edge. -->
+         page background in style.css), and the foreground layer is that
+         whole square, so the background behind it must be the same colour
+         or the launcher's parallax shows a seam at the edge. -->
     <color name="icon_background">#FF17191C</color>
     <color name="dial_icon_background">#FF101418</color>
 </resources>
