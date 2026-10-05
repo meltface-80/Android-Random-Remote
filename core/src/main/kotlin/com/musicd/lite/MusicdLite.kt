@@ -145,7 +145,16 @@ class MusicdLite(
 
     val roon: RoonApi = roonFactory(store, extension, multicastLock)
     val index = AlbumIndex()
-    val settings = Settings(store)
+
+    /**
+     * One revision per kind of data a screen can show, served to the page as a
+     * long poll (/api/live) so a screen re-reads itself when — and only when —
+     * something it shows has moved. Fed from here: the index (below), every
+     * settings write, plays, years learned, and the feature stores.
+     */
+    val live = LiveState({ index.builtAt }).also { l -> index.onChanged = { l.snapshotChanged() } }
+
+    val settings = Settings(store) { live.bump("settings") }
     val view = LibraryView(index, store)
     val albums = Albums(roon.tree, index, store)
     val metadata = Metadata(http, "MusicDRemoteLite/$version ( ${extension.website} )")
@@ -471,6 +480,7 @@ class MusicdLite(
     fun rescan(force: Boolean): RescanResult {
         if (!roon.isPaired) return RescanResult("unpaired")
         if (!rebuilding.compareAndSet(false, true)) return RescanResult("busy")
+        libraryCheckedAt = System.currentTimeMillis()
         try {
             val changed = try {
                 force || libraryChangedSince()
@@ -505,8 +515,24 @@ class MusicdLite(
 
     data class RescanResult(val status: String, val count: Int? = null)
 
+    /**
+     * When Roon was last asked whether the library moved — the side menu's
+     * "checked just now". Zero until the first probe, and the page falls back
+     * to the index's build time then.
+     */
+    @Volatile
+    var libraryCheckedAt: Long = 0L
+        private set
+
+    /** A release year arrived: the year sort and the album views move with it. */
+    fun yearLearned() {
+        live.bump("library")
+        live.bump("dates")
+    }
+
     private fun libraryMaintenance() {
         if (!roon.isPaired) return
+        libraryCheckedAt = System.currentTimeMillis()
         try {
             if (!index.isBuilt) {
                 rebuildIndex("index is empty")
@@ -557,6 +583,7 @@ class MusicdLite(
         }
         val key = AlbumRecord(0, album, artist, null).key
         runCatching { store.recordPlay(key, album, artist, track, System.currentTimeMillis()) }
+            .onSuccess { live.bump("plays") }
         // A year learned once is worth keeping, but never at the cost of a
         // better source: file tags and MusicBrainz both outrank a guess.
         runCatching {
@@ -565,6 +592,7 @@ class MusicdLite(
                     jobs.execute {
                         metadata.extras(hit.title, hit.subtitle).year?.let { y ->
                             store.putAlbumYear(hit.key, y, YearSource.MUSICBRAINZ)
+                            yearLearned()
                         }
                     }
                 }

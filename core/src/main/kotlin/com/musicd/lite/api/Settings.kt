@@ -13,7 +13,16 @@ import org.json.JSONObject
  * MusicD-Remote keeps these in a settings file next to its database; there is
  * no reason for the shapes to differ, because the same front-end reads them.
  */
-class Settings(private val store: Store) {
+class Settings(
+    private val store: Store,
+    /**
+     * Told the key of every settings write, so the live-state `settings`
+     * revision moves and other devices' screens follow it. Not told about the
+     * last-zone bookmark, which moves whenever the user looks at another room
+     * and is nothing any screen draws.
+     */
+    private val onChange: (String) -> Unit = {}
+) {
 
     companion object {
         /**
@@ -68,7 +77,10 @@ class Settings(private val store: Store) {
     private fun doc(key: String): JSONObject =
         store.setting(key)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
 
-    private fun save(key: String, value: JSONObject) = store.putSetting(key, value.toString())
+    private fun save(key: String, value: JSONObject) {
+        store.putSetting(key, value.toString())
+        if (key != KEY_LAST_ZONE) runCatching { onChange(key) }
+    }
 
     // ------------------------------------------------------------- home rows
 

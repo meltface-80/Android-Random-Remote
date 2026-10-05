@@ -2,6 +2,7 @@ package com.musicd.lite.api
 
 import com.musicd.lite.str
 import com.musicd.lite.strOrNull
+import com.musicd.lite.LiveState
 import com.musicd.lite.Log
 import com.musicd.lite.MusicdLite
 import com.musicd.lite.http.HttpServer
@@ -179,6 +180,7 @@ class RemoteApi(
 
         return when (path) {
             "/api/status" -> status()
+            "/api/live" -> live(request)
             "/api/zones" -> zones()
             "/api/outputs" -> outputs()
             "/api/zone-state" -> zoneState(request)
@@ -315,6 +317,26 @@ class RemoteApi(
                 .put("version", app.version)
                 .put("lite", true)
         )
+    }
+
+    /**
+     * The live-state revisions, as a long poll.
+     *
+     * Rouen's page asks for these every three seconds. This build's page sends
+     * back the `token` it was last given as `wait_for`, and the request is held
+     * until a revision moves or [LiveState.MAX_WAIT_MS] passes — so a screen
+     * hears about a play, a setting changed on another device or a rebuilt
+     * library within a moment, and an idle app makes one request every
+     * twenty-five seconds rather than twenty a minute. No `wait_for` answers
+     * at once: the page's first ask has nothing to compare against.
+     *
+     * One held request per open page, on the server's worker pool, alongside
+     * the zone-state wait that already works this way.
+     */
+    private fun live(request: Request): Response {
+        val timeout = (request.int("timeout")?.toLong() ?: LiveState.MAX_WAIT_MS)
+        val rev = app.live.await(request.str("wait_for"), timeout)
+        return Json.obj(app.live.toJson(rev))
     }
 
     // --------------------------------------------------------------- zones
@@ -827,9 +849,10 @@ class RemoteApi(
         // A year learned here is worth keeping: it feeds the Decade filter and
         // the year sort, which otherwise only fill in as albums are played.
         val record = index.relocate(title, artist)
-        if (record != null && extras?.year != null) {
+        if (record != null && extras?.year != null && store.albumYear(record.key) != extras.year) {
             runCatching {
                 store.putAlbumYear(record.key, extras.year, YearSource.MUSICBRAINZ)
+                app.yearLearned()
             }
         }
         // The store is the fast path's real source: every album whose card has
