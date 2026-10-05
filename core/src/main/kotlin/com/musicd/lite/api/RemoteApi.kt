@@ -892,28 +892,43 @@ class RemoteApi(
         )
     }
 
+    /**
+     * Play, queue or play-next one track of an album.
+     *
+     * The field names are the page's, as every caller in app.js sends them:
+     * `track` is the track's INDEX, `title` is the TRACK's title, and the album
+     * it is expected to be in is album_title / album_subtitle. This read
+     * track_index and track_title, with the album as title/subtitle — the
+     * playlist route's vocabulary — so every tap on a track was answered 400
+     * "track_index is required", and the test written from the same reading
+     * passed throughout.
+     */
     private fun playTrack(request: Request): Response {
         val body = Json.body(request)
         val offset = body.optInt("offset", -1)
         if (offset < 0) return Json.error(400, "offset is required")
         val zone = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "zone_or_output_id is required")
-        val trackIndex = body.optInt("track_index", -1)
-        if (trackIndex < 0) return Json.error(400, "track_index is required")
+        val trackIndex = body.optInt("track", -1)
+        if (trackIndex < 0) return Json.error(400, "track index is required")
         val kind = body.str("kind").takeIf { it.isNotEmpty() } ?: "play_now"
         val (invoked, track) = app.albums.invokeTrack(
-            offset, trackIndex, body.str("track_title").takeIf { it.isNotEmpty() },
+            offset, trackIndex, body.str("title").takeIf { it.isNotEmpty() },
             zone, kind,
             AlbumFilter.parse(
                 body.str("filter_type"), body.str("filter_value"),
                 body.str("filter_parent")
             ),
             Albums.Expect(
-                body.str("title").takeIf { it.isNotEmpty() },
-                body.str("subtitle").takeIf { it.isNotEmpty() }
+                body.str("album_title").takeIf { it.isNotEmpty() },
+                body.str("album_subtitle").takeIf { it.isNotEmpty() }
             )
         )
-        return Json.ok(JSONObject().put("invoked", invoked).put("track", track))
+        // `action` is what the page toasts; `invoked` is kept for anything
+        // that already reads it.
+        return Json.ok(
+            JSONObject().put("action", invoked).put("invoked", invoked).put("track", track)
+        )
     }
 
     /**

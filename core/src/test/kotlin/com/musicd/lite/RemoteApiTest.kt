@@ -627,14 +627,40 @@ class RemoteApiTest {
 
     @Test
     fun aTrackIsPlayedByIndexAndVerifiedByTitle() {
+        // The page's own names, exactly as app.js sends them from the album
+        // view's track list: `track` is the INDEX, `title` is the TRACK's
+        // title, and the album it is expected to be in travels as
+        // album_title / album_subtitle. This test used to send track_index,
+        // track_title and the album as title/subtitle — the server's own
+        // reading — so it passed while every tap on a track in the app was
+        // answered 400 "track_index is required".
         val (code, text) = post(
             "/api/play-track",
-            """{"offset":1,"zone_or_output_id":"z1","track_index":2,"track_title":"Closer",
-                "kind":"queue","title":"Dummy","subtitle":"Portishead"}"""
+            """{"offset":1,"zone_or_output_id":"z1","track":2,"title":"Closer",
+                "kind":"queue","album_title":"Dummy","album_subtitle":"Portishead"}"""
         )
         assertEquals(text, 200, code)
-        assertEquals("Closer", JSONObject(text).getString("track"))
+        val body = JSONObject(text)
+        assertEquals("Closer", body.getString("track"))
+        // What the page toasts: `j.action || "Playing"`.
+        assertEquals("Queue", body.getString("action"))
         assertEquals(listOf("queue:track:1:2@z1"), core.invoked)
+    }
+
+    /**
+     * The album a track is expected in is album_title, not title — `title` is
+     * the track's own. Read the wrong way round, the stale-offset check would
+     * compare the album against a track name and refuse every play.
+     */
+    @Test
+    fun aTrackInAnAlbumThatMovedIsRefusedNotPlayedFromTheWrongAlbum() {
+        val (code, text) = post(
+            "/api/play-track",
+            """{"offset":1,"zone_or_output_id":"z1","track":0,"title":"Opening",
+                "kind":"play_now","album_title":"Not This Album","album_subtitle":"Nobody"}"""
+        )
+        assertEquals(text, 409, code)
+        assertEquals(emptyList<String>(), core.invoked)
     }
 
     /**
