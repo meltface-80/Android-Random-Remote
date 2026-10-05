@@ -4,20 +4,24 @@
 
 </div>
 
-# MusicD Remote Lite (Android)
+# Rouen Lite (Android)
 
 **📱 Download & install guide: [meltface-80.github.io/Android-Random-Remote](https://meltface-80.github.io/Android-Random-Remote/)**
 
-A native Android APK of [MusicD Remote for Roon](https://github.com/meltface-80/MusicD-Remote),
-with the same interface and no server behind it. It registers itself as a Roon
-extension and talks to your Core directly — no Docker, no Node host, no
-companion service on another machine.
+A native Android APK of [Rouen](https://github.com/meltface-80/Rouen) — the Roon
+remote formerly called MusicD Remote — with the same interface and no server
+behind it. It registers itself as a Roon extension and talks to your Core
+directly — no Docker, no Node host, no companion service on another machine.
+Until 0.5.0 this app was called MusicD Remote Lite.
 
-The interface is not a lookalike: it is MusicD-Remote's own `public/` directory,
-copied unmodified into the APK. What changed is everything underneath. The
-13,000-line Node server it used to talk to is now Kotlin running in the same
-process, speaking Roon's protocols natively — the approach the earlier
-Display-extension-apk established, applied to a much larger app.
+The interface is not a lookalike: it is Rouen's own `public/` directory, kept
+current with upstream (v1.8.77 as of 0.5.0) by a three-way merge, with this
+build's own differences on top — the ones a phone needs, and the choices the
+owner made for this build. `app/src/main/assets/web/NOTICE` names the upstream
+commit. What changed is everything underneath. The Node server it used to talk
+to is now Kotlin running in the same process, speaking Roon's protocols
+natively — the approach the earlier Display-extension-apk established, applied
+to a much larger app.
 
 **"Lite" means one thing above all: no record labels.** That feature is most of
 the original's weight and it cannot work on a phone at all — details in
@@ -28,7 +32,7 @@ the original's weight and it cannot work on a phone at all — details in
 ```
 ┌──────────────────────────────────────────────────┐
 │ MainActivity — a WebView                         │
-│   assets/web/  =  MusicD-Remote's public/, as-is │
+│   assets/web/  =  Rouen's public/, merged        │
 └───────────────────────┬──────────────────────────┘
                         │  http://127.0.0.1:<port>/api/...
 ┌───────────────────────▼──────────────────────────┐
@@ -50,8 +54,8 @@ Two decisions carry the whole design:
 requests inside the WebView would have avoided the socket, but
 `shouldInterceptRequest` is never handed the *body* of a POST — and the UI POSTs
 for every play, queue, volume change and setting. Serving it properly means the
-page runs byte-identical to the browser version, and a newer upstream UI is a
-file copy rather than a merge.
+page runs as it does in a browser, and a newer upstream UI is a merge of its
+web files rather than a rewrite.
 
 **Everything that is not Android lives in `:core`,** a plain Kotlin/JVM module.
 That is what makes the protocol layer, the stale-offset defence and the whole
@@ -102,9 +106,12 @@ then on.
 Then, once:
 
 1. Open the app on the same Wi-Fi as your Roon Core.
-2. In Roon: **Settings → Extensions → Enable "MusicD Remote Lite (Android)"**.
+2. In Roon: **Settings → Extensions → Enable "Rouen Lite (Android)"**.
 
 The pairing token is stored per Core, so approval only happens the first time.
+Builds before 0.5.0 appear in Roon as "MusicD Remote Lite (Android)": it is the
+same extension under a new name — Roon keys its approval on the extension's
+id, which has not changed.
 Until it does, the app's notification tells you exactly what it is waiting for.
 
 ## What's here
@@ -112,23 +119,43 @@ Until it does, the app's notification tells you exactly what it is waiting for.
 Everything below works against your library through Roon's browse API, with the
 original's screens unchanged:
 
-- **A Home screen of rows you choose.** Album of the day, Recently played,
-  Smart Picks, Random albums, Artists, Library and Browse by genre — each one
-  can be reordered or switched off in Settings → Home Screen, and a row that is
-  off is not loaded at all rather than merely hidden.
-- **Discovery** — a wall of random albums, filtered by genre, tag or decade, and
-  Album of the Day: the same record for everyone until local midnight, withdrawn
-  once you have actually played it.
+- **A Home screen of rows you choose.** Under the greeting, Album of the day
+  and a Random Album button; below them Recently played, Listen later, Smart
+  Picks, Random albums, Artists, Library and Browse by genre — each one can be
+  reordered or switched off in Settings → Home Screen, and a row that is off is
+  not loaded at all rather than merely hidden.
+- **Random albums** — a wall of random albums, filtered by genre, tag or decade,
+  and Album of the Day: one record for the whole day (from 00:01 to 00:01),
+  kept even if the library grows, and withdrawn once you have played it.
 - **Smart Picks** — a set of albums drawn from your library each day and steady
   until tomorrow, with a "not for me" that blocks that artist from coming back.
+  Each one opens its album, or goes on Listen later; Settings can send each
+  day's first five there automatically.
+- **Listen later** — put an album aside from its page or from Smart Picks, and
+  it waits on Home and in the menu. It leaves
+  the list by itself once every track on it has played.
+- **Discover** — new records, from the last sixty days, by the forty acts you
+  play on the most different days. Built once a day from your own play history
+  and Deezer's public catalogue; records you own and reissues are left out.
+  **Off until you switch it on** in Settings → Discover: it is the one feature
+  that sends artist names to a third party.
+- **"If you like this"** — under the share card, three acts like the one
+  playing, each with their first album: queued straight from your library when
+  you own it, a link to your streaming service of choice when you do not.
+- **The queue remembers what already played.** "Played earlier" lists what this
+  app saw each zone play, and puts any of it back in the queue — one track or a
+  selection, next or at the end. Kept in memory, so it starts empty when the
+  app does.
 - **The whole library** — a paged grid, sorted by title, artist, year, added,
   play count, last played or a stable shuffle, with facets for decade, genre and
   whether you have ever played it.
 - **Instant search** over the whole library, matched locally on every keystroke:
   prefix-aware, out-of-order (`dark moon` → *Dark Side of the Moon*) and
   typo-tolerant. Artists are matched too, and have their own pages.
-- **Album pages** — track list, release year, album and artist write-ups,
-  linkable artist credits, play / queue / play-next / start-radio.
+- **Album pages** — track list, release date (to the day where MusicBrainz
+  knows it), album and artist write-ups, linkable artist credits, play / queue /
+  play-next / start-radio, and a swipe or arrow to the next album in the row
+  you opened it from.
 - **Playback** — zones and grouping, transport, per-output volume and mute,
   shuffle / repeat / Roon Radio, the queue, play-from-here, zone transfer,
   standby and convenience-switch on source-controlled devices.
@@ -147,8 +174,14 @@ original's screens unchanged:
   and links out to pitchfork.com. No review text is served, here or upstream:
   the writing is Pitchfork's and the app links to it.
 - **Share cards** — what is playing, rendered to an image and handed to
-  Android's share sheet. The card is drawn in the page itself; nothing is
-  uploaded anywhere to make one.
+  Android's share sheet, with a row of links under it: where to hear the record
+  (Qobuz, TIDAL, Spotify, Apple Music, Amazon, Deezer, Bandcamp) and where to
+  read about it (Wikipedia, Pitchfork, AllMusic), chosen in Settings → Share
+  Card. The card is drawn in the page itself; nothing is uploaded anywhere to
+  make one, and the links are plain searches built on the phone.
+- **Screens that keep themselves current, without polling.** A screen re-reads
+  only when something it shows has changed — a play, a setting changed on
+  another device, a new day — through one long-held request, not a timer.
 - **Updates in the app** — Settings checks for a newer APK and offers it.
   Android's installer still asks; this only saves finding the download.
 - **Your other devices, if you ask for them.** Settings → Network rebinds the
@@ -156,8 +189,9 @@ original's screens unchanged:
   dial at `:3450/dial` from anything on the same Wi-Fi. Off by default, and
   every request passes one gate before the API sees it.
 
-Release years come from MusicBrainz and the write-ups from Wikipedia. Both are
-free and need no key.
+Release dates come from MusicBrainz, the write-ups from Wikipedia, and Discover
+and "If you like this" from Deezer's public catalogue. All are free and need no
+key or account.
 
 ### Outside the app
 
@@ -262,8 +296,9 @@ second repository being alive. If a clone of the upstream turns up, `--source`
 restores the full regeneration comparison.
 
 Not here, and removed from the interface rather than left as controls that
-cannot work: Qobuz and Tidal, label browsing, Roon's own and dynamic playlists,
-the wall display, and sharing a playlist as a link. Where a screen remains, the
+cannot work: Qobuz and Tidal accounts, label browsing, Roon's own and dynamic
+playlists, the wall display, the waveform seek bar, and sharing a playlist as a
+link. Where a screen remains, the
 API answers "not in this build" in the shape the front-end already understands,
 so it shows its own empty state instead of an error.
 
@@ -290,6 +325,7 @@ instead of an error.
 | **Qobuz and TIDAL** browsing, favourites, external search | Both logins drive unofficial APIs those services' own terms forbid, and they buy catalogue browsing only: Roon streams from either through its own account regardless. Removed rather than deferred. |
 | **The wall display** — the `/display` page | Not ported. Serving pages to other devices is possible now (Settings → Network), but a wall display also means the phone staying awake to render one. See [Why there is no wall display](#why-there-is-no-wall-display). |
 | Quality badges (sample rate / bit depth) and source badges | Read from file tags on the mounted music directory. Same missing input as labels. |
+| **The waveform seek bar** | Upstream decodes the audio file itself to draw it. The phone has neither the files nor the CPU budget to spend on it; the plain seek bar is there instead. |
 | **Roon's playlists**, Dynamic Playlists, and importing or sharing a playlist as a link | Playlists you make yourself **are** here — see [What's here](#whats-here). What is not is reading Roon's own playlists, the dynamic/smart kind, and the share-a-link import: those screens remain and show their empty state. |
 | **Queue editing** — remove, reorder, clear | Not a lite limitation. Roon's extension API has no verb for it: `play_from_here` is the only queue mutation it exposes, and that works. |
 
@@ -319,13 +355,13 @@ phone would have to hold its CPU and Wi-Fi awake indefinitely to serve a screen
 in another room. A phone is a poor always-on server, and the Docker build never
 asked one to be.
 
-Use MusicD Remote proper for a wall display: it runs on a machine that is
-already awake.
+Use Rouen proper for a wall display: it runs on a machine that is already
+awake.
 
 ### Reading your music folder
 
 Labels, and the quality badges with them, are the one feature that needs
-something other than Roon: the tags in your actual files. MusicD-Remote gets
+something other than Roon: the tags in your actual files. Rouen gets
 them by mounting your library read-only into its container, which works because
 it runs on a machine that can see the files.
 
@@ -361,7 +397,7 @@ Needs JDK 17+, Android SDK platform 36 and build-tools 36.0.0. Output lands in
 
 ## Verification
 
-**389 unit tests, all passing** — 368 in `:core` on a plain JVM, and 21 in
+**526 unit tests** — 505 in `:core` on a plain JVM, and 21 in
 `:app` under Robolectric. Splitting `:core` out is what makes the first number
 possible: the parts most worth testing are tested with no emulator in the loop.
 
@@ -416,9 +452,22 @@ possible: the parts most worth testing are tested with no emulator in the loop.
   This is the only Android code here with a test behind it rather than just a
   compiler.
 
-- **The API, end to end over a real socket.** 79 tests drive the shipping HTTP
-  server and router — the JSON the unmodified front-end reads, `409` on a moved
-  album, `503` when unpaired, and the "feature is off" shapes.
+- **The API, end to end over a real socket.** About 130 tests drive the
+  shipping HTTP server and router — the JSON the front-end reads, by the names
+  its code reads them, `409` on a moved album, `503` when unpaired, and the
+  "feature is off" shapes. Outbound requests (MusicBrainz, Wikipedia, Deezer)
+  are answered by the test or refused, so a suite never reaches the internet
+  and can assert which calls a route did *not* make.
+
+- **Rouen's own rules, held to Rouen's own tests.** Where a feature's logic was
+  ported — the share links, Discover's release rules, the similar-acts reader —
+  its upstream unit suite was ported case for case alongside it.
+
+- **Both directions of the wire contract.** `tools/check-api-contract.py` lists
+  fields the page reads that the server may not send, and
+  `tools/check-request-fields.py` lists fields the server reads that the page
+  never sends. The second found three routes (play a track, transfer a zone,
+  step the volume) that had answered every tap with a `400`.
 
 - **What the library view costs the database.** Every per-album read is a real
   SQLite round trip on a phone, and the view runs over the whole snapshot — so a
@@ -435,6 +484,11 @@ possible: the parts most worth testing are tested with no emulator in the loop.
 **Not yet verified against a live Roon Core.** There is no Core in the build
 environment. The protocol layer is checked against Roon's own code and the API
 end to end against a scripted one, but the first real pairing is untested.
+
+**Nor against the real Deezer.** Discover and "If you like this" read Deezer's
+public API, which the build environment cannot reach. Their parsing is tested
+against the payload shapes Rouen's own suite and field reports describe, not
+against a live answer.
 
 **The APK compiles and packages** — CI assembles it on every push, and the file
 in `dist/` is that output. What CI cannot do is *run* it: nothing here has
@@ -453,13 +507,13 @@ launched the app on a device.
 
 ## Licence
 
-MusicD Remote Lite (Android) is copyright (c) 2026 Lewis Menzies (Music Duck /
-MusicD) and is released under the MIT License — the full text is in
+Rouen Lite (Android), formerly MusicD Remote Lite, is copyright (c) 2026 Lewis
+Menzies (Music Duck / MusicD) and is released under the MIT License — the full text is in
 [LICENSE](LICENSE). In short: do what you like with it, as long as the copyright
 notice and the licence travel with it. It comes with no warranty.
 
 The front-end in `app/src/main/assets/web/` is
-[MusicD Remote's](https://github.com/meltface-80/MusicD-Remote) — same copyright
-holder, same licence, see the `NOTICE` beside it.
+[Rouen's](https://github.com/meltface-80/Rouen) — same copyright holder, same
+licence, see the `NOTICE` beside it.
 
 Not affiliated with or endorsed by Roon Labs. "Roon" is their trademark.
