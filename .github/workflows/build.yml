@@ -261,6 +261,8 @@ jobs:
           # too, and a label that disagrees with what it downloads is worse
           # than no label.
           sed -i -E "s#musicd-remote-lite-[0-9][0-9A-Za-z._-]*\.apk#$APK#g" README.md
+          # The title names the version too, Rouen's way.
+          sed -i -E "s|^(# Rouen Lite \(for Android\) - v)[0-9][0-9A-Za-z._-]*$|\1${version}|" README.md
           # The Pages site reads dist/latest.json at load time, but its baked-in
           # link and version are what a visitor sees if that fetch fails. Keep
           # them current here for the same reason the README's link is: a
