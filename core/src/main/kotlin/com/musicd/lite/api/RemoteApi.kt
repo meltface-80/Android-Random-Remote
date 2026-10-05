@@ -20,6 +20,7 @@ import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
 import com.musicd.lite.meta.Metadata
 import com.musicd.lite.meta.Pitchfork
+import com.musicd.lite.meta.ShareLinks
 import com.musicd.lite.roon.AlbumFilter
 import com.musicd.lite.roon.BrowseException
 import com.musicd.lite.roon.MooSocket
@@ -264,6 +265,7 @@ class RemoteApi(
             "/api/user-playlists/add-albums" ->
                 requirePost(post) { addAlbumsToPlaylist(request) }
             "/api/settings/smart-picks" -> if (post) saveSmartPicks(request) else smartPickSettings()
+            "/api/settings/share-links" -> if (post) saveShareLinks(request) else shareLinksSettings()
             "/api/settings/labels" -> labelsSetting(post)
             "/api/settings/discogs-token" ->
                 secret(request, post, Settings.KEY_DISCOGS_TOKEN, "token")
@@ -946,8 +948,37 @@ class RemoteApi(
                 .put("url", review.url)
         }
 
+        // Where to hear it and where to read about it, under the share card.
+        // Pure string building, so it rides along on the answer the card
+        // already waits for. The article and review found above are handed
+        // over, so those chips land on the actual page rather than a search.
+        val links = JSONObject()
+            .put(
+                "services",
+                Json.arrayOf(
+                    ShareLinks.serviceLinks(
+                        artist, title,
+                        locale = ShareLinks.localeFromAcceptLanguage(request.headers["accept-language"]),
+                        enabled = settings.shareServices()
+                    ).map { it.toJson() }
+                )
+            )
+            .put(
+                "reviews",
+                Json.arrayOf(
+                    ShareLinks.reviewLinks(
+                        artist, title,
+                        enabled = settings.shareReviews(),
+                        wikipediaUrl = extras?.album?.takeIf { it.source == "Wikipedia" }?.url,
+                        pitchforkUrl = review?.url,
+                        wikipediaArtistUrl = extras?.artist?.takeIf { it.source == "Wikipedia" }?.url
+                    ).map { it.toJson() }
+                )
+            )
+
         return Json.obj(
             JSONObject()
+                .put("links", links)
                 .put("year", year ?: JSONObject.NULL)
                 // To the day where MusicBrainz knows it (Rouen v1.8.62); the
                 // album view prints it in the device's own date format.
@@ -1588,6 +1619,49 @@ class RemoteApi(
         val picks = smartPicksFor(day, pool ?: smartPickPool(), PICKS_TO_LATER)
         for (album in picks) app.listenLater.add(album.title, album.subtitle, source = "picks")
         settings.markSmartPicksSent(day)
+    }
+
+    // ------------------------------------------------------ share-card links
+
+    /** Settings → Share Card: what CAN be linked to, and what is switched on. */
+    private fun shareLinksSettings(): Response = Json.obj(
+        JSONObject()
+            .put(
+                "services",
+                JSONObject()
+                    .put("all", Json.arrayOf(ShareLinks.SERVICES.map { JSONObject().put("id", it.id).put("name", it.name) }))
+                    .put("enabled", Json.strings(settings.shareServices()))
+            )
+            .put(
+                "reviews",
+                JSONObject()
+                    .put(
+                        "all",
+                        Json.arrayOf(
+                            ShareLinks.REVIEWS.map {
+                                JSONObject().put("id", it.id).put("name", it.name).put("kind", it.kind)
+                                    .put("chip", it.chip).put("onByDefault", it.onByDefault)
+                            }
+                        )
+                    )
+                    .put("enabled", Json.strings(settings.shareReviews()))
+            )
+    )
+
+    private fun saveShareLinks(request: Request): Response {
+        val body = Json.body(request)
+        fun ids(field: String): List<String>? =
+            body.optJSONArray(field)?.let { arr -> (0 until arr.length()).map { arr.str(it) } }
+        val services = ids("services")
+        val reviews = ids("reviews")
+        // An absent field is "not being changed"; an empty array is "all off".
+        if (services == null && reviews == null) return Json.error(400, "services and/or reviews array required")
+        settings.saveShareLinks(services, reviews)
+        return Json.ok(
+            JSONObject()
+                .put("services", Json.strings(settings.shareServices()))
+                .put("reviews", Json.strings(settings.shareReviews()))
+        )
     }
 
     // --------------------------------------------------------- listen later

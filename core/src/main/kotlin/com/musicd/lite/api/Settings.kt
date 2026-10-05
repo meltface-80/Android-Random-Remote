@@ -4,6 +4,7 @@ import com.musicd.lite.str
 import com.musicd.lite.strOrNull
 import com.musicd.lite.store.Store
 import com.musicd.lite.http.LanAccess
+import com.musicd.lite.meta.ShareLinks
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -56,6 +57,9 @@ class Settings(
         const val KEY_DISCOGS_TOKEN = "discogs_token"
         const val KEY_FANART_KEY = "fanart_key"
         const val KEY_LAST_ZONE = "last_zone"
+
+        /** Which link chips the share card shows — see shareServices. */
+        const val KEY_SHARE_LINKS = "share_links"
 
         /** Where Smart Picks can be sent in this build — see smartPicksDest. */
         val SMART_PICK_DESTS = listOf("later", "ask")
@@ -214,6 +218,31 @@ class Settings(
         if (hour != null && hour in 0..23) d.put("hour", hour)
         if (dest != null && dest in SMART_PICK_DESTS) d.put("dest", dest)
         save(KEY_SMART_PICKS, d)
+    }
+
+    // ------------------------------------------------------- share-card links
+
+    /**
+     * The services and review sites the share card links to (Settings → Share
+     * Card). An absent list means "never chosen", which is the defaults; an
+     * EMPTY list means the user switched them all off. Conflating the two is
+     * how an off switch quietly turns itself back on.
+     */
+    fun shareServices(): List<String> = idList("services", ShareLinks.SERVICE_IDS, ShareLinks.defaultServiceIds())
+    fun shareReviews(): List<String> = idList("reviews", ShareLinks.REVIEW_IDS, ShareLinks.defaultReviewIds())
+
+    private fun idList(field: String, known: List<String>, defaults: List<String>): List<String> {
+        val arr = doc(KEY_SHARE_LINKS).optJSONArray(field) ?: return defaults
+        val ids = (0 until arr.length()).map { arr.str(it) }
+        return ShareLinks.sanitiseIds(ids, known)
+    }
+
+    /** Null leaves a list as it is. Unknown ids are dropped, not stored. */
+    fun saveShareLinks(services: List<String>?, reviews: List<String>?) {
+        val d = doc(KEY_SHARE_LINKS)
+        if (services != null) d.put("services", JSONArray(ShareLinks.sanitiseIds(services, ShareLinks.SERVICE_IDS)))
+        if (reviews != null) d.put("reviews", JSONArray(ShareLinks.sanitiseIds(reviews, ShareLinks.REVIEW_IDS)))
+        save(KEY_SHARE_LINKS, d)
     }
 
     // ----------------------------------------------------------------- radio
