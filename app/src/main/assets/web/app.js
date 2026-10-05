@@ -6,17 +6,94 @@
  */
 
 (() => {
-  // Disable pinch-zoom on iOS Safari (which ignores user-scalable=no since iOS 10)
-  ["gesturestart", "gesturechange", "gestureend"].forEach((evt) => {
-    document.addEventListener(evt, (e) => e.preventDefault(), { passive: false });
-  });
-  // Belt-and-braces: cancel any quick second tap (the iOS double-tap-to-zoom heuristic)
-  let lastTouchEnd = 0;
-  document.addEventListener("touchend", (e) => {
-    const now = Date.now();
-    if (now - lastTouchEnd < 320) e.preventDefault();
-    lastTouchEnd = now;
-  }, { passive: false });
+  /*
+   * TWO ZOOM HACKS USED TO LIVE HERE. Both are gone (v1.8.42), with the
+   * viewport meta's `maximum-scale=1,user-scalable=no`, and the reasons are
+   * worth keeping because each of them made a real bug.
+   *
+   * 1. `gesturestart/gesturechange/gestureend` were preventDefault()ed to
+   *    re-impose the pinch-zoom block that iOS Safari refuses to honour from
+   *    the viewport meta. IT WORKED, AND THAT WAS THE PROBLEM: pinching is the
+   *    only way a person can get a mis-scaled page back, so with this in place
+   *    a page that came back from a rotation at the wrong scale could not be
+   *    recovered at all. That is exactly the reported symptom — "force closing
+   *    is the only way to restore function". The app took away the escape.
+   *
+   * 2. A `touchend` that preventDefault()ed any tap within 320ms of the last
+   *    one, to suppress double-tap zoom. preventDefault on touchend CANCELS
+   *    THE CLICK, so this also turned "that tap did nothing" into "nothing
+   *    works": somebody whose first tap misses taps again straight away, and
+   *    every impatient repeat was cancelled by this. It could only ever make a
+   *    dead-feeling screen deader.
+   *
+   * Neither was buying anything. Double-tap-to-zoom is already off the correct
+   * way — `touch-action: manipulation` on html/body in style.css — which
+   * suppresses the double-tap gesture WITHOUT disabling pinch. The two hacks
+   * were belt-and-braces over a rule that was already doing the job properly,
+   * and between them they cost the user every way out of a bad frame.
+   *
+   * test/static/viewport-scale.test.js keeps them from coming back.
+   */
+
+  /* ------------------------------------------------------------------
+   * THE WINDOW MUST NEVER BE SCROLLED. Keep it pinned.
+   *
+   * This is the iOS home-screen-app freeze, found with the instrument rather
+   * than guessed at — v1.8.40 and v1.8.42 each shipped a theory and each was
+   * wrong. What the readout actually said, from a phone with dead buttons:
+   *
+   *     win 440x894   doc 440x894          the layout viewport is NOT stale
+   *     vv  440x894 scale=1                the page is NOT scaled
+   *     vv off=0,62   page=0,62
+   *     scrollXY 0,62                <---- THE WINDOW IS SCROLLED 62px
+   *     every tap: top=img#modal-img
+   *
+   * The buttons were never dead. The window had scrolled down 62 pixels, so
+   * hit-testing ran 62px below the paint: a press on the Back button at
+   * (35, 31) was tested at (35, 93) and landed on the album artwork, which
+   * does nothing. Every control on every screen behaves that way at once,
+   * which is why it reads as "nothing works" rather than as a misplaced tap.
+   * 62px is this device's top safe-area inset, and the app is only standalone
+   * — `viewport-fit=cover` with live insets — in a home-screen app, which is
+   * why Safari and Chrome on the same phone were fine.
+   *
+   * SO THIS IS NOT A WORKAROUND FOR A SCROLL: it enforces an invariant the app
+   * already declares. `html, body { overflow: hidden }` and the shell is
+   * `position: fixed`; only <main> scrolls, and it scrolls itself. A non-zero
+   * window scroll is therefore not a state this app has, at any size, on any
+   * screen — so snapping it back cannot discard a position anybody wanted.
+   *
+   * THE ONE EXCEPTION IS A FOCUSED TEXT FIELD. iOS scrolls the window to lift
+   * an input clear of the keyboard, and fighting that would park the field
+   * under the keys — trading a bug nobody can see for one everybody can.
+   * ------------------------------------------------------------------ */
+  const pinWindow = () => {
+    if (!window.scrollX && !window.scrollY) return;
+    const el = document.activeElement;
+    const tag = el && el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || (el && el.isContentEditable)) return;
+    window.scrollTo(0, 0);
+    // All three, because Safari has historically moved one scroller and not
+    // another, and a half-reset offset is the same bug at a smaller number.
+    if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+    if (document.body) document.body.scrollTop = 0;
+  };
+  window.addEventListener("scroll", pinWindow, { passive: true });
+  window.addEventListener("pageshow", pinWindow, { passive: true });
+  /*
+   * A rotation is not an instant: iOS fires orientationchange before the web
+   * view has finished resizing, and the offset appears as it settles — the
+   * instrument had to sample a turn three times for the same reason. One
+   * check on the event would run before the thing it is checking for exists.
+   */
+  const pinAfterSettle = () => { pinWindow(); setTimeout(pinWindow, 300); setTimeout(pinWindow, 1000); };
+  window.addEventListener("orientationchange", pinAfterSettle, { passive: true });
+  window.addEventListener("resize", pinAfterSettle, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", pinAfterSettle, { passive: true });
+    window.visualViewport.addEventListener("scroll", pinWindow, { passive: true });
+  }
+  window.__pinWindow = pinWindow;
 
   const grid       = document.getElementById("album-grid");
   const refreshBtn = document.getElementById("refresh-btn");
@@ -26,18 +103,14 @@
 
   const modal       = document.getElementById("album-modal");
   const modalImg    = document.getElementById("modal-img");
-  const modalSource = document.getElementById("modal-source");
-  // Same rule as the tiles: badge only on confirmed local files, and clear it
-  // on every open so a previous album's badge can't linger.
-  function setModalSource(album) {
-    if (!modalSource) return;
-    const kind = album && (album.source || (album.local ? "local" : null));
-    const label = { local: "Local albums", qobuz: "Qobuz", tidal: "TIDAL" }[kind];
-    modalSource.className = "album-source" + (label ? " " + kind : " hidden");
-    if (label) { modalSource.title = label; modalSource.setAttribute("aria-label", label); }
-    // Same badge as the tiles, on the album's own artwork. Cleared on every
-    // open for the same reason: a previous album's rate lingering on a new
-    // cover would be a confident, wrong statement about the file.
+  // The sample-rate badge, on the album's own artwork. Cleared on every open:
+  // a previous album's rate lingering on a new cover would be a confident,
+  // wrong statement about the file.
+  //
+  // The local / Qobuz / TIDAL SOURCE badge is not drawn here any more (v1.8.60)
+  // — that corner of this artwork is under the Share button, on the album view
+  // and Now playing alike. Grid tiles keep theirs (sourceBadge).
+  function setModalQuality(album) {
     const mq = document.getElementById("modal-quality");
     if (!mq) return;
     const q = album && album.quality;
@@ -67,20 +140,103 @@
   let zones = [];
   let selectedZoneId = null;
 
-  // Phone wall geometry (used by measurePhoneWall/computeAlbumCount below).
-  // Declared BEFORE the computeAlbumCount() call on the next line — it's a
-  // const, so referencing it from that call while it is still in its temporal
-  // dead zone would throw and abort the whole app (blank screen). TEXT_BLOCK/
-  // gaps mirror the .album-grid.phone-fit and phone .album-meta CSS.
-  const PHONE_WALL = {
-    COLS: 3,
-    ROW_GAP: 10,     // .album-grid.phone-fit row-gap
-    COL_GAP: 8,      // .album-grid.phone-fit column-gap
-    TEXT_BLOCK: 51,  // worst case: 5px meta margin + 2 title lines (12×1.25=30) + 1px gap + artist (~15) = 51
-                     // sized for the 2-line-title max so 4 rows never overflow into a scroll
-    MIN_ART: 96,     // don't shrink art below this — drop a row instead
-    TARGET_ROWS: 4
+  // How many albums a phone wall asks for.
+  //
+  // The random wall used to MEASURE the screen and shrink its artwork until
+  // exactly four rows fit without scrolling — the app's original "a screenful
+  // of random albums". That made it the one wall whose tiles were a different
+  // size from every other, which is the difference this replaced: every wall
+  // now uses the same natural third-of-width artwork as the Library, and they
+  // scroll. Three screens' worth, so there is something to scroll to.
+  //
+  // ----- UI Settings (v1.8.77): text size, grid layout, tile size -----
+  //
+  // Per device, in localStorage, painted as custom properties on <html> so
+  // every screen — every carousel, every grid, every render path — reads the
+  // same numbers without being told. Nothing here rebuilds a tile.
+  //
+  //   --ui-text   album and artist text, a multiplier on each breakpoint's size
+  //   --ui-title  the grid screen's title in the top bar, and a playlist's name
+  //   --ui-tile   the Home carousels' tile width (150px × this)
+  //   --grid-cols the column count of every .album-grid, when not the default
+  //
+  // Declared up here, before `let albumCount = computeAlbumCount()` below:
+  // computeAlbumCount() reads effGridCols() on tablets and desktops, and a
+  // const reached while still in its temporal dead zone aborts the whole app.
+  //
+  // Grid columns: "3" or "2" fixes the count on every screen. "auto" keeps the
+  // screen's own count (3 phone, 5 tablet portrait, 7 tablet landscape, 9
+  // desktop) divided by the tile size, so a bigger tile is fewer columns. List
+  // is the grid/list toggle's own stored choice, shown here as a fourth option.
+  const UI_OPTS = {
+    text:  { key: "rra-ui-text",  def: "1",    allowed: ["1", "1.1", "1.25", "1.5"] },
+    title: { key: "rra-ui-title", def: "1",    allowed: ["1", "1.1", "1.25", "1.5"] },
+    cols:  { key: "rra-ui-cols",  def: "auto", allowed: ["auto", "3", "2"] },
+    tile:  { key: "rra-ui-tile",  def: "1",    allowed: ["0.5", "0.75", "0.9", "1", "1.1", "1.25", "1.5"] },
   };
+  function uiGet(k) {
+    const o = UI_OPTS[k];
+    let v = null;
+    try { v = localStorage.getItem(o.key); }
+    catch (e) {} // localStorage optional — the default stands
+    return o.allowed.indexOf(v) > -1 ? v : o.def;
+  }
+  function uiSet(k, v) {
+    const o = UI_OPTS[k];
+    if (o.allowed.indexOf(v) < 0) return;
+    try { localStorage.setItem(o.key, v); }
+    catch (e) {} // localStorage optional — applied for this session regardless
+    uiMem[k] = v;
+    applyUiSettings();
+    // The columns moved at once (CSS); the random wall's COUNT is a screenful
+    // at the old columns, so ask again when that is now a different number.
+    if ((k === "cols" || k === "tile") && window.__refreshWallCount) window.__refreshWallCount();
+  }
+  const uiMem = {};
+  const uiVal = (k) => (k in uiMem ? uiMem[k] : uiGet(k));
+
+  // The screen's own column count, by the SAME breakpoints style.css uses for
+  // .album-grid (keep the two in step).
+  function baseGridCols() {
+    const w = window.innerWidth, h = window.innerHeight;
+    if (w >= 1200) return 9;
+    if (w >= 768) return h >= w ? 5 : 7;
+    return 3;
+  }
+  function effGridCols() {
+    const c = uiVal("cols");
+    if (c !== "auto") return parseInt(c, 10);
+    return Math.max(1, Math.round(baseGridCols() / parseFloat(uiVal("tile"))));
+  }
+  function applyUiSettings() {
+    const root = document.documentElement.style;
+    const put = (prop, v, def) => { if (v === def) root.removeProperty(prop); else root.setProperty(prop, v); };
+    put("--ui-text",  uiVal("text"),  "1");
+    put("--ui-title", uiVal("title"), "1");
+    put("--ui-tile",  uiVal("tile"),  "1");
+    const eff = effGridCols();
+    if (eff === baseGridCols()) root.removeProperty("--grid-cols");
+    else root.setProperty("--grid-cols", String(eff));
+  }
+  applyUiSettings();
+  window.addEventListener("resize", applyUiSettings);
+  window.__uiSettings = {
+    get: uiVal,
+    set: uiSet,
+    // Layout as Settings shows it: "list" when the grid/list toggle says list,
+    // else the column choice.
+    layout: () => (window.__albumViewIsList && window.__albumViewIsList()) ? "list" : uiVal("cols"),
+    setLayout: (v) => {
+      if (v === "list") { if (window.__setAlbumViewList) window.__setAlbumViewList(true); return; }
+      if (window.__setAlbumViewList) window.__setAlbumViewList(false);
+      uiSet("cols", v);
+    },
+  };
+
+  // Declared BEFORE the computeAlbumCount() call on the next line — a `const`
+  // referenced from that call while still in its temporal dead zone throws and
+  // aborts the whole app (blank screen).
+  const PHONE_WALL_COUNT = 24;
   let albumCount = computeAlbumCount();
   let labelsActive = false;        // viewing the record-label browser?
   let libraryWallActive = false;   // viewing the full A-Z library grid?
@@ -98,6 +254,10 @@
   let playlistSeq = 0;              // orphans in-flight playlist fetches
   let smartPicksActive = false;     // viewing the Smart Picks screen?
   let smartPicksSeq = 0;            // orphans in-flight Smart Picks fetches
+  let discoverActive = false;       // viewing the Discover screen?
+  let discoverSeq = 0;              // orphans in-flight Discover fetches
+  let laterActive = false;          // viewing the Listen later screen?
+  let laterSeq = 0;                 // orphans in-flight Listen later fetches
   // How long a report about a long-running queue fill stays up (vs showToast's
   // 2.4s default). Declared here rather than beside showToast() for the same
   // reason as the flags above — a `const` further down the file is a TDZ
@@ -124,6 +284,28 @@
   let trackSelected = [];          // [{index,title}] within the open album
   let albumSelectMode = false;
   let albumSelected = [];          // [{offset,title,subtitle}] albums chosen in select mode
+  // The queue's "played earlier" select mode, and the picks in the order they
+  // were MADE — which is the order they will be queued in, and is not the order
+  // they are shown in. Both are reset whenever the list is rebuilt: the rows are
+  // new nodes then, and a selection pointing at rows that no longer exist is
+  // worse than none. Up here with the other flags because liveBusy() reads the
+  // mode (a live re-read must not rebuild the list mid-selection).
+  let historySelectMode = false;
+  let historySelected = [];
+  // Album view: previous / next (v1.8.66). The tile the open album was opened
+  // from, and how to find it again; pendingNavTile is set by a tile's click for
+  // exactly as long as its opener runs. Up here because closeModal() clears
+  // them and can run during boot.
+  let albumNavTile = null;
+  let albumNavParent = null;
+  let albumNavKey = null;
+  let pendingNavTile = null;
+  // The open album's detail is out of date — an error line, or a "your Roon
+  // library changed" note — and is asked for again when the library watch
+  // republishes the snapshot (v1.8.68). albumDetailAskedAt is the snapshot
+  // revision that answer was asked for under.
+  let albumDetailHeal = false;
+  let albumDetailAskedAt = "";
   // The filter that the currently-open album modal belongs to. Usually the
   // active genre/tag filter, but a per-open override is used for label albums
   // so detail + play resolve offsets against the right list.
@@ -146,32 +328,295 @@
   }
   function filterQS() { return filterQSOf(activeFilter); }
 
+  // ===========================================================================
+  // LIVE STATE (v1.8.65): a screen shows what the server holds NOW.
+  //
+  // It used to show what the server held when the screen was entered — and on
+  // Home not even that. The Library row counted itself fresh whenever the SORT
+  // matched, so a row saved under the current sort was reused across every
+  // visit, every cold open and every upgrade: the order and the badges on it
+  // were whatever they had been the day it was saved, and the only way to move
+  // it was to change the sort and change it back.
+  //
+  // /api/live answers a handful of revisions (LiveState in :core). Rouen asks
+  // for them on a three-second timer; this build does not poll, so the same
+  // answer is a LONG POLL — each request carries the revisions last seen
+  // (`wait_for`) and the server holds it until one of them moves, the way
+  // /api/zone-state already works. A screen whose revision moved re-reads
+  // itself IN PLACE: same scroll position, no "Loading…", and no repaint when
+  // the answer is what is already showing. Two rules every screen keeps:
+  //
+  //   * Nothing is swapped under a finger. A tile that changes as it is pressed
+  //     opens an album nobody chose, so a change waits until the screen has been
+  //     left alone for a moment, and for any selection to end (liveWhenIdle).
+  //   * A random pick is not stale. The random rows re-read with the seed they
+  //     were drawn with (seededPick on the server), so a re-read shows the same
+  //     albums with current facts — never a new draw nobody asked for.
+  // ===========================================================================
+  const LIVE_IDLE_MS = 1200;
+  let liveRev = null;              // the revisions the server last reported
+  const liveListeners = [];
+  function onLive(fn) { liveListeners.push(fn); }
+  // The revisions `keys` stand at, as one comparable string — "?" until the
+  // server has answered. Something read before that is compared as unknown and
+  // read again once the answer comes, rather than guessed to be current.
+  function liveStamp(keys) {
+    if (!liveRev) return "?";
+    return keys.map(k => k + "=" + (liveRev[k] === undefined ? "" : String(liveRev[k]))).join("&");
+  }
+  let liveInFlight = false;
+  // The server's own token for the revisions this page last heard, sent back as
+  // `wait_for`. Null until the first answer, which is therefore immediate.
+  let liveToken = null;
+  let liveAbort = null;
+  // Set while the server cannot be reached. A screen whose re-read failed in
+  // that time is stale with nothing left to tell it so — the revisions may not
+  // move again for hours — so the first answer after an outage asks every
+  // screen to check itself (liveCatchUp), whether or not anything moved.
+  let liveUnreachable = false;
+  // Resolves true when the server answered, false when it could not be reached
+  // (the loop below backs off on false).
+  async function pollLive() {
+    if (liveInFlight) return true;
+    liveInFlight = true;
+    try {
+      const ctl = typeof AbortController === "function" ? new AbortController() : null;
+      liveAbort = ctl;
+      const q = liveToken ? "?wait_for=" + encodeURIComponent(liveToken) : "";
+      const r = await fetch("/api/live" + q, { cache: "no-store", signal: ctl ? ctl.signal : undefined });
+      if (!r.ok) { liveUnreachable = true; return false; }
+      const j = await r.json();
+      const next = j && j.rev;
+      if (!next || typeof next !== "object") return true;
+      liveToken = typeof j.token === "string" ? j.token : null;
+      const recovered = liveUnreachable;
+      liveUnreachable = false;
+      // The first answer of a page reports every key as changed — nothing was
+      // known before it — and says so, for listeners that would otherwise
+      // repeat work the boot path already does.
+      const first = !liveRev;
+      const changed = new Set();
+      for (const k of Object.keys(next)) {
+        if (first || String(liveRev[k]) !== String(next[k])) changed.add(k);
+      }
+      liveRev = next;
+      if (!changed.size) {
+        if (recovered) liveCatchUp();
+        return true;
+      }
+      for (const fn of liveListeners) {
+        // One screen's fault must not stop the others hearing about the change.
+        try { fn(changed, first); } catch (e) { console.error("[live]", e); }
+      }
+      return true;
+    } catch (e) {
+      // Offline, the server restarting, or stopLive() hanging up: the loop asks
+      // again, and the first answer after it brings every screen up to date.
+      liveUnreachable = true;
+      return false;
+    } finally {
+      liveInFlight = false;
+      liveAbort = null;
+    }
+  }
+  // One loop at a time, alive while the page is on screen. Paced like the
+  // zone-state loop: a failure backs off (one second, doubling to fifteen),
+  // and a server that answers at once — an older build with no wait support —
+  // is held to four asks a second rather than becoming a hot loop.
+  let liveRunning = false;
+  async function liveLoop() {
+    let backoff = 0;
+    while (liveRunning) {
+      const before = Date.now();
+      const ok = await pollLive();
+      if (!liveRunning) return;
+      backoff = ok ? 0 : Math.min(backoff ? backoff * 2 : 1000, 15000);
+      const elapsed = Date.now() - before;
+      const pause = backoff || (elapsed < 250 ? 250 - elapsed : 0);
+      if (pause) await new Promise(r => setTimeout(r, pause));
+    }
+  }
+  function startLive() {
+    if (liveRunning) return;
+    liveRunning = true;
+    liveLoop();
+  }
+  function stopLive() {
+    if (!liveRunning) return;
+    liveRunning = false;
+    // Hang up rather than leave a held request open on a backgrounded page.
+    if (liveAbort) { try { liveAbort.abort(); } catch (e) {} liveAbort = null; }
+  }
+  // Only while the app is on screen: a hidden tab has nobody to show a change
+  // to, and coming back asks at once — which is exactly when a stale screen
+  // would otherwise be seen.
+  document.addEventListener("visibilitychange", () => { if (document.hidden) stopLive(); else startLive(); });
+  window.addEventListener("online", () => { if (!document.hidden) pollLive(); });
+  // A page restored from the back/forward cache (iOS keeps an installed app's
+  // page this way) comes back with its timers as they were and may not report
+  // a visibility change: ask straight away.
+  window.addEventListener("pageshow", (e) => {
+    if (e.persisted && !document.hidden) { startLive(); pollLive(); }
+  });
+  // Ask every screen to check itself against the revisions already known, with
+  // no change announced. For a screen coming back into view that missed changes
+  // while it was put away — the artist view hands the grid back this way. The
+  // listeners that compare stamps act; the ones that wait for a change do not.
+  function liveCatchUp() {
+    for (const fn of liveListeners) {
+      try { fn(new Set()); } catch (e) { console.error("[live]", e); }
+    }
+  }
+  window.__liveCatchUp = liveCatchUp;
+
+  // When the user last touched, scrolled or typed. `scroll` does not bubble, so
+  // it is caught on the way DOWN — a capturing listener on the document hears
+  // <main>'s and every carousel's.
+  let liveLastInput = 0;
+  // When the press being held began, or 0. A press is busy for as long as it is
+  // held, not just when it starts — a long press (select mode) outlasts any idle
+  // window. A FLAG with a time limit, never a count: a release the page does not
+  // hear (a mouse let go outside the window, a press on a node removed under it)
+  // would leave a count stuck above zero, and every live update after it would
+  // wait for ever. Past LIVE_PRESS_MAX_MS a "press" is not a tap on anything.
+  let livePressAt = 0;
+  const LIVE_PRESS_MAX_MS = 10000;
+  {
+    const touched = () => { liveLastInput = Date.now(); };
+    for (const ev of ["touchstart", "wheel", "keydown"]) {
+      document.addEventListener(ev, touched, { capture: true, passive: true });
+    }
+    document.addEventListener("scroll", touched, { capture: true, passive: true });
+    document.addEventListener("pointerdown", () => { livePressAt = Date.now(); touched(); },
+                              { capture: true, passive: true });
+    const lifted = () => { livePressAt = 0; touched(); };
+    document.addEventListener("pointerup", lifted, { capture: true, passive: true });
+    document.addEventListener("pointercancel", lifted, { capture: true, passive: true });
+    // Leaving the app ends any press; the release may never be delivered here.
+    window.addEventListener("blur", () => { livePressAt = 0; });
+    document.addEventListener("visibilitychange", () => { if (document.hidden) livePressAt = 0; });
+  }
+  // Busy = mid-gesture, or choosing things: a repaint during a selection would
+  // take the user's picks off the screen they are making them on.
+  function liveBusy() {
+    const held = livePressAt && (Date.now() - livePressAt) < LIVE_PRESS_MAX_MS;
+    return !!held ||
+           (Date.now() - liveLastInput) < LIVE_IDLE_MS ||
+           albumSelectMode || trackSelectMode || historySelectMode;
+  }
+  // Run each job once the screen is idle. Keyed, so a burst of changes while
+  // the user is busy runs each job once when they stop, not once per change.
+  const liveIdleJobs = new Map();
+  let liveIdleTimer = null;
+  function liveWhenIdle(key, fn) {
+    liveIdleJobs.set(key, fn);
+    if (liveIdleTimer) return;
+    const tick = () => {
+      if (liveBusy()) {
+        // Until the idle window has run, then a few looks a second while a
+        // press or a selection lasts — never a tight loop.
+        const wait = Math.max(250, LIVE_IDLE_MS - (Date.now() - liveLastInput));
+        liveIdleTimer = setTimeout(tick, wait);
+        return;
+      }
+      liveIdleTimer = null;
+      const jobs = Array.from(liveIdleJobs.values());
+      liveIdleJobs.clear();
+      for (const job of jobs) {
+        try { job(); } catch (e) { console.error("[live]", e); }
+      }
+    };
+    liveIdleTimer = setTimeout(tick, 0);
+  }
+
+  // What a tile SHOWS, as one string: two albums with equal keys draw identical
+  // tiles. Every field buildAlbumTile() reads is here — leave one out and a
+  // change to it (a badge, say) would be "nothing changed" to every live
+  // re-read, which is the stale screen this exists to end.
+  function albumTileKey(a) {
+    return JSON.stringify([a.offset, a.title || "", a.subtitle || "", a.image_key || null,
+                           Array.isArray(a.art_keys) ? a.art_keys : null,
+                           a.source || null, !!a.local, a.quality || null, !!a.hires]);
+  }
+  // Make `container` show `entries` ({key, build}) in order, REUSING every child
+  // already showing the same key. appendChild moves a live node — cover already
+  // loaded, listeners intact — where re-creating it would reload every image
+  // from cache and make the whole row blink for a change to one tile. (Moving is
+  // also what CLAUDE.md pre-flight step 4 asks for over re-parsing markup.)
+  // Nothing is touched at all when the keys are already in that order, so the
+  // usual live re-read — the same answer again — costs no DOM work. Anything in
+  // the container without a key (an empty-state line) is dropped.
+  function paintRow(container, entries) {
+    if (!container) return;
+    const kids = container.children;
+    if (kids.length === entries.length) {
+      let same = true;
+      for (let i = 0; i < entries.length; i++) {
+        if (kids[i].__tileKey !== entries[i].key) { same = false; break; }
+      }
+      if (same) return;
+    }
+    // A carousel keeps its sideways position; emptying it for an instant must
+    // not throw the user back to its first tile.
+    const left = container.scrollLeft;
+    const spare = new Map();
+    for (const el of Array.from(kids)) {
+      if (!el.__tileKey) continue;
+      const list = spare.get(el.__tileKey);
+      if (list) list.push(el); else spare.set(el.__tileKey, [el]);
+    }
+    const frag = document.createDocumentFragment();
+    for (const entry of entries) {
+      const list = spare.get(entry.key);
+      let el = list && list.length ? list.shift() : null;
+      if (!el) { el = entry.build(); el.__tileKey = entry.key; }
+      frag.appendChild(el);
+    }
+    container.textContent = "";
+    container.appendChild(frag);
+    if (left) container.scrollLeft = left;
+    // The album view open from this row: its previous / next hints say what is
+    // beside it NOW, not what was there when it opened.
+    if (albumNavParent === container) paintAlbumSteps();
+  }
+  function reconcileTiles(container, albums, build) {
+    paintRow(container, (albums || []).map(a => ({ key: albumTileKey(a), build: () => build(a) })));
+  }
+  // The same machinery for the screens that live in the other closures of this
+  // file (the artist view, the label browser). One implementation: a second
+  // copy would be a second idea of when a screen is stale.
+  window.__live = { on: onLive, stamp: liveStamp, whenIdle: liveWhenIdle,
+                    paintRow, tileKey: albumTileKey };
+  // Started here, at the top of the app, so the first answer is normally in
+  // before anything asks for a stamp — a screen read before it is read again
+  // once it lands (see liveStamp).
+  if (!document.hidden) startLive();
+
   // ----- Themes -----
-  // Four themes, expressed as TWO attributes rather than four values of one:
+  // Two themes since v1.8.74, expressed as TWO attributes rather than two
+  // values of one:
   //
-  //   data-theme   = dark | light   — the FAMILY
-  //   data-palette = classic | copper — the COLOURS
+  //   data-theme   = dark | light       — the FAMILY
+  //   data-palette = graphite | brass   — the COLOURS
   //
-  // The split exists because thirteen rules in style.css are keyed on
-  // `[data-theme="light"] .something` — white text on an accent fill, the
-  // light-side hover washes, the translucent top bar. Those describe the
-  // family, not the palette, and a new light theme under a third data-theme
-  // value would silently miss every one of them: white-on-accent labels would
-  // fall back to near-black, and the queue would use dark-theme washes on a
-  // light background. Keying palettes on their own attribute means the
-  // existing themes are untouched and the new ones inherit all thirteen.
+  // The family is kept separate because a number of rules in style.css are
+  // keyed on `[data-theme="light"] .something` — white text on an accent fill,
+  // the light-side hover washes — and those describe the family, not the
+  // palette.
   const THEMES = [
-    { id: "dark",         label: "Dark",         note: "The original — cool grey and cyan",
-      theme: "dark",  palette: "classic" },
-    { id: "light",        label: "Light",        note: "The original — bright and neutral",
-      theme: "light", palette: "classic" },
-    { id: "copper-dark",  label: "Copper dark",  note: "Charcoal and copper, from the MusicD site",
-      theme: "dark",  palette: "copper" },
-    { id: "brass-light",  label: "Brass light",  note: "Warm parchment with a brass accent",
-      theme: "light", palette: "copper" },
+    // The default: graphite and brass. First, so the picker leads with what a
+    // new device starts on.
+    { id: "graphite-brass", label: "Graphite and Brass", note: "Warm charcoal with a brass accent",
+      theme: "dark",  palette: "graphite" },
+    { id: "brass-light",    label: "Brass light",        note: "Warm parchment with a brass accent",
+      theme: "light", palette: "brass" },
   ];
   const THEME_KEY = "rra-theme-v2";
-  const DEFAULT_THEME = "dark";
+  // What a device that has never chosen gets — and what a device that chose a
+  // theme which no longer exists (Mandarin, Dark, Light, Copper dark; removed
+  // in v1.8.74) is moved to. index.html starts <html> on the same palette, so
+  // the first paint before this file runs is already it.
+  const DEFAULT_THEME = "graphite-brass";
   const themeById = (id) => THEMES.find(t => t.id === id) || null;
 
   function applyTheme(id) {
@@ -181,9 +626,24 @@
     // The browser chrome colour was hard-coded to the dark background and
     // never updated, so it was already wrong in light theme. Read it back off
     // the applied palette instead of maintaining a second list of hexes.
+    //
+    // It is the TOP BAR's colour — which as of v1.7.87 is simply --bg, because
+    // the page, the top bar and every full-screen panel are one ground. iOS
+    // draws the status bar (clock, signal, battery) itself and fills it with
+    // theme-color; nothing this app renders can appear there. The one thing
+    // that WOULD let the page show through it is
+    // `apple-mobile-web-app-status-bar-style: black-translucent`, the exact
+    // meta that stopped the app filling the display in v1.7.60-65, banned by
+    // pre-flight step 6, and baked into the home screen shortcut at ADD time so
+    // a wrong one cannot be undone from the server. So the status bar cannot be
+    // translucent. What it can be is the colour of the bar beneath it, and one
+    // ground makes that a token read rather than a blend to keep in step.
+    // v1.7.86 composited --glass-bg over --bg here; that helper went with the
+    // two-tone bar it existed to describe.
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
-      const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+      const bg = getComputedStyle(document.documentElement)
+        .getPropertyValue("--bg").trim();
       if (bg) meta.setAttribute("content", bg);
     }
     return t.id;
@@ -193,18 +653,8 @@
     let id = null;
     try { id = localStorage.getItem(THEME_KEY); } catch (e) { /* private browsing */ }
     if (themeById(id)) return id;
-    // Migrate the v1 key, which only ever held "light" or "dark" — those are
-    // still valid theme ids, so the user's choice carries over untouched.
-    try {
-      const old = localStorage.getItem("rra-theme");
-      if (old === "light" || old === "dark") {
-        localStorage.setItem(THEME_KEY, old);
-        return old;
-      }
-    } catch (e) { /* private browsing */ }
-    // No stored choice: follow the OS, as before. Read once at boot, with no
-    // change listener — same behaviour the single toggle had.
-    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
+    // Anything else — no choice yet, or one of the themes removed in v1.8.74 —
+    // is the default. "mandarin" was the same colours under its old name.
     return DEFAULT_THEME;
   }
 
@@ -231,81 +681,38 @@
   // the wall is width-limited, art is the natural third-of-width (no shrink);
   // when height-limited, art shrinks so the target rows still fit. Falls back
   // to 3 rows if 4 can't fit at a reasonable size.
-  function measurePhoneWall() {
-    const P = PHONE_WALL;
-    const mainEl = document.querySelector("main");
-    let innerW, innerH;
-    if (mainEl && mainEl.clientHeight > 0) {
-      const cs = window.getComputedStyle(mainEl);
-      // Subtract <main>'s padding — the bottom padding reserves the transport,
-      // so innerH is the true height the grid can occupy.
-      innerW = mainEl.clientWidth
-        - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-      innerH = mainEl.clientHeight
-        - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
-    } else {
-      // Pre-layout fallback: ~110px top bar, ~94px <main> vertical padding.
-      innerW = window.innerWidth - 28;
-      innerH = window.innerHeight - 110 - 94;
-    }
-    const artW = (innerW - (P.COLS - 1) * P.COL_GAP) / P.COLS;
-    const artForRows = (r) => (innerH - (r - 1) * P.ROW_GAP - r * P.TEXT_BLOCK) / r;
-    let rows = P.TARGET_ROWS;
-    let art = Math.min(artW, artForRows(P.TARGET_ROWS));
-    if (art < P.MIN_ART) {
-      rows = 3;
-      art = Math.min(artW, artForRows(3));
-      if (art < P.MIN_ART) art = artW;   // very short screen: natural size, may scroll
-    }
-    return { rows, art: Math.max(1, Math.floor(art)) };
-  }
-
-  // Remove the phone-fit wall sizing (used when the labels browser takes over
-  // the shared grid, so label tiles use their own default layout).
-  function clearWallGridSizing() {
-    grid.classList.remove("phone-fit");
-    grid.style.removeProperty("--phone-art");
-  }
-
-  // Apply (or clear) the phone-fit sizing on the album wall grid. Called for
-  // the album wall only — the labels browser removes it so it keeps its own
-  // layout. Returns the album count for the wall, or null off-phone.
-  function applyWallGridSizing() {
-    if (Math.min(window.innerWidth, window.innerHeight) >= 768) {
-      grid.classList.remove("phone-fit");
-      grid.style.removeProperty("--phone-art");
-      return null;
-    }
-    const m = measurePhoneWall();
-    grid.style.setProperty("--phone-art", m.art + "px");
-    grid.classList.add("phone-fit");
-    return PHONE_WALL.COLS * m.rows;
-  }
-
   function computeAlbumCount() {
     const w = window.innerWidth;
     const h = window.innerHeight;
     const isLandscape = w > h;
     const minDim = Math.min(w, h);  // smallest dimension identifies phones vs tablets
 
-    // Phone (narrowest side < 768 px): 3 columns, rows measured to fill the
-    // screen (target 4) — see measurePhoneWall. Landscape is blocked via CSS.
-    if (minDim < 768) {
-      return Math.min(96, PHONE_WALL.COLS * measurePhoneWall().rows);  // 96 = server max
-    }
+    // Phone (narrowest side < 768 px): 3 columns of natural third-of-width
+    // artwork, the same as every other wall, and it scrolls.
+    if (minDim < 768) return PHONE_WALL_COUNT;
 
-    // Desktop (width ≥ 1200 px)
-    if (w >= 1200) return 45;       // 9×5
-
-    // Tablet (768–1199 px)
-    return isLandscape ? 21 : 20;   // 7×3 or 5×4
+    // Desktop (width ≥ 1200 px), tablet (768–1199 px): a screenful of rows at
+    // the column count UI Settings has given the grid (v1.8.77).
+    const cols = effGridCols();
+    if (w >= 1200) return cols * 5;       // 9×5 by default
+    return cols * (isLandscape ? 3 : 4);  // 7×3 or 5×4 by default
   }
 
-  // Re-fit the phone wall when the viewport resizes (Safari chrome collapsing,
-  // iPad split view). Debounced; only applies to the actual phone-fit random
-  // wall — it must not fire while Home, an active search, the labels browser,
-  // or the "Not played" full grid are showing, since none of those are the
-  // phone-fit wall and loadRandom() would silently replace their content.
+  // A viewport change (Safari chrome collapsing, iPad split view) can change how
+  // many albums are worth holding. Debounced, and only for the RANDOM wall — it
+  // must not fire while Home, an active search, the labels browser, the artist
+  // view or the "Not played" grid are showing, because loadRandom() would
+  // silently replace their content with something else entirely.
+  // The random wall again, when UI Settings changes its columns: the same
+  // guards as a resize, without the phone-only limit (every size has a count).
+  window.__refreshWallCount = () => {
+    if (labelsActive || libraryWallActive) return;
+    if (window.__artistViewActive && window.__artistViewActive()) return;
+    if (homeView && !homeView.classList.contains("hidden")) return;
+    if (window.__searchActive && window.__searchActive()) return;
+    if (grid.classList.contains("hidden")) return;
+    if (computeAlbumCount() !== albumCount) loadRandom();
+  };
   let _wallResizeTimer = null;
   window.addEventListener("resize", () => {
     clearTimeout(_wallResizeTimer);
@@ -319,32 +726,111 @@
       if (window.__searchActive && window.__searchActive()) return;
       if (Math.min(window.innerWidth, window.innerHeight) >= 768) return;
       const next = computeAlbumCount();
-      if (next !== albumCount) loadRandom();   // rows changed → refetch to fill exactly
-      else applyWallGridSizing();              // same rows → rescale art in place
+      // Nothing to rescale any more — the tiles are a plain third of the width
+      // at every size. Only a genuinely different count is worth a refetch.
+      if (next !== albumCount) loadRandom();
     }, 250);
   });
 
   // ----- Home landing view -----
   const homeView     = document.getElementById("home-view");
   const homeSections = document.getElementById("home-sections");
-  const homeAotd = document.getElementById("home-aotd");
+  const homeToday    = document.getElementById("home-today");
   const homeRandom   = document.getElementById("home-random");
   const homeArtists  = document.getElementById("home-artists");
   const homeLibrary  = document.getElementById("home-library");
   const homeLotw     = document.getElementById("home-lotw");
   const homePicks    = document.getElementById("home-picks");
+  const homeLater    = document.getElementById("home-later");
   const homeHistory  = document.getElementById("home-history");
   const homeGenres   = document.getElementById("home-genres");
   const topbarBack   = document.getElementById("topbar-back");
   const topbarRefresh = document.getElementById("topbar-refresh");
   const topbarSearch  = document.getElementById("topbar-search");
-  let homeSectionsLoaded = false;
-  let homeLibraryLoaded = false; // set once the Library row populates
-  // Smart Picks are built once a day on the server. The row is retried on each
-  // Home visit until it populates (the first build runs in the background and
-  // can take a minute), then left alone — the set does not change again today.
-  let homePicksDay = "";
-  let homeHistoryLoaded = false;  // set once the recently-played row populates
+  // ---------------------------------------------------------------------------
+  // What each Home row holds, and what it was built from (v1.8.65).
+  //
+  // A row is fresh when it holds the answer to the question it would ask NOW,
+  // and that question has two halves: the server data it reads (the live
+  // revisions in homeRowDeps) and what this device chose — the wall's order for
+  // the Library row, the seed for the two random rows (homeRowStamp). Before
+  // this, no row tracked both. The Library row remembered the ORDER it held and
+  // nothing about the data, so it counted as fresh for as long as the sort
+  // stayed put — across visits, cold opens and upgrades; Recently played, Label
+  // of the week and the genres loaded once per session and never again; Smart
+  // Picks once a day.
+  // ---------------------------------------------------------------------------
+  function homeRowDeps(id) {
+    switch (id) {
+      // Album of the day turns over at 00:01, and is withheld once played.
+      case "today":    return ["library", "plays", "aotd"];
+      case "history":  return ["library", "plays"];
+      case "picks":    return ["picks", "library", "day"];
+      // An album put aside or taken off, and the library — an entry Roon has
+      // just imported turns from "add it" into an ordinary album tile.
+      case "later":    return ["later", "library"];
+      // The two drawn rows: the draw is the day's (homeSeeds), and re-read in
+      // place when the library moves under it.
+      case "random":   return ["library", "day"];
+      case "artists":  return ["library", "day"];
+      // The same revisions the wall it heads reads (Focus aside — see libSortParams).
+      case "library":  return libOrderDeps(libView.sort, "any");
+      // Read from the Core, so only a rebuilt library re-reads them — never a
+      // year or a badge arriving (those do not change which genres Roon has).
+      case "genres":   return ["snapshot"];
+      default:         return [];
+    }
+  }
+  // The two drawn rows — Random albums and Artists — are a DRAW, fixed by a
+  // seed so that re-reading them shows the same albums with current facts
+  // (seededRank on the server). Rouen re-draws them on a five-minute clock;
+  // here the seed is the DATE, so they are the same ten all day on every device
+  // and turn over at local midnight ("ten a day", 0.4.37). A random seed is
+  // still what the random-album WALL draws with (newHomeSeed).
+  const newHomeSeed = () => Math.floor(Math.random() * 1e9) + 1;
+  const homeSeeds = { random: daySeed() };
+  let homeRowsRolledAt = 0;
+  function rerollHomeRandomRows() {
+    homeSeeds.random = daySeed();
+    homeRowsRolledAt = Date.now();
+  }
+  // Settled BEFORE anything loads the two rows — by a Home visit, and by the
+  // cold open's repaint — so a page left open across midnight draws the new
+  // day's set rather than re-reading yesterday's.
+  function rerollHomeRandomRowsIfDue() {
+    if (!homeRowsRolledAt || homeSeeds.random !== daySeed()) rerollHomeRandomRows();
+  }
+  function homeRowStamp(id) {
+    const s = liveStamp(homeRowDeps(id));
+    if (id === "library") return libSortKey() + "#" + s;
+    if (id === "random" || id === "artists") return "seed=" + homeSeeds.random + "#" + s;
+    return s;
+  }
+  // id -> { held: the stamp of what the row shows, inflight: the stamp being
+  // fetched, seq: which load is the newest }.
+  const homeRowState = {};
+  function homeRowStateOf(id) {
+    return homeRowState[id] || (homeRowState[id] = { held: null, inflight: null, seq: 0 });
+  }
+  function homeRowFresh(id) { return homeRowStateOf(id).held === homeRowStamp(id); }
+  // Run a row's loader so that the same question is never asked twice at once,
+  // an older answer never paints over a newer one, and the row records what it
+  // holds only when the loader says it painted a real answer. The loader gets
+  // isCurrent(), false once a newer load of the row has started, and resolves
+  // true when it painted.
+  function runHomeRow(id, loader) {
+    const st = homeRowStateOf(id);
+    const stamp = homeRowStamp(id);
+    if (st.inflight === stamp) return;
+    st.inflight = stamp;
+    const seq = ++st.seq;
+    const isCurrent = () => seq === st.seq;
+    Promise.resolve()
+      .then(() => loader(isCurrent))
+      .then((painted) => { if (painted && isCurrent()) st.held = stamp; },
+            (e) => { console.error("[home] " + id + " row:", e); })
+      .then(() => { if (isCurrent()) st.inflight = null; });
+  }
 
   // ---------------------------------------------------------------------------
   // The Home rows, as one table.
@@ -360,24 +846,49 @@
   // to stop the work behind it, not just the paint.
   // ---------------------------------------------------------------------------
   const HOME_ROWS = [
-    { id: "aotd",     title: "Album of the day",
-      load: () => { loadHomeAotd(); },
-      isFresh: () => homeAotdDay === localDayKey() && rowHasContent(homeAotd) },
     { id: "history",  title: "Recently played",
-      load: () => { loadHomeHistory(); }, isFresh: () => homeHistoryLoaded },
+      load: () => runHomeRow("history", loadHomeHistory),     isFresh: () => homeRowFresh("history") },
+    { id: "later",    title: "Listen later",
+      load: () => runHomeRow("later", loadHomeLater),         isFresh: () => homeRowFresh("later") },
     { id: "picks",    title: "Smart Picks",
-      load: () => { loadHomeSmartPicks(); }, isFresh: () => homePicksDay === localDayKey() },
+      load: () => runHomeRow("picks", loadHomeSmartPicks),    isFresh: () => homeRowFresh("picks") },
     { id: "random",   title: "Random albums",
-      load: () => { loadHomeRandom(); },
-      isFresh: () => homeRandomDay === localDayKey() && rowHasContent(homeRandom) },
+      load: () => runHomeRow("random", loadHomeRandom),       isFresh: () => homeRowFresh("random") },
     { id: "artists",  title: "Artists",
-      load: () => { loadHomeArtists(); },
-      isFresh: () => homeArtistsDay === localDayKey() && rowHasContent(homeArtists) },
+      load: () => runHomeRow("artists", loadHomeArtists),     isFresh: () => homeRowFresh("artists") },
     { id: "library",  title: "Library",
-      load: () => { loadHomeLibrary(); }, isFresh: () => homeLibraryLoaded },
+      load: () => runHomeRow("library", loadHomeLibrary),     isFresh: () => homeRowFresh("library") },
     { id: "genres",   title: "Browse by genre",
-      load: () => { loadHomeGenres(); }, isFresh: () => homeSectionsLoaded },
+      load: () => runHomeRow("genres", loadHomeGenres),       isFresh: () => homeRowFresh("genres") },
   ];
+  // Load every enabled row that does not hold the answer to its question now.
+  // showHome() calls it on every visit, and the live listener below whenever a
+  // revision moves while Home is on screen.
+  function refreshHomeRows() {
+    // The strip under the greeting is not a row and cannot be switched off.
+    if (homeToday && !homeRowFresh("today")) runHomeRow("today", loadHomeToday);
+    for (const row of HOME_ROWS) {
+      if (!homeRowOn(row.id)) continue;   // off means the work does not run
+      if (row.isFresh()) continue;
+      row.load();
+    }
+  }
+  function homeOnScreen() { return !!(homeView && !homeView.classList.contains("hidden")); }
+  onLive((changed, first) => {
+    // A settings write can come from any device: the row order and switches,
+    // and the features behind rows and menu entries. (Not on a page's first
+    // answer: bootstrap reads both itself.)
+    const layout = changed.has("settings") && !first
+      // Both catch their own failures and keep what is showing; this only stops
+      // an unexpected throw from also skipping the row refresh below.
+      ? Promise.all([loadHomeLayout(), applyFeatureMenuFromServer()]).catch((e) => console.error("[live] layout:", e))
+      : Promise.resolve();
+    // Off screen, nothing is fetched: showHome asks every row again on the way
+    // back in. On screen — even under an open album — the rows are brought up
+    // to date where they are, once the user is not mid-gesture.
+    layout.then(() => { if (homeOnScreen()) liveWhenIdle("home", refreshHomeRows); });
+  });
+
   function homeRowEl(id) {
     return homeSections ? homeSections.querySelector('[data-row="' + id + '"]') : null;
   }
@@ -394,12 +905,47 @@
   // fresh install has no history and no picks, and an empty labelled shelf
   // reads as a fault rather than an absence.
   function rowHidesWhenEmpty(id) {
-    return id === "history" || id === "picks" || id === "lotw";
+    // "unplayed" too since v1.8.75: it is empty for its first six months, and
+    // appears by itself once unplayed albums do.
+    return id === "unplayed" || id === "history" || id === "picks" || id === "lotw" || id === "later";
   }
   function rowHasAnyContent(sectionEl) {
     return !!(sectionEl &&
       sectionEl.querySelector(".album, .pick-card, .home-genre-tile, .artist-tile"));
   }
+
+  // The greeting above Home: the part of the day, and the date.
+  function paintGreeting() {
+    const d = new Date(), h = d.getHours();
+    const t = document.getElementById("home-greeting-text");
+    const dt = document.getElementById("home-greeting-date");
+    if (t) t.textContent = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+    if (dt) {
+      try { dt.textContent = d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }); }
+      catch (e) { dt.textContent = ""; }   // an engine without Intl options: no date rather than a wrong one
+    }
+  }
+  // Repainted when the words would change — noon, six, midnight — rather than
+  // on a one-minute timer: this build keeps no clock running for its own sake
+  // (CLAUDE.md, "Never poll"). Coming back on screen repaints too, which also
+  // covers a timeout the system delayed while the app was in the background.
+  let greetingTimer = null;
+  function scheduleGreeting() {
+    paintGreeting();
+    clearTimeout(greetingTimer);
+    const now = new Date();
+    const next = new Date(now);
+    const h = now.getHours();
+    if (h < 12) next.setHours(12, 0, 5, 0);
+    else if (h < 18) next.setHours(18, 0, 5, 0);
+    else { next.setDate(next.getDate() + 1); next.setHours(0, 0, 5, 0); }
+    greetingTimer = setTimeout(scheduleGreeting, Math.max(1000, next - now));
+  }
+  scheduleGreeting();
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { clearTimeout(greetingTimer); greetingTimer = null; }
+    else scheduleGreeting();
+  });
 
   function applyHomeLayout() {
     if (!homeSections) return;
@@ -472,14 +1018,76 @@
     if (r) r.classList.toggle("hidden", !on);
   }
 
-  function setTopbarNav(back, refresh, search) {
+  // Grid or list, for every album wall, remembered.
+  //
+  // One stored choice rather than one per screen: Random, Library, a genre and
+  // "Not played" are the same shelf seen through different filters, and a
+  // per-screen setting would mean setting it again on each of them.
+  const ALBUM_VIEW_KEY = "rra-album-view";
+  let albumViewList = false;
+  try { albumViewList = localStorage.getItem(ALBUM_VIEW_KEY) === "list"; }
+  catch (e) {} // localStorage optional (private browsing) — grid is the default
+
+  // Painted onto the grid itself, so it survives every re-render without each
+  // render path having to remember it.
+  function applyAlbumView() {
+    if (grid) grid.classList.toggle("as-list", albumViewList);
+    const btn  = document.getElementById("topbar-view");
+    const icoG = document.getElementById("topbar-view-grid");
+    const icoL = document.getElementById("topbar-view-list");
+    // The icon shows what a tap GIVES you, not what you are looking at — the
+    // same way the app's other mode buttons read.
+    if (icoG) icoG.classList.toggle("hidden",  albumViewList);
+    if (icoL) icoL.classList.toggle("hidden", !albumViewList);
+    if (btn) {
+      const label = albumViewList ? "Show as grid" : "Show as list";
+      btn.setAttribute("aria-label", label);
+      btn.setAttribute("title", label);
+      btn.setAttribute("aria-pressed", String(albumViewList));
+    }
+  }
+
+  window.__albumViewIsList = () => albumViewList;
+  window.__setAlbumViewList = (on) => {
+    albumViewList = !!on;
+    try { localStorage.setItem(ALBUM_VIEW_KEY, albumViewList ? "list" : "grid"); }
+    catch (e) {} // localStorage optional — the choice still holds for this session
+    applyAlbumView();
+  };
+
+  function setTopbarNav(back, refresh, search, view) {
     if (topbarBack)    topbarBack.classList.toggle("hidden", !back);
     if (topbarRefresh) topbarRefresh.classList.toggle("hidden", !refresh);
     if (topbarSearch)  topbarSearch.classList.toggle("hidden", !search);
+    // Defaults to hidden: only the screens that actually show album tiles ask
+    // for it, so it never appears over a playlist's track list.
+    const vb = document.getElementById("topbar-view");
+    if (vb) vb.classList.toggle("hidden", !view);
+    // The Labels screen's tools belong to that one screen: every other screen
+    // that sets the bar hides them, and the label list shows them again.
+    if (window.__showLabelTools) window.__showLabelTools(false);
+    applyAlbumView();
+  }
+
+  // Wired here, in the scope that owns albumViewList — it was briefly attached
+  // inside the mini-transport IIFE, where the state is not in scope at all and
+  // a tap would have thrown. `node --check` cannot see that; only running it
+  // can, which is what pre-flight step 3 is for.
+  {
+    const viewBtn = document.getElementById("topbar-view");
+    if (viewBtn) {
+      viewBtn.addEventListener("click", () => {
+        albumViewList = !albumViewList;
+        try { localStorage.setItem(ALBUM_VIEW_KEY, albumViewList ? "list" : "grid"); }
+        catch (e) {} // localStorage optional — the choice still holds for this session
+        applyAlbumView();
+      });
+    }
   }
 
   // Show the Home landing (hide the wall). The wall loads lazily when entered.
   function showHome() {
+    abandonRandomDraw();
     parkTopbarSort();
     leaveArtistsWall();
     libraryWallActive = false;
@@ -503,19 +1111,14 @@
     setTopbarNav(false, false, true);   // Home: search box, no Back/Refresh
     const m = document.querySelector("main");
     if (m) m.scrollTop = 0;
-    // The three picked rows — the daily album, the random albums, the artists —
-    // hold their tiles for the DAY. Every Back tap lands here, and rebuilding
-    // them each time re-fetched their cover images through the Roon Core, the
-    // single biggest repeated cost in the app; a five-minute clock used to cap
-    // that. A day does it better and is also what the rows now promise: the
-    // same suggestions until tomorrow, rather than a reshuffle whenever five
-    // minutes had passed. Each row records the day it loaded, so a row that
-    // failed (or has never run) is simply not fresh and is loaded here.
-    for (const row of HOME_ROWS) {
-      if (!homeRowOn(row.id)) continue;   // off means the work does not run
-      if (row.isFresh()) continue;
-      row.load();
-    }
+    // The two drawn rows — Random albums and Artists — hold their draw for the
+    // DAY: the date is the seed, so the same ten come back until tomorrow and a
+    // Back tap never re-fetches covers through the Core. (Rouen redraws on a
+    // five-minute clock; this build promised "ten a day" in 0.4.37 and keeps
+    // it.) Whether a row is current is the live-stamp model above, and the day
+    // is part of each drawn row's stamp, so midnight redraws them.
+    rerollHomeRandomRowsIfDue();
+    refreshHomeRows();
   }
   // Reveal the album wall. opts.loadIfEmpty loads a fresh wall only when it has
   // no content yet (so passive reveals — opening an overlay from the menu —
@@ -531,7 +1134,7 @@
     if (window.__exitArtistView) window.__exitArtistView({ restore: false });
     if (homeView) homeView.classList.add("hidden");
     grid.classList.remove("hidden");
-    setTopbarNav(true, true, false);   // random / genre grid: Back + Refresh, no search
+    setTopbarNav(true, true, false, true);   // random / genre grid: Back + Refresh + view, no search
     // Home and the grid share <main>'s scroll container — without this, a
     // wall entered while Home was scrolled down (e.g. tapping a genre card
     // below the fold) opens mid-page/at-the-bottom instead of at the top.
@@ -544,16 +1147,24 @@
   // Labels/search reuse the shared grid but aren't the random-album wall, so
   // they show Back but not Refresh.
   window.__setTopbarNav = setTopbarNav;
+  // The zone every "play this somewhere" action targets, for the modules that
+  // live in their own IIFEs (the share sheet's suggestions). The SELECT wins
+  // when it has a value — it is what the user last touched — with the
+  // in-memory value behind it, which is the same order every caller inside
+  // this scope already uses.
+  window.__selectedZoneId = () => {
+    const sel = document.getElementById("zone-select");
+    return (sel && sel.value) || selectedZoneId || null;
+  };
 
-  // The chevron is the one back control in the app now, so it has to mean
-  // "back from wherever you are" — the artist view used to carry its own
-  // "← Back" pill in the page, which scrolled under the floating hamburger and
-  // was a second style of the same button besides.
-  if (topbarBack) topbarBack.addEventListener("click", () => {
-    if (window.__artistViewActive && window.__artistViewActive()) {
-      window.__exitArtistView();
-      return;
-    }
+  // The chevron is the one back control in the app, so it has to mean "back
+  // from wherever you are". While the artist view is up, Back steps out of it
+  // instead — to the album it came from — through the artist view's own
+  // capture-phase listener. Checked here as well rather than relying on that
+  // listener running first: older WebKit runs listeners on the clicked element
+  // in the order they were added, capture or not.
+  if (topbarBack)    topbarBack.addEventListener("click", () => {
+    if (window.__artistViewActive && window.__artistViewActive()) return;
     showHome();
   });
   // The random-album wall's shuffle AND the walls' Random re-roll: one button
@@ -564,17 +1175,14 @@
     loadRandom();
   });
 
-  // Which local day each of the picked rows last loaded for. Empty means never
-  // — so a row that has never run is never mistaken for a fresh one, which is
-  // exactly what a shared clock did to the Artists row the day it was added.
-  // Persisted with the rows themselves, so a reopen shows the same suggestions
-  // rather than drawing new ones.
-  let homeAotdDay    = "";
-  let homeRandomDay  = "";
-  let homeArtistsDay = "";
   // Today, as the server's seeded draw wants it: 2026-09-10 -> 20260910. The
   // same number all day on every device, so "the same ten albums until
   // tomorrow" survives a restart, a reinstall and a cleared cache.
+  function localDayKey() {
+    const d = new Date();
+    const p = (n) => (n < 10 ? "0" + n : String(n));
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
   function daySeed() { return Number(localDayKey().replace(/-/g, "")); }
   // How many tiles the two drawn rows carry. Ten, at the owner's asking: enough
   // to be worth scrolling, few enough to be a suggestion rather than a wall.
@@ -582,8 +1190,9 @@
 
   // --- Home content persistence (instant open) --------------------------
   // The in-memory rows above live only as long as the page's JS context, so a
-  // cold PWA open (the process is torn down when the app is backgrounded) used
-  // to reload — and re-randomise — the entire Home screen every single time. Persist the last rendered rows to localStorage
+  // cold PWA open (the process is torn down when the app is backgrounded) had
+  // nothing to show and reloaded — and re-randomised — the entire Home screen
+  // every single time. Persist the last rendered rows to localStorage
   // and repaint them instantly on open, then revalidate in the background
   // (stale-while-revalidate). Covers come straight from the browser's HTTP
   // cache (the server sends them immutable for a week), so it's a flash-free
@@ -617,87 +1226,144 @@
     if (extraClass) tile.classList.add(extraClass);
     return tile;
   }
-  // Album of the day: one album for everyone, changing at local midnight.
-  // This used to be the first two tiles of a "Not played in 6 months" row —
-  // an unheard-shuffle button and the daily pick. The row is gone (the plays
-  // table only holds what this app watched happen, so it could not answer its
-  // own title), and the daily pick, which never depended on any of that, keeps
-  // the section to itself.
-  function renderHomeAotd(aotd) {
-    homeAotd.innerHTML = "";
-    if (!aotd) {
-      homeAotd.innerHTML = '<div class="home-carousel-empty">Nothing to suggest yet.</div>';
-      return;
-    }
+
+  // The action that used to live in the side menu, as the first tile of the
+  // "Not played" row. It reuses .album so the grid/carousel sizing, the hover
+  // state and the art aspect ratio all come for free — only the inside of the
+  // art square differs.
+  function buildUnheardTile() {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "album home-unheard-tile";
+    btn.id = "home-unheard-tile";
+    btn.setAttribute("aria-label", "Random Album");
+    // The whole library: this build's play history only holds what the app
+    // itself saw play, so "unheard" is not a question it can answer honestly.
+    btn.title = "Play a random album from your library";
+
+    const art = document.createElement("div");
+    art.className = "album-art-wrap unheard-art";
+    const glyph = document.createElement("span");
+    // A disc turning slowly on its own centre all the time, faster while the
+    // album is being chosen (the .spinning state playUnheard sets).
+    glyph.className = "unheard-glyph unheard-disc";
+    glyph.setAttribute("aria-hidden", "true");
+    glyph.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">' +
+      '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/>' +
+      '<path d="M6.6 8.4A6.6 6.6 0 0 1 9.4 5.9"/><path d="M17.4 15.6A6.6 6.6 0 0 1 14.6 18.1"/></svg>';
+    art.appendChild(glyph);
+    btn.appendChild(art);
+
+    const meta = document.createElement("div");
+    meta.className = "album-meta";
+    const t = document.createElement("div");
+    t.className = "album-title";
+    t.textContent = "Random Album";
+    meta.appendChild(t);
+    btn.appendChild(meta);
+
+    // One implementation, two triggers: the request, the zone check and the
+    // spin all live in playUnheard, which spins whichever control was pressed.
+    btn.addEventListener("click", () => {
+      if (window.__playUnheard) window.__playUnheard(btn);
+    });
+    return btn;
+  }
+
+  // Album of the day's day on THIS device's clock, in the server's format
+  // (aotdDayKey in index.js): the date a minute ago, so it turns at 00:01.
+  // Used only to refuse a saved copy from another day; the server decides.
+  function aotdDayKeyLocal() {
+    const d = new Date(Date.now() - 60 * 1000);
+    const p = (n) => (n < 10 ? "0" + n : String(n));
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+
+  // Album of the day, as a tile with its "★ Today" badge.
+  function buildAotdTile(aotd) {
     const tile = homeTile(aotd, "home-aotd");
     const wrap = tile.querySelector(".album-art-wrap");
     if (wrap) {
       const badge = document.createElement("span");
       badge.className = "aotd-badge";
-      badge.textContent = "\u2605 Today";
+      badge.textContent = "★ Today";
       wrap.appendChild(badge);
     }
-    homeAotd.appendChild(tile);
+    return tile;
   }
 
-  async function loadHomeAotd() {
-    if (!homeAotd) return;
-    if (!rowHasContent(homeAotd)) homeAotd.innerHTML = '<div class="home-carousel-empty">Loading\u2026</div>';
+  // The strip under the greeting: Random Album, then Album of the day when
+  // there is one (none once it has been played, until the next 00:01).
+  function renderHomeToday(aotd) {
+    if (!homeToday) return;
+    const entries = [{ key: "unheard", build: buildUnheardTile }];
+    if (aotd) entries.push({ key: "aotd:" + albumTileKey(aotd), build: () => buildAotdTile(aotd) });
+    paintRow(homeToday, entries);
+  }
+  async function loadHomeToday(isCurrent) {
+    if (!homeToday) return false;
+    if (!rowHasContent(homeToday)) renderHomeToday(null);   // Random Album needs no answer
     try {
-      const r = await fetch("/api/home/album-of-the-day");
-      const j = await r.json();
-      const aotd = (j && j.album) ? j.album : null;
-      renderHomeAotd(aotd);
-      if (aotd) {
-        homeAotdDay = localDayKey();
-        saveHomeCache({ aotd: { aotd }, aotdDay: homeAotdDay });
-      }
+      const r = await fetch("/api/home/album-of-the-day", { cache: "no-store" });
+      if (!isCurrent() || !r.ok) return false;
+      const aj = await r.json();
+      if (!isCurrent()) return false;
+      const aotd = (aj && aj.album) ? aj.album : null;
+      renderHomeToday(aotd);
+      saveHomeCache({ today: { aotd, day: (aj && aj.day) || null } });
+      return true;
     } catch (e) {
-      if (!rowHasContent(homeAotd)) homeAotd.innerHTML = '<div class="home-carousel-empty">Couldn\u2019t load.</div>';
-      // The day is only stamped on success, so this retries on the next visit.
+      return false;   // offline or restarting: what is showing stays
     }
   }
 
   // Random-albums row (reuses /api/random-albums, no filter → full library).
   // TEN albums, and the same ten until tomorrow: the row is a suggestion, and a
   // suggestion that has changed by the time you come back to it is not one. The
-  // date is the seed, so the set is the server's to draw and costs nothing to
-  // ask for twice. Tapping the header opens the full random wall (same as the
-  // hamburger "Random albums"), which is where a fresh shuffle lives.
-  // One renderer for the plain album carousels (Random, Library) — same tiles,
-  // same empty state, so the rows can't drift apart.
+  // date is the seed (homeSeeds), so the set is the server's to draw, costs
+  // nothing to ask for twice, and is re-read with the same seed when the
+  // library changes under it. Tapping the header opens the full random wall
+  // (same as the hamburger "Random albums"), which is where a fresh shuffle
+  // lives.
+  // One renderer for the plain album carousels (Random, Library, Recently
+  // played) — same tiles, same empty state, so the rows can't drift apart.
   function renderAlbumRow(rowEl, albums) {
     albums = albums || [];
     if (!rowEl) return;
-    rowEl.innerHTML = "";
     if (!albums.length) {
       rowEl.innerHTML = '<div class="home-carousel-empty">No albums.</div>';
       return;
     }
-    const frag = document.createDocumentFragment();
-    for (const a of albums) frag.appendChild(homeTile(a));   // filter:null → offsets resolve
-    rowEl.appendChild(frag);
+    reconcileTiles(rowEl, albums, (a) => homeTile(a));   // filter:null → offsets resolve
   }
   function renderHomeRandom(albums) { renderAlbumRow(homeRandom, albums); }
 
-  async function loadHomeRandom() {
-    if (!homeRandom) return;
+  async function loadHomeRandom(isCurrent) {
+    if (!homeRandom) return false;
     if (!rowHasContent(homeRandom)) homeRandom.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
+    const seed = homeSeeds.random;
     try {
-      const r = await fetch("/api/random-albums?count=" + HOME_PICK_COUNT + "&seed=" + daySeed());
-      if (r.status === 503) {
-        if (!rowHasContent(homeRandom)) homeRandom.innerHTML = '<div class="home-carousel-empty">Waiting for Roon Core…</div>';
-        return;   // keep any cached tiles while the index builds; retried next visit
+      const r = await fetch("/api/random-albums?count=" + HOME_PICK_COUNT + "&seed=" + seed);
+      if (!isCurrent()) return false;
+      if (!r.ok) {
+        // Keep any cached tiles while the index builds (503) or the server
+        // errs; not painted, so asked again on the next visit or change.
+        if (!rowHasContent(homeRandom)) {
+          homeRandom.innerHTML = '<div class="home-carousel-empty">' +
+            (r.status === 503 ? "Waiting for Roon Core…" : "Couldn’t load.") + '</div>';
+        }
+        return false;
       }
       const j = await r.json();
+      if (!isCurrent()) return false;
       const albums = (j && j.albums) || [];
       renderHomeRandom(albums);
-      if (albums.length) {
-        homeRandomDay = localDayKey();
-        saveHomeCache({ random: albums, randomDay: homeRandomDay });
-      }
+      if (albums.length) saveHomeCache({ random: albums, randomSeed: seed });
+      return true;
     } catch (e) {
+      if (!isCurrent()) return false;
       if (!rowHasContent(homeRandom)) homeRandom.innerHTML = '<div class="home-carousel-empty">Couldn’t load.</div>';
+      return false;
     }
   }
 
@@ -723,7 +1389,7 @@
       const img = document.createElement("img");
       img.loading = "lazy";
       img.alt = "";
-      img.src = `/api/image/${encodeURIComponent(a.image_key)}?size=${TILE_IMG_SIZE}`;
+      img.src = `/api/image/${encodeURIComponent(a.image_key)}?size=${tileImgSize()}`;
       // A dead key leaves the initial behind rather than the broken-image glyph.
       img.onerror = () => img.remove();
       art.appendChild(img);
@@ -767,69 +1433,91 @@
   // Ten artists, and the same ten until tomorrow — the Random albums row's
   // contract, for the same reason. Today's date is the seed, so the server
   // draws the set and any device asking on the same day is shown the same one.
-  async function loadHomeArtists() {
-    if (!homeArtists) return;
+  // A row loader in the runHomeRow sense: told whether it is still the newest
+  // load, and answering whether it painted a real answer.
+  async function loadHomeArtists(isCurrent) {
+    if (!homeArtists) return false;
     if (!rowHasContent(homeArtists)) {
       homeArtists.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
     }
+    const seed = homeSeeds.random;
     try {
       const r = await fetch("/api/artists?sort=random&limit=" + HOME_PICK_COUNT +
-                            "&seed=" + daySeed());
+                            "&seed=" + seed);
+      if (!isCurrent()) return false;
       // 503 is "the library is still being read", NOT "there are no artists" —
       // the difference this row got wrong on a phone, painting "No artists."
       // over itself for the rest of the session while the artists screen,
-      // opened a minute later, was full of them. Keep what is there, try again.
+      // opened a minute later, was full of them. Keep what is there; not
+      // painted, so it is asked again on the next visit or change.
       if (r.status === 503) {
         if (!rowHasContent(homeArtists)) {
           homeArtists.innerHTML = '<div class="home-carousel-empty">Waiting for Roon Core…</div>';
         }
-        return;
+        return false;
       }
       if (!r.ok) throw new Error("HTTP " + r.status);
       const j = await r.json();
+      if (!isCurrent()) return false;
       const artists = (j && j.artists) || [];
       renderHomeArtists(artists);
-      if (artists.length) {
-        homeArtistsDay = localDayKey();
-        saveHomeCache({ artists, artistsDay: homeArtistsDay });
-      }
+      if (artists.length) saveHomeCache({ artists, artistsSeed: seed });
+      // Only a row with artists in it counts as current: an empty answer from
+      // a library still settling must be asked again, not remembered.
+      return artists.length > 0;
     } catch (e) {
+      if (!isCurrent()) return false;
       if (!rowHasContent(homeArtists)) {
         homeArtists.innerHTML = '<div class="home-carousel-empty">Couldn\u2019t load.</div>';
       }
+      return false;
     }
   }
 
-  // Library row — the first albums of the whole library in Roon's own order.
-  // Stable content (changes only when the library does), so it loads once per
-  // session and is retried each Home visit until it populates, like the label
-  // of the week. Tapping the header opens the full scrolling library wall.
+  // Library row — the first albums of the library in the order the user chose
+  // on the wall, so the row is the head of the same list its header opens.
+  // Re-read whenever that order changes OR the data under it does (a release
+  // day arriving moves a Release date order; a play moves Most played) — see
+  // homeRowStamp. Both halves, because the row that tracked only the order
+  // (v1.7.76) counted as fresh for as long as the sort was left alone.
   function renderHomeLibrary(albums) { renderAlbumRow(homeLibrary, albums); }
 
-  async function loadHomeLibrary() {
-    if (!homeLibrary) return;
+  async function loadHomeLibrary(isCurrent) {
+    if (!homeLibrary) return false;
     if (!rowHasContent(homeLibrary)) homeLibrary.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
+    // Captured BEFORE the request: the answer describes the order that was
+    // current when it was asked for, and the user can change Sort while it is
+    // in the air.
+    const key = libSortKey();
     try {
-      const r = await fetch("/api/library/albums?offset=0&count=30");
+      const r = await fetch("/api/library/albums?offset=0&count=30&" + key);
+      if (!isCurrent()) return false;
       // Any non-OK response (503 while the index builds, 500 on a transient
       // server error) keeps the cached tiles — a built index never legitimately
       // returns zero albums, so blanking the row to "No albums." would only
       // ever be showing an error as an empty state.
       if (!r.ok) {
         if (!rowHasContent(homeLibrary)) homeLibrary.innerHTML = '<div class="home-carousel-empty">Waiting for Roon Core…</div>';
-        return;   // retried on the next Home visit (homeLibraryLoaded stays false)
+        return false;   // not painted: asked again on the next visit or change
       }
       const j = await r.json();
+      if (!isCurrent()) return false;
       const albums = (j && j.albums) || [];
+      // The order changed while this was in flight. Painting it would put the
+      // previous order on screen and, worse, record it as the current one — so
+      // the row would look settled on an order the user had already replaced.
+      if (key !== libSortKey()) return false;
       if (albums.length) {
         renderHomeLibrary(albums);
-        homeLibraryLoaded = true;   // populated — stop retrying on future visits
-        saveHomeCache({ library: albums });
-      } else if (!rowHasContent(homeLibrary)) {
-        renderHomeLibrary([]);   // genuinely empty and nothing cached — show the empty state
+        saveHomeCache({ library: albums, librarySort: key });
+        return true;
       }
+      if (!rowHasContent(homeLibrary)) renderHomeLibrary([]);   // genuinely empty and nothing cached
+      return false;
     } catch (e) {
+      if (!isCurrent()) return false;
       if (!rowHasContent(homeLibrary)) homeLibrary.innerHTML = '<div class="home-carousel-empty">Couldn’t load.</div>';
+      return false;
     }
   }
 
@@ -844,22 +1532,24 @@
     const sec = homeHistory.closest(".home-section");
     if (sec) sec.classList.toggle("hidden", !albums.length || !homeRowOn("history"));
   }
-  async function loadHomeHistory() {
-    if (!homeHistory) return;
+  async function loadHomeHistory(isCurrent) {
+    if (!homeHistory) return false;
     try {
       const r = await fetch("/api/home/history?count=30");
-      if (!r.ok) return;   // retried next visit — homeHistoryLoaded stays false
+      if (!isCurrent() || !r.ok) return false;   // not painted: asked again on the next visit or change
       const j = await r.json();
+      if (!isCurrent()) return false;
       const albums = (j && j.albums) || [];
       renderHomeHistory(albums);
-      // Marked loaded even when empty: an empty history is a real answer, and
-      // retrying it on every Home visit would query the plays table forever on
-      // a box nobody has played anything from.
-      homeHistoryLoaded = true;
       if (albums.length) saveHomeCache({ history: albums });
+      // Painted even when empty: an empty history is a real answer, and it
+      // stays the answer until a play is recorded — which is a live revision,
+      // so the row is asked again exactly when there could be something in it.
+      return true;
     } catch (e) {
       // Offline or the server went away. The row keeps whatever it had; the
-      // next visit tries again.
+      // next visit or change tries again.
+      return false;
     }
   }
 
@@ -873,19 +1563,12 @@
   // tap handlers all assume an offset into the albums hierarchy.
   // -------------------------------------------------------------------------
 
-  // Today, in the viewer's own timezone.
-  //
-  // This is deliberately NOT compared against the server's `day`. The container
-  // sets no TZ and runs UTC, so for anyone east or west of Greenwich the two
-  // strings differ for part of every day — and the guard below would then be
-  // permanently true, refetching and re-rendering the row on every Back tap.
-  // "Has the day rolled over" is a question about the VIEWER's midnight, so the
-  // client answers it with its own clock and stores its own key.
-  function localDayKey() {
-    const d = new Date();
-    const p = (n) => (n < 10 ? "0" + n : String(n));
-    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
-  }
+  // (The row used to decide "is it a new day" with the viewer's own clock —
+  // localDayKey — because comparing that against the server's day, which runs
+  // UTC in the container, disagreed for part of every day. Since v1.8.65 it
+  // follows the server's `day` revision instead, which is only ever compared
+  // with itself: the day the picks are BUILT for is the server's, so the
+  // server's midnight is exactly when the row can change.)
 
   function smartPickAddLabel(added) { return added ? "✓ Added" : "＋ Add"; }
 
@@ -950,6 +1633,101 @@
     }
   }
 
+  // The Play / waiting / Add button, shared by a Smart Pick and a Listen later
+  // entry — both are "a record that may or may not be in Roon yet", and two
+  // copies of the three states would drift. `title`/`artist` are the strings
+  // the record was found under; Play opens it under ROON's own strings
+  // (library_title / library_subtitle), because the play routes check identity
+  // against the snapshot and an edition suffix that differs would be refused as
+  // a stale offset. Returns null when there is nothing to offer (not in Roon
+  // and no service album to add).
+  function pickPrimaryButton(item, title, artist, addLabel) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    if (item.offset !== null && item.offset !== undefined) {
+      // In the library — so it opens the album view, where every ordinary
+      // play route works. It does not start playback, so it does not say
+      // Play: that is a promise the button would not keep.
+      btn.className = "pick-add pick-play";
+      btn.textContent = "Go to Album";
+      btn.addEventListener("click", () => openAlbum({
+        offset:    item.offset,
+        title:     item.library_title || title || "",
+        subtitle:  item.library_subtitle || artist || "",
+        image_key: item.image_key || null
+      }, { filter: null }));
+    } else if (item.added) {
+      // WAITING — favourited, not imported yet. Roon decides when.
+      btn.className = "pick-add is-done";
+      btn.disabled = true;
+      btn.textContent = "✓ Added — waiting for Roon";
+    } else if (item.album_id && item.service) {
+      // ADD — the one-way favourite (addSmartPick latches on success).
+      btn.className = "pick-add";
+      btn.textContent = addLabel;
+      btn.addEventListener("click", () => addSmartPick(item, btn));
+    } else {
+      return null;
+    }
+    return btn;
+  }
+
+  function smartPickLaterLabel(on) { return on ? "✓ Listen later" : "＋ Listen later"; }
+  function smartPickLaterButton(pick) {
+    let on = !!pick.later;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pick-block pick-later";
+    const paint = () => {
+      btn.textContent = smartPickLaterLabel(on);
+      btn.classList.toggle("is-on", on);
+      btn.setAttribute("aria-pressed", String(on));
+    };
+    paint();
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const got = await setListenLater({
+        title: pick.album || "", artist: pick.artist || "",
+        service: pick.service || "", album_id: pick.album_id || "",
+        image: pick.image || "", source: "picks"
+      }, !on);
+      btn.disabled = false;
+      if (got === null) return;   // not saved — already reported
+      on = got;
+      paint();
+      showToast(on ? "Put aside in Listen later" : "Taken off Listen later", "ok");
+    });
+    return btn;
+  }
+
+  // Where a tap on a pick goes (v1.8.77): the album view when Roon has it, and
+  // otherwise the default streaming service as set in Share Card — the same
+  // rule as a suggestion under the share card. Returns null when neither is
+  // possible (no service switched on), so the caller can fall back.
+  function pickInLibrary(pick) { return pick.offset !== null && pick.offset !== undefined; }
+  function pickService(pick) {
+    const list = pick.services || [];
+    if (!list.length) return null;
+    const ids = list.map(x => x.id);
+    const want = window.__preferredService ? window.__preferredService(ids) : ids[0];
+    return list.find(x => x.id === want) || list[0];
+  }
+  function openPick(pick) {
+    if (pickInLibrary(pick)) {
+      openAlbum({
+        offset:    pick.offset,
+        title:     pick.library_title || pick.album || "",
+        subtitle:  pick.library_subtitle || pick.artist || "",
+        image_key: pick.image_key || null
+      }, { filter: null });
+      return true;
+    }
+    const svc = pickService(pick);
+    if (!svc) return false;
+    window.open(svc.url, "_blank", "noopener,noreferrer");
+    return true;
+  }
+
   // One pick. `full` adds the reason line and the action buttons — the Home
   // carousel stays a plain tile so it reads like the rows around it.
   function smartPickCard(pick, full) {
@@ -982,7 +1760,34 @@
       why.textContent = pick.reason;
       meta.appendChild(why);
     }
+    // Where a tap goes, said before it is tapped: "this opens the album" and
+    // "this leaves the app" must not look the same (v1.8.35's rule).
+    if (full) {
+      const svc = pickInLibrary(pick) ? null : pickService(pick);
+      if (pickInLibrary(pick) || svc) {
+        const to = document.createElement("div");
+        to.className = "pick-opens";
+        to.textContent = pickInLibrary(pick) ? "In your library" : "Opens in " + svc.name + " ↗";
+        meta.appendChild(to);
+      }
+    }
     card.appendChild(meta);
+
+    // The cover and the details open the album (or the service); the action
+    // buttons below keep their own jobs.
+    // Only where there is somewhere to go: with every service switched off a
+    // pick not in the library stays plain text rather than a dead button.
+    if (full && (pickInLibrary(pick) || pickService(pick))) {
+      for (const el of [art, meta]) {
+        el.classList.add("pick-open");
+        el.setAttribute("role", "button");
+        el.tabIndex = 0;
+        el.addEventListener("click", () => openPick(pick));
+        el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPick(pick); }
+        });
+      }
+    }
 
     if (full) {
       const actions = document.createElement("div");
@@ -998,41 +1803,13 @@
       //              decides when, so there is nothing to press.
       //   ADD      — not in the streaming library. Where every pick sits when
       //              automatic adding is off.
-      if (pick.offset !== null && pick.offset !== undefined) {
-        const play = document.createElement("button");
-        play.type = "button";
-        play.className = "pick-add pick-play";
-        // It opens the album; it does not start playback. The old label said
-        // Play, which is a promise the button does not keep.
-        play.textContent = "Go to Album";
-        play.addEventListener("click", () => openAlbum({
-          offset:    pick.offset,
-          // Roon's OWN strings for the album, not Qobuz's — the play routes
-          // check identity against the snapshot, and an edition suffix that
-          // differs would be refused as a stale offset.
-          title:     pick.library_title || pick.album || "",
-          subtitle:  pick.library_subtitle || pick.artist || "",
-          image_key: pick.image_key || null
-        }, { filter: null }));
-        actions.appendChild(play);
-      } else if (pick.added) {
-        const wait = document.createElement("button");
-        wait.type = "button";
-        wait.className = "pick-add is-done";
-        wait.disabled = true;
-        wait.textContent = "✓ Added — waiting for Roon";
-        actions.appendChild(wait);
-      } else if (pick.service && pick.album_id) {
-        const add = document.createElement("button");
-        add.type = "button";
-        add.className = "pick-add";
-        add.textContent = smartPickAddLabel(false);
-        add.addEventListener("click", () => addSmartPick(pick, add));
-        actions.appendChild(add);
-      }
-      // No third branch. ADD favourited the album on a streaming service so
-      // Roon would import it, and this build has no service connected — the
-      // button could only ever have reported that there was nothing to add to.
+      const primary = pickPrimaryButton(pick, pick.album, pick.artist, smartPickAddLabel(false));
+      if (primary) actions.appendChild(primary);
+
+      // Listen later (v1.8.67): the other place a pick can go — put aside
+      // without touching the streaming library. Two-way, unlike Add: taking
+      // a pick back off the list costs nothing and changes nothing elsewhere.
+      actions.appendChild(smartPickLaterButton(pick));
 
       const nope = document.createElement("button");
       nope.type = "button";
@@ -1047,19 +1824,9 @@
       card.setAttribute("role", "button");
       card.tabIndex = 0;
       // A pick Roon already has behaves like any other album tile; one it does
-      // not opens the Smart Picks screen, where Add and the reason live.
-      const open = () => {
-        if (pick.offset !== null && pick.offset !== undefined) {
-          openAlbum({
-            offset:    pick.offset,
-            title:     pick.library_title || pick.album || "",
-            subtitle:  pick.library_subtitle || pick.artist || "",
-            image_key: pick.image_key || null
-          }, { filter: null });
-        } else {
-          showSmartPicks();
-        }
-      };
+      // not opens on the default streaming service (v1.8.77). Only with no
+      // service to go to does it fall back to the Smart Picks screen.
+      const open = () => { if (!openPick(pick)) showSmartPicks(); };
       card.addEventListener("click", open);
       card.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
@@ -1078,31 +1845,37 @@
       return false;
     }
     if (sec) sec.classList.toggle("hidden", !homeRowOn("picks"));   // never un-hide a row the layout switched off
-    homePicks.innerHTML = "";
-    const frag = document.createDocumentFragment();
-    for (const p of picks) frag.appendChild(smartPickCard(p, false));
-    homePicks.appendChild(frag);
+    // Keyed on everything the card shows, so a pick that changed (added to a
+    // service, now in the library) is rebuilt and the rest are kept.
+    paintRow(homePicks, picks.map(p => ({ key: "pick:" + JSON.stringify(p), build: () => smartPickCard(p, false) })));
     return true;
   }
 
-  async function loadHomeSmartPicks() {
-    if (!homePicks) return;
+  async function loadHomeSmartPicks(isCurrent) {
+    if (!homePicks) return false;
     try {
       const r = await fetch("/api/smart-picks");
-      if (!r.ok) return;   // 503 while pairing / 500 — retried on the next visit
+      if (!isCurrent() || !r.ok) return false;   // 503 while pairing / 500 — asked again on the next visit or change
       const j = await r.json();
+      if (!isCurrent()) return false;
       const picks = (j && j.picks) || [];
       if (picks.length) {
         renderHomePicks(picks);
-        homePicksDay = localDayKey();   // our own key — see localDayKey
-      } else if (!rowHasContent(homePicks)) {
+        return true;
+      }
+      if (!rowHasContent(homePicks)) {
         // Genuinely nothing yet (the build runs in the background) and no
         // cached row to keep — hide the section rather than leave an empty one.
+        // A real answer: the build finishing is a live revision, so the row is
+        // asked again the moment there is something to show.
         renderHomePicks([]);
+        return true;
       }
+      return false;   // keep the row that is showing until the day's set lands
     } catch (e) {
-      // Transient — the row simply stays hidden and is retried next visit.
-      // Silence is safe here because nothing was replaced or lost.
+      // Transient — the row keeps what it had and is asked again on the next
+      // visit or change. Silence is safe here because nothing was replaced.
+      return false;
     }
   }
 
@@ -1110,10 +1883,25 @@
   // (smartPicksActive / smartPicksSeq are declared with the other view flags at
   // the top of the file — leavePlaylistScreens writes them, and that can run
   // during boot.)
-  async function showSmartPicks() {
-    enterFullWall("Smart Picks");
-    smartPicksActive = true;
+  // v1.8.65: the screen follows the day's set. It used to say "Come back
+  // shortly" while the first build ran — the exact thing a live screen does
+  // not ask of anyone. When the build lands (the `picks` revision) the screen
+  // re-reads where it stands, and a pick blocked on another device goes here too.
+  // "later" too: a pick put aside on another device shows it here.
+  const SMART_PICKS_DEPS = ["picks", "day", "later"];
+  let smartPicksReadStamp = null;
+  const smartPicksOnScreen = () =>
+    smartPicksActive && !(window.__artistViewActive && window.__artistViewActive());
+  async function showSmartPicks(opts) {
+    // The section header passes its click event here, so only a real
+    // { live: true } counts.
+    const live = !!(opts && opts.live === true);
+    if (!live) {
+      enterFullWall("Smart Picks");
+      smartPicksActive = true;
+    }
     const mySeq = ++smartPicksSeq;
+    const stamp = liveStamp(SMART_PICKS_DEPS);
     let j = null;
     try {
       const r = await fetch("/api/smart-picks");
@@ -1125,9 +1913,12 @@
     } catch (e) {
       j = null;
     }
-    if (!smartPicksActive || mySeq !== smartPicksSeq) return;   // user moved on
-    grid.innerHTML = "";
+    if (!smartPicksOnScreen() || mySeq !== smartPicksSeq) return;   // user moved on
+    // A re-read that fails leaves the screen as it is; the next change retries.
+    if (live && (!j || j.error)) return;
+    smartPicksReadStamp = stamp;
     if (!j || j.error) {
+      grid.innerHTML = "";
       setBanner(j && j.error
         ? ("Couldn't load Smart Picks — " + j.error)
         : "Couldn't load Smart Picks — the extension didn't answer. Try again.", true);
@@ -1135,8 +1926,9 @@
     }
     const picks = j.picks || [];
     if (!picks.length) {
+      grid.innerHTML = "";
       setBanner(j.service_ready
-        ? "Building today's picks — this takes a minute the first time. Come back shortly."
+        ? "Building today's picks — this takes a minute the first time. They appear here the moment they are ready."
         : "Smart Picks needs the library index — it will have suggestions once " +
           "that finishes building.", false);
       return;
@@ -1144,11 +1936,482 @@
     // Picks are suggestions to go and find; adding them to a library needs a
     // streaming account, which this build does not have.
     setBanner(j.service_ready ? null
-      : "These are suggestions — this build can show them but not add them for you.", false);
-    const wrap = document.createElement("div");
-    wrap.className = "pick-list";
-    for (const p of picks) wrap.appendChild(smartPickCard(p, true));
-    grid.appendChild(wrap);
+      : "These are suggestions from your own library — open one, or put it aside for later.", false);
+    let wrap = Array.prototype.find.call(grid.children, el => el.classList.contains("pick-list"));
+    if (!wrap) {
+      grid.innerHTML = "";
+      wrap = document.createElement("div");
+      wrap.className = "pick-list";
+      grid.appendChild(wrap);
+    }
+    // Keyed on everything a card shows: a card whose pick is unchanged is the
+    // same node — its "✓ Added — waiting for Roon" latch, which lives only on
+    // the node, survives a re-read.
+    const m = document.querySelector("main");
+    const top = m ? m.scrollTop : 0;
+    paintRow(wrap, picks.map(p => ({ key: "pick:" + JSON.stringify(p), build: () => smartPickCard(p, true) })));
+    if (live && m && m.scrollTop !== top) m.scrollTop = top;
+  }
+  onLive(() => {
+    if (!smartPicksOnScreen() || smartPicksReadStamp === liveStamp(SMART_PICKS_DEPS)) return;
+    liveWhenIdle("smart-picks-screen", () => { if (smartPicksOnScreen()) showSmartPicks({ live: true }); });
+  });
+
+  /*
+   * LISTEN LATER (v1.8.67) — albums put aside to play another time.
+   *
+   * Ported from Mandarin. Roon's own Listen later cannot be reached from an
+   * extension, so the list is the server's (GET/POST /api/listen-later), kept
+   * by album identity so it survives a rescan, and shared by every device.
+   *
+   * An entry is one of two things, and every control here turns on which:
+   *
+   *   IN THE LIBRARY  it has an offset, so it is an ordinary album — the Home
+   *                   tile opens the album view, the screen offers Play.
+   *   NOT YET         a Smart Pick sent here rather than to the streaming
+   *                   library. No offset, so nothing can play it: the tile
+   *                   opens this screen, where it can be added to the library
+   *                   (Roon imports it, and it becomes the first kind with no
+   *                   further step) or opened in the service's own app.
+   */
+
+  // Put an album on the list (on: true) or take it off. `on` is the state
+  // ASKED FOR rather than a toggle, so two devices tapping at once both end
+  // where they meant to. Resolves to the state the server reports, or null
+  // when it could not be saved (already reported to the user).
+  async function setListenLater(entry, on) {
+    try {
+      const r = await fetch("/api/listen-later", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.assign({}, entry, { on: !!on }))
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j || !j.ok) {
+        showToast((j && j.error) || "Couldn't save that", "error");
+        return null;
+      }
+      return !!j.on;
+    } catch (e) {
+      showToast("Failed: " + e.message, "error");
+      return null;
+    }
+  }
+
+  const HOME_LATER_MAX = 30;   // tiles on the Home shelf; the screen shows them all
+  const laterInLibrary = (e) => e.offset !== null && e.offset !== undefined;
+  // The album an entry opens as. Roon's OWN strings, not the ones it was put
+  // aside under: the play routes check identity against the snapshot, and an
+  // edition suffix that differs would be refused as a stale offset.
+  function laterAlbum(e) {
+    // The server's own album record when Roon has it — badges and all.
+    if (e.album && e.album.offset !== null && e.album.offset !== undefined) return e.album;
+    return {
+      offset:    e.offset,
+      title:     e.library_title || e.title || "",
+      subtitle:  e.library_subtitle || e.artist || "",
+      image_key: e.image_key || null
+    };
+  }
+  // By calendar day, through the same wording Discover uses: discoverWhen
+  // counts local midnights, so "yesterday" turns over at midnight rather than
+  // twenty-four hours after the album was put aside.
+  function laterAgo(ts) {
+    const d = new Date(ts || 0);
+    const p = (n) => (n < 10 ? "0" + n : String(n));
+    return discoverWhen(d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate())) || "today";
+  }
+  function laterServiceName(service) {
+    return service === "tidal" ? "TIDAL" : service === "qobuz" ? "Qobuz" : "";
+  }
+  // A cover from the service's CDN, for an entry Roon has no artwork for yet.
+  // A dead URL removes itself rather than leave the broken-image glyph, which
+  // reads as "this app is broken" rather than "no cover" (v1.8.39).
+  function laterExternalArt(wrap, url) {
+    // Kept on the element even after a failed <img> removes itself, the way an
+    // album tile keeps data-art-key: "what cover was this given" stays
+    // answerable after the fact.
+    wrap.dataset.artSrc = url;   // the same names the share card's rows use (rowArt)
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.alt = "";
+    img.addEventListener("error", () => {
+      wrap.dataset.artFailed = "1";
+      wrap.classList.add("no-image");
+      img.remove();
+    });
+    img.src = url;
+    wrap.classList.remove("no-image");
+    wrap.appendChild(img);
+  }
+
+  // One Home tile. An album Roon has is an ordinary Home tile; one it does not
+  // is the same shape (so the row reads as one shelf) but opens this screen.
+  function laterTile(e) {
+    if (laterInLibrary(e)) return homeTile(laterAlbum(e));
+    const tile = buildAlbumTile({ title: e.title, subtitle: e.artist },
+                                () => showListenLater(), { selectable: false });
+    tile.classList.add("later-tile-service");
+    const wrap = tile.querySelector(".album-art-wrap");
+    if (wrap && e.image) laterExternalArt(wrap, e.image);
+    return tile;
+  }
+
+  function renderHomeLater(albums) {
+    if (!homeLater) return;
+    const sec = homeLater.closest(".home-section");
+    if (!albums.length) {
+      // Nothing put aside: no shelf at all, rather than an empty labelled one.
+      homeLater.textContent = "";
+      if (sec) sec.classList.add("hidden");
+      return;
+    }
+    // A shelf, not the whole list: picks sent here arrive five a day, and the
+    // full list is one tap away on the header.
+    const shown = albums.slice(0, HOME_LATER_MAX);
+    paintRow(homeLater, shown.map(e => ({ key: "later:" + JSON.stringify(e), build: () => laterTile(e) })));
+    if (sec) sec.classList.toggle("hidden", !homeRowOn("later"));   // never un-hide a row the layout switched off
+  }
+
+  async function loadHomeLater(isCurrent) {
+    if (!homeLater) return false;
+    try {
+      // favs=0: the row never shows "added", so it must not wait on a
+      // streaming service's favourites to paint.
+      const r = await fetch("/api/listen-later?favs=0");
+      if (!isCurrent() || !r.ok) return false;   // asked again on the next visit or change
+      const j = await r.json();
+      if (!isCurrent()) return false;
+      // Painted even when empty: an empty list is a real answer, and it stays
+      // the answer until something is put aside — a live revision.
+      const albums = (j && j.albums) || [];
+      renderHomeLater(albums);
+      // Kept for the cold open, empty included: a list emptied on purpose must
+      // not come back from the cache as a shelf that then vanishes.
+      saveHomeCache({ later: albums });
+      return true;
+    } catch (e) {
+      // Offline or the server went away. The row keeps whatever it had and is
+      // asked again on the next visit or change, so nothing is lost by silence.
+      return false;
+    }
+  }
+
+  // Take an entry off from the full screen, and drop its card.
+  async function removeLaterCard(e, card, button) {
+    button.disabled = true;
+    const got = await setListenLater({ title: e.title, artist: e.artist }, false);
+    if (got === null) { button.disabled = false; return; }
+    if (card && card.parentNode) {
+      const list = card.parentNode;
+      list.removeChild(card);
+      if (!list.children.length && laterOnScreen()) setBanner(LATER_EMPTY, false);
+    }
+    showToast("Taken off Listen later", "ok");
+  }
+
+  // One entry on the full screen: the art, what it is, where it stands, and
+  // what can be done with it.
+  function laterCard(e) {
+    const inLib = laterInLibrary(e);
+    const card = document.createElement("div");
+    card.className = "pick-card pick-card-full later-card";
+
+    const art = document.createElement("div");
+    art.className = "pick-art";
+    if (inLib && e.image_key) {
+      loadArt(art, e.image_key, tileImgSize(), (img) => {
+        img.remove();
+        if (e.image) laterExternalArt(art, e.image);
+      });
+    } else if (e.image) {
+      laterExternalArt(art, e.image);
+    }
+    card.appendChild(art);
+
+    const meta = document.createElement("div");
+    meta.className = "pick-meta";
+    const artist = document.createElement("div");
+    artist.className = "pick-artist";
+    artist.textContent = inLib ? (e.library_subtitle || e.artist) : e.artist;
+    meta.appendChild(artist);
+    const album = document.createElement("div");
+    album.className = "pick-album";
+    album.textContent = inLib ? (e.library_title || e.title) : e.title;
+    meta.appendChild(album);
+    const status = document.createElement("div");
+    status.className = "pick-reason";
+    const from = e.source === "picks" ? "From Smart Picks · " : "";
+    status.textContent = inLib
+      ? from + "Put aside " + laterAgo(e.added_at)
+      : e.service
+        ? from + "Not in your library yet — on " + laterServiceName(e.service)
+        : "No longer in your library";
+    meta.appendChild(status);
+    card.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "pick-actions";
+    const primary = pickPrimaryButton(e, e.title, e.artist, "＋ Add to library");
+    if (primary) actions.appendChild(primary);
+    if (!inLib && e.service_url) {
+      // Somewhere to hear it before deciding. A link, not a button: it leaves
+      // the app, and that should look different from an action that does not.
+      const open = document.createElement("a");
+      open.className = "pick-block pick-link";
+      open.href = e.service_url;
+      open.target = "_blank";
+      open.rel = "noopener noreferrer";
+      open.textContent = "Open in " + laterServiceName(e.service);
+      actions.appendChild(open);
+    }
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "pick-block later-remove";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => removeLaterCard(e, card, remove));
+    actions.appendChild(remove);
+    card.appendChild(actions);
+    return card;
+  }
+
+  // The full Listen later screen. Live like Smart Picks: it follows the list
+  // (an album put aside on another device, or played through) and the library
+  // (an entry Roon has just imported becomes playable where it stands).
+  const LATER_DEPS = ["later", "library"];
+  const LATER_EMPTY = "Nothing put aside yet. Open any album and choose Listen later from its ⋯ menu, " +
+                      "or send Smart Picks here in Settings → Smart Picks.";
+  let laterReadStamp = null;
+  const laterOnScreen = () =>
+    laterActive && !(window.__artistViewActive && window.__artistViewActive());
+  async function showListenLater(opts) {
+    // The section header passes its click event here, so only a real
+    // { live: true } counts.
+    const live = !!(opts && opts.live === true);
+    if (!live) {
+      enterFullWall("Listen later");
+      laterActive = true;
+    }
+    const mySeq = ++laterSeq;
+    const stamp = liveStamp(LATER_DEPS);
+    let j = null;
+    try {
+      const r = await fetch("/api/listen-later");
+      j = await r.json();
+      if (!r.ok && !(j && j.error)) j = { error: "HTTP " + r.status };
+    } catch (e) {
+      j = null;
+    }
+    if (!laterOnScreen() || mySeq !== laterSeq) return;   // user moved on
+    // A re-read that fails leaves the screen as it is; the next change retries.
+    if (live && (!j || j.error)) return;
+    laterReadStamp = stamp;
+    if (!j || j.error) {
+      grid.innerHTML = "";
+      setBanner(j && j.error
+        ? ("Couldn't load Listen later — " + j.error)
+        : "Couldn't load Listen later — the extension didn't answer. Try again.", true);
+      return;
+    }
+    const albums = j.albums || [];
+    if (!albums.length) {
+      grid.innerHTML = "";
+      setBanner(LATER_EMPTY, false);
+      return;
+    }
+    setBanner(null);
+    let wrap = Array.prototype.find.call(grid.children, el => el.classList.contains("later-list"));
+    if (!wrap) {
+      grid.innerHTML = "";
+      wrap = document.createElement("div");
+      wrap.className = "pick-list later-list";
+      grid.appendChild(wrap);
+    }
+    // Keyed on everything a card shows, so an unchanged entry keeps its node —
+    // and with it the "✓ Added — waiting for Roon" latch, which lives only there.
+    const m = document.querySelector("main");
+    const top = m ? m.scrollTop : 0;
+    paintRow(wrap, albums.map(e => ({ key: "laterfull:" + JSON.stringify(e), build: () => laterCard(e) })));
+    if (live && m && m.scrollTop !== top) m.scrollTop = top;
+  }
+  onLive(() => {
+    if (!laterOnScreen() || laterReadStamp === liveStamp(LATER_DEPS)) return;
+    liveWhenIdle("later-screen", () => { if (laterOnScreen()) showListenLater({ live: true }); });
+  });
+  window.__showListenLater = showListenLater;
+  window.__setListenLater = setListenLater;
+
+  /*
+   * DISCOVER — new records by the acts you play.
+   *
+   * The screen this app did not have. Smart Picks is LATERAL (acts next to
+   * your library that you do not own) and the Pitchfork and service screens
+   * are EDITORIAL (what somebody else rates this week); neither can answer
+   * "has anyone I actually listen to put something out", because that question
+   * needs your listening history and nobody outside this box has it.
+   *
+   * The rows are the same KIND of answer the share card's suggestions give —
+   * a record that is either in your library or on a service — so they are
+   * built by the same goRow() and go to the same places. What differs is the
+   * emphasis: here the RECORD is the headline and the act is the quiet line,
+   * because you already know the act. That is the whole point of the screen.
+   */
+  // v1.8.65: live, like Smart Picks — "come back shortly" while a build ran is
+  // gone; the list appears when the build lands (the `discover` revision), and
+  // turns over with the day. Rows are keyed, so an unchanged row stays the same
+  // node through a re-read, its upgraded Qobuz link and all.
+  const DISCOVER_DEPS = ["discover", "day"];
+  let discoverReadStamp = null;
+  const discoverOnScreen = () =>
+    discoverActive && !(window.__artistViewActive && window.__artistViewActive());
+  async function showDiscover(opts) {
+    const live = !!(opts && opts.live === true);
+    if (!live) {
+      enterFullWall("Discover");
+      discoverActive = true;
+    }
+    const mySeq = ++discoverSeq;
+    const stamp = liveStamp(DISCOVER_DEPS);
+    let j = null;
+    try {
+      const r = await fetch("/api/discover");
+      j = await r.json();
+      // A 503 while pairing carries a real explanation. Dropping it for the
+      // generic message throws away the one thing that says what to do.
+      if (!r.ok && !(j && j.error)) j = { error: "HTTP " + r.status };
+    } catch (e) {
+      j = null;
+    }
+    if (!discoverOnScreen() || mySeq !== discoverSeq) return;   // the user moved on
+    // A re-read that fails leaves the screen as it is; the next change retries.
+    if (live && (!j || j.error)) return;
+    discoverReadStamp = stamp;
+    if (!j || j.error) {
+      grid.innerHTML = "";
+      setBanner(j && j.error
+        ? ("Couldn't load Discover — " + j.error)
+        : "Couldn't load Discover — the extension didn't answer. Try again.", true);
+      return;
+    }
+    if (!j.enabled) {
+      grid.innerHTML = "";
+      setBanner("Discover is switched off. Turn it on in Settings \u2192 Discover and " +
+                "it will look for new records by the artists you play.", false);
+      return;
+    }
+    const releases = j.releases || [];
+    if (!releases.length) {
+      // "Building" and "found nothing" are different answers and the screen
+      // says which: the first fills in by itself when the build lands, the
+      // second is the day's answer.
+      grid.innerHTML = "";
+      setBanner(j.building
+        ? "Looking for new records by the artists you play \u2014 they appear here the moment they are found."
+        : "Nothing new from the artists you play in the last " +
+          (j.window_days || 60) + " days. This rebuilds every day.", false);
+      return;
+    }
+    setBanner(null, false);
+
+    if (!window.__goRow) {
+      // The share overlay's closure owns the row builder and publishes it at
+      // load. Nothing can reach this screen before that has run, so this is a
+      // guard against a future reordering rather than a live case — and a
+      // silent empty screen would be a worse way to find out.
+      grid.innerHTML = "";
+      setBanner("Couldn't draw the list — reload the app.", true);
+      return;
+    }
+    let wrap = Array.prototype.find.call(grid.children, el => el.classList.contains("discover-list"));
+    if (!wrap) {
+      grid.innerHTML = "";
+      wrap = document.createElement("div");
+      wrap.className = "discover-list";
+      grid.appendChild(wrap);
+    }
+    const m = document.querySelector("main");
+    const top = m ? m.scrollTop : 0;
+    // The sub line ("3 days ago") is in the key: it moves with the day while
+    // the release itself does not.
+    paintRow(wrap, releases.filter(rel => rel && rel.album).map(rel => {
+      const sub = discoverSubLine(rel);
+      return { key: "rel:" + JSON.stringify(rel) + "|" + sub,
+               build: () => window.__goRow(rel, rel.album, sub, discoverArt(rel)) };
+    }));
+    if (live && m && m.scrollTop !== top) m.scrollTop = top;
+
+    // The Qobuz links upgraded AFTER the rows are on screen and never before
+    // them — a page read per row, and a failure leaves the search link that is
+    // already there. Not awaited, for the same reason. (A reused row keeps the
+    // link it was upgraded to; the helper finds nothing to change on it.)
+    if (window.__upgradeQobuzLinks) {
+      window.__upgradeQobuzLinks(releases, {
+        container: wrap, current: () => discoverOnScreen() && mySeq === discoverSeq,
+        album: r => r.album, artist: r => r.artist,
+      });
+    }
+  }
+  onLive(() => {
+    if (!discoverOnScreen() || discoverReadStamp === liveStamp(DISCOVER_DEPS)) return;
+    liveWhenIdle("discover-screen", () => { if (discoverOnScreen()) showDiscover({ live: true }); });
+  });
+  window.__showDiscover = showDiscover;
+
+  /*
+   * Where a release's cover comes from, or "" for none.
+   *
+   * ROON'S OWN ART WINS WHENEVER THERE IS ANY. A record the library already
+   * holds has an image_key, and that art is served from this box, is already
+   * cached, and is the same picture the album shows everywhere else in the
+   * app — using Deezer's copy for it would put two different covers on the
+   * same record on two different screens.
+   *
+   * Everything else falls back to the cover Deezer named during the build,
+   * loaded straight from their CDN. That is what the Smart Picks cards and the
+   * Pitchfork grid already do with their services' images, so it introduces no
+   * new kind of request; rowArt() handles the ones that never arrive.
+   */
+  function discoverArt(rel) {
+    if (rel.image_key) {
+      return "/api/image/" + encodeURIComponent(rel.image_key) + "?size=160";
+    }
+    return rel.cover || "";
+  }
+
+  /*
+   * The quiet line under a release: who made it, and when it came out.
+   *
+   * The DATE and not the year. A screen whose whole subject is what is new has
+   * to distinguish last week from ten months ago, and "2026" cannot — every
+   * row would read the same for the first eleven months of a year.
+   */
+  function discoverSubLine(rel) {
+    const when = discoverWhen(rel.release_date);
+    return when ? (rel.artist + " \u00b7 " + when) : rel.artist;
+  }
+
+  /*
+   * A release date as a human distance: "today", "3 days ago", "2 weeks ago",
+   * then the date itself.
+   *
+   * Compared in whole DAYS, from the local midnight of each — not by
+   * subtracting timestamps. A release dated yesterday afternoon is one day
+   * old at any hour of today, and an hours-based rule calls it "today" all
+   * morning and "yesterday" all evening for the same record.
+   */
+  function discoverWhen(dateStr) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr || ""));
+    if (!m) return "";
+    const then = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const now = new Date();
+    const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const days = Math.round((midnight(now) - midnight(then)) / 86400000);
+    if (!Number.isFinite(days) || days < 0) return "";
+    if (days === 0) return "today";
+    if (days === 1) return "yesterday";
+    if (days < 7) return days + " days ago";
+    if (days < 14) return "last week";
+    if (days < 60) return Math.floor(days / 7) + " weeks ago";
+    return then.toLocaleDateString(undefined, { month: "short", year: "numeric" });
   }
 
   // Label of the week — one label featured for the whole ISO week (backend
@@ -1168,11 +2431,8 @@
     }
     if (titleEl) titleEl.textContent = "Label of the week: " + label;
     homeLotw.dataset.label = label;
-    if (sec) sec.classList.toggle("hidden", !homeRowOn("lotw"));   // never un-hide a row the layout switched off   // un-hide if a prior attempt hid it
-    homeLotw.innerHTML = "";
-    const frag = document.createDocumentFragment();
-    for (const a of albums) frag.appendChild(homeTile(a));   // full-hierarchy offsets → filter:null
-    homeLotw.appendChild(frag);
+    if (sec) sec.classList.toggle("hidden", !homeRowOn("lotw"));   // never un-hide a row the layout switched off
+    reconcileTiles(homeLotw, albums, (a) => homeTile(a));   // full-hierarchy offsets → filter:null
     return true;
   }
 
@@ -1194,27 +2454,31 @@
   //
   // `moved` is the server's library_moved flag, and it picks the TIMING as well
   // as the wording — the two cases wait on different clocks. When the change is
-  // proven the server has already armed the recheck chain (5 minutes); when it
-  // is only the likeliest explanation, the next look is the background watch
-  // (10 minutes). One number for both would be wrong exactly when it is read.
+  // proven the server has already asked the library watch to look, and it
+  // follows Roon every 20 seconds until it settles; when it is only the
+  // likeliest explanation, the next look is the watch's own turn (30 seconds
+  // while the app is open). The numbers are the server's librarySettleMs() and
+  // libraryWatchActiveMs(): test/unit/librarychange.test.js runs both copies
+  // and fails if they say anything different.
   function libraryChangingAdvice(moved) {
     return (moved
       ? " Your Roon library changed after this list was built"
       : " This usually means your Roon library changed after this list was built") +
       " — normally because albums are being added or identified. " +
-      (moved ? "A re-check is already scheduled — about 5 minutes"
-             : "The extension re-checks every 10 minutes") +
-      " — and it refreshes itself once Roon settles, so this usually clears on " +
+      (moved ? "The extension is already re-reading it, checking Roon every 20 seconds until it settles"
+             : "The extension checks Roon every 30 seconds while the app is open") +
+      ", and this screen refreshes itself once it has, so this usually clears on " +
       "its own. If it hasn't, open the side menu and tap Rescan library.";
   }
 
+  // The three dots only. The circle round them is the BUTTON's border
+  // (.overflow-btn in style.css) since v1.8.60: drawn here, it was a ring about
+  // half the height of the Play now / Queue pills it sits beside.
   const OVERFLOW_SVG =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
-    'aria-hidden="true">' +
-    '<circle cx="12" cy="12" r="9"/>' +
-    '<circle cx="7.6" cy="12" r="1.15" fill="currentColor" stroke="none"/>' +
-    '<circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none"/>' +
-    '<circle cx="16.4" cy="12" r="1.15" fill="currentColor" stroke="none"/>' +
+    '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+    '<circle cx="6" cy="12" r="1.9"/>' +
+    '<circle cx="12" cy="12" r="1.9"/>' +
+    '<circle cx="18" cy="12" r="1.9"/>' +
     "</svg>";
 
   // Bumped every time iOS backgrounds the app.
@@ -1303,7 +2567,17 @@
   // leave other views, clear the filter, take over the shared grid, set the
   // topbar chrome + title, scroll to the top, paint skeletons. Both walls'
   // active flags are reset here; the caller sets its own to true afterwards.
-  function enterFullWall(title) {
+  // `albumWall` says whether this screen shows album TILES — the Library wall
+  // does; the playlist screens share the same container but list tracks, and
+  // offering a grid/list switch over those would be a control that does
+  // nothing.
+  function enterFullWall(title, albumWall) {
+    abandonRandomDraw();
+    // Every menu screen comes through here, and the artist view must not
+    // outlive one: left open, the shared Back would act on it from the new
+    // screen — putting the screen behind the artist page back over this one
+    // and reopening the album it came from. Discarded, as showHome does.
+    if (window.__exitArtistView) window.__exitArtistView({ restore: false });
     libraryWallActive = false;
     leaveArtistsWall();
     // Cleared here as well as by the caller: every other wall's entry point must
@@ -1320,8 +2594,7 @@
     if (homeView) homeView.classList.add("hidden");
     if (homeSections) homeSections.classList.remove("hidden");
     grid.classList.remove("hidden");
-    clearWallGridSizing();  // standard scrolling grid, not phone-fit wall
-    setTopbarNav(true, false, false);   // Back (to Home), no Refresh, no search
+    setTopbarNav(true, false, false, !!albumWall);   // Back (to Home), no Refresh, no search
     setCountText(title);
     const m = document.querySelector("main");
     if (m) m.scrollTop = 0;
@@ -1354,21 +2627,25 @@
       asc: "A → Z", desc: "Z → A" },
     { id: "artist",     label: "Artist",       dir: "asc",
       asc: "A → Z", desc: "Z → A" },
-    { id: "year",       label: "Release year", dir: "desc",
+    // "Release date", not "year", since v1.8.60: the server orders by the day
+    // wherever a source states one (the id stays "year" — saved views and
+    // smart playlists store it). An album known only by its year sorts after
+    // that year's dated albums newest-first, and before them oldest-first.
+    { id: "year",       label: "Release date", dir: "desc",
       asc: "Oldest first", desc: "Newest first",
-      note: "from years collected during scanning" },
+      note: "from dates collected during scanning" },
     { id: "added",      label: "Recently added", dir: "desc",
       asc: "Oldest first", desc: "Newest first",
       // Deliberately not "when you added it": Roon publishes no import date,
       // so this is the extension's own evidence — file timestamps, and albums
       // turning up between library scans.
-      note: "from dates MusicD Remote could work out" },
+      note: "from dates Rouen Lite could work out" },
     { id: "plays",      label: "Most played",  dir: "desc",
       asc: "Least played first", desc: "Most played first",
-      note: "from plays MusicD Remote has seen" },
+      note: "from plays Rouen Lite has seen" },
     { id: "lastplayed", label: "Last played",  dir: "desc",
       asc: "Longest ago first", desc: "Most recent first",
-      note: "from plays MusicD Remote has seen" },
+      note: "from plays Rouen Lite has seen" },
     { id: "random",     label: "Random",       dir: "asc" }   // no direction
   ];
   const LIB_PLAYED_OPTIONS = [
@@ -1395,13 +2672,15 @@
   const LIB_VIEW_KEY = "rra-library-view";
   // v2 changed what `dir` MEANS for Most played / Last played, and ONLY those
   // two: the server used to invert them, so "asc" produced most-played-first.
-  // Now "desc" means descending for every sort. Album/Artist/Release year meant
+  // Now "desc" means descending for every sort. Album/Artist/Release date meant
   // the same thing in v1, so a v1 blob keeps its direction for those — dropping
   // it wholesale would silently reset someone's Z→A wall to A→Z and, because
   // the migrated blob is written straight back, lose the preference for good.
   const LIB_VIEW_VERSION = 2;
   const LIB_V1_INVERTED_SORTS = ["plays", "lastplayed"];
-  const libWall = { offset: 0, loading: false, done: false, seq: 0, total: 0 };
+  // readStamp: the live revisions the wall's pages were read against (see
+  // refreshLibraryWall).
+  const libWall = { offset: 0, loading: false, done: false, seq: 0, total: 0, readStamp: null };
   // Every multi-select Focus facet, in the order the sheet lays them out. This
   // list is the client's half of libFacetDefs() on the server; the SERVER is
   // what decides which of them actually have values, and the sheet renders
@@ -1461,17 +2740,45 @@
     try { localStorage.setItem(LIB_VIEW_KEY, JSON.stringify(libView)); }
     catch (e) { /* localStorage optional (private browsing) */ }
   }
-  function libViewQuery() {
+  // The ORDER half of the library view: the sort, its direction, and — when the
+  // sort IS a shuffle — the seed that fixes which shuffle.
+  //
+  // Split out of libViewQuery() because the Home Library row mirrors the order
+  // the user chose on the wall but NOT the Focus narrowing. Focus is a filter on
+  // the wall in front of them; applied to a Home shelf labelled "Library" it
+  // could empty it from a setting made on another screen, and that row does not
+  // hide itself when empty. One function so the two callers cannot drift on what
+  // "the order" means.
+  function libSortParams() {
     const p = new URLSearchParams();
     p.set("sort", libView.sort);
     p.set("dir", libView.dir);
     if (libView.sort === "random") p.set("seed", String(libView.seed));
+    return p;
+  }
+  // The order as one comparable string — what the Home row records so it can
+  // tell "already loaded" from "loaded in an order the user has since changed".
+  function libSortKey() { return libSortParams().toString(); }
+  function libViewQuery() {
+    const p = libSortParams();
     for (const id of LIB_FACET_IDS) {
       for (const v of (libView[id] || [])) p.append(id, v);
     }
     if (libView.played !== "any") p.set("played", libView.played);
     if (libView.prefix) p.set("prefix", libView.prefix);
     return p.toString();
+  }
+  // The live revisions an order reads (v1.8.65) — the same rule the server's
+  // view cache keys on (libraryView's signature): every order reads the
+  // library; Release date reads the release days too; the play sorts and the
+  // Listening focus read plays. The Home Library row and the wall both ask
+  // this, so the row can never be re-read on a different rule from the wall
+  // it heads.
+  function libOrderDeps(sort, played) {
+    const deps = ["library"];
+    if (sort === "year") deps.push("dates");
+    if (sort === "plays" || sort === "lastplayed" || (played && played !== "any")) deps.push("plays");
+    return deps;
   }
   // How many filters are ON. Every selected chip counts — including the
   // excluded ones, which are as much a filter as the included ones.
@@ -1615,13 +2922,7 @@
       wrap.dataset.mosaic = String(use.length);
     }
     wrap.dataset.artKeys = use.join(",");
-    for (const k of use) {
-      const img = document.createElement("img");
-      img.loading = "lazy"; img.alt = "";
-      img.src = `/api/image/${encodeURIComponent(k)}?size=${TILE_IMG_SIZE}`;
-      img.onerror = () => img.remove();
-      wrap.appendChild(img);
-    }
+    for (const k of use) loadArt(wrap, k, tileImgSize());
     if (!use.length) wrap.classList.add("no-image");
   }
 
@@ -1656,7 +2957,6 @@
 
     setBanner(null);
     grid.innerHTML = "";
-    clearWallGridSizing();
 
     const wrap = document.createElement("div");
     wrap.className = "playlist-detail";
@@ -1819,21 +3119,48 @@
     // next. enterFullWall and showHome both call this, so adding it here covers
     // every route out of the screen at once.
     smartPicksActive = false;
+    // Discover joins the same ritual, and for the same reason: its fetch is
+    // slower than most (the server resolves every row against the library), so
+    // it is the likeliest of all of them to land after the user has moved on.
+    discoverActive = false;
+    // Listen later too: its screen shares the grid like the two above.
+    laterActive = false;
     playlistSeq++;
     smartSeq++;
     userPlSeq++;
     smartPicksSeq++;
+    discoverSeq++;
+    laterSeq++;
   }
   window.__leavePlaylistScreens = leavePlaylistScreens;
 
   function leaveLibraryWall() { const was = libraryWallActive; libraryWallActive = false; return was; }
   window.__leaveLibraryWall = leaveLibraryWall;
-  window.__restoreLibraryWall = (was) => { libraryWallActive = !!was; };
+  window.__restoreLibraryWall = (was) => {
+    libraryWallActive = !!was;
+    // Anything that moved while another view borrowed the grid was not heard:
+    // this wall was not active then. Catch up now that it is on screen again.
+    if (libraryWallNeedsRead()) liveWhenIdle("library-wall", refreshLibraryWall);
+  };
   window.__libraryWallSeq = () => libWall.seq;
+
+  // The wall's tiles carry a key of their own ("libwall|…") so a live re-read
+  // only ever reuses a tile this wall built. The grid is shared with every
+  // other wall, and a tile left by, say, a genre wall opens its album through
+  // THAT wall's filtered offsets.
+  function libWallTile(a) {
+    const el = homeTile(a);   // filter:null → offsets resolve
+    el.__tileKey = "libwall|" + albumTileKey(a);
+    return el;
+  }
+  function libWallStampNow() { return liveStamp(libOrderDeps(libView.sort, libView.played)); }
 
   async function fetchLibraryPage(mySeq, firstPage) {
     if (libWall.loading) return;   // a page is already in flight for this view
     libWall.loading = true;
+    // What this read is against — recorded before the request, so a revision
+    // that moves while it is in the air leaves the wall looking stale, not fresh.
+    if (firstPage) libWall.readStamp = libWallStampNow();
     try {
       const r = await fetch(`/api/library/albums?offset=${libWall.offset}&count=${LIB_PAGE}&${libViewQuery()}`);
       // Left the wall (or re-entered, bumping seq) while the fetch was in
@@ -1854,7 +3181,7 @@
       const albums = (j && j.albums) || [];
       if (firstPage) { grid.innerHTML = ""; setBanner(null); }
       const frag = document.createDocumentFragment();
-      for (const a of albums) frag.appendChild(homeTile(a));   // filter:null → offsets resolve
+      for (const a of albums) frag.appendChild(libWallTile(a));
       grid.appendChild(frag);
       libWall.offset += albums.length;
       // End of library = a short (or empty) page; no separate total bookkeeping.
@@ -1872,6 +3199,61 @@
       if (mySeq === libWall.seq) libWall.loading = false;
     }
   }
+
+  // Re-read the wall where it stands (v1.8.65), when a revision its order reads
+  // has moved — a release day arriving re-sorts a Release date wall, a play a
+  // Most played one. Everything already on screen is asked for again, from the
+  // top and the same count, and repainted by key (paintRow): tiles that kept
+  // their place and their facts are not touched, and the scroll position is
+  // kept. It has to be the WHOLE loaded range: pages are read by offset, and a
+  // wall assembled from pages of two different orders repeats albums at one
+  // join and skips them at another.
+  const LIB_REFRESH_CHUNK = 200;   // the server's per-request ceiling
+  async function refreshLibraryWall() {
+    if (!libraryWallActive || labelsActive) return;
+    const stamp = libWallStampNow();
+    const want = Math.max(LIB_PAGE, libWall.offset);
+    libWall.seq++;                 // any page in flight read the old order — orphan it
+    const mySeq = libWall.seq;
+    libWall.loading = true;
+    try {
+      const got = [];
+      let total = null;
+      while (got.length < want) {
+        const count = Math.min(LIB_REFRESH_CHUNK, want - got.length);
+        const r = await fetch(`/api/library/albums?offset=${got.length}&count=${count}&${libViewQuery()}`);
+        if (!libraryWallActive || mySeq !== libWall.seq) return;
+        if (!r.ok) return;         // keep what is on screen; the next change tries again
+        const j = await r.json();
+        if (!libraryWallActive || mySeq !== libWall.seq) return;
+        const page = (j && j.albums) || [];
+        if (j && typeof j.total === "number") total = j.total;
+        for (const a of page) got.push(a);
+        if (page.length < count) break;
+      }
+      const m = document.querySelector("main");
+      const top = m ? m.scrollTop : 0;
+      paintRow(grid, got.map(a => ({ key: "libwall|" + albumTileKey(a), build: () => libWallTile(a) })));
+      if (m && m.scrollTop !== top) m.scrollTop = top;
+      libWall.offset = got.length;
+      libWall.done = got.length < want;
+      libWall.total = total !== null ? total : got.length;
+      libWall.readStamp = stamp;
+      // No "Library · N albums" header: this build dropped it (0.4.33) — the
+      // library is the one wall whose title says nothing you did not know.
+      setBanner(got.length ? null : "Nothing matches this focus — try clearing a filter.", false);
+    } catch (e) {
+      // Offline mid-read. What is on screen stays, and the next change retries.
+    } finally {
+      if (mySeq === libWall.seq) libWall.loading = false;
+    }
+  }
+  function libraryWallNeedsRead() {
+    return libraryWallActive && !labelsActive && libWall.readStamp !== libWallStampNow();
+  }
+  onLive(() => {
+    if (libraryWallNeedsRead()) liveWhenIdle("library-wall", refreshLibraryWall);
+  });
 
   let libFacets = null;   // cached /api/library/facets payload
 
@@ -2114,7 +3496,6 @@
     const mySeq = ++userPlSeq;
     setBanner(null);
     grid.innerHTML = "";
-    clearWallGridSizing();
 
     let j = null;
     try {
@@ -2978,7 +4359,7 @@
                 "and fills in over time.",
         format: "Read from your own files, and — for albums you have no file for — from " +
                 "the Qobuz or TIDAL account you've connected. Anything from neither has none.",
-        added:  "Roon publishes no date-added, so this is what MusicD Remote could work " +
+        added:  "Roon publishes no date-added, so this is what Rouen Lite could work " +
                 "out for itself — file timestamps, and albums appearing between scans."
       };
       // Format, Sample rate, Bit depth and Channels all come from the same file
@@ -3033,7 +4414,7 @@
                  () => { libView.played = p.id; });
           }
           if (!f.hasPlays) {
-            note(ls.section, "MusicD Remote hasn't seen anything play yet, so these use an " +
+            note(ls.section, "Rouen Lite hasn't seen anything play yet, so these use an " +
                              "empty history — everything counts as never played.");
           }
         }
@@ -3075,8 +4456,14 @@
             // identifies — so when nothing else can claim an album, counting by
             // elimination is both exact and honest, and the user should know
             // that's the reasoning rather than assume every file was matched.
-            note(s.section, "No streaming service is connected, so every album in your " +
-                            "Roon library came from your own files.");
+            // Which fact the elimination rests on (v1.8.61): Roon's own list of
+            // services when it has been read — "none" there is true even while
+            // this extension is signed in to Qobuz for its own features, and
+            // saying "no service is connected" then contradicts Settings.
+            note(s.section, (f.sources_derived_why === "roon"
+                              ? "Roon isn't signed in to any streaming service"
+                              : "No streaming service is connected") +
+                            ", so every album in your Roon library came from your own files.");
           }
         }
 
@@ -3366,7 +4753,6 @@
 
     setBanner(null);
     grid.innerHTML = "";
-    clearWallGridSizing();
 
     const wrap = document.createElement("div");
     wrap.className = "playlist-detail";
@@ -3611,11 +4997,8 @@
     // "which artwork was this row given" is answerable after the fact.
     if (t.image_key) art.dataset.artKey = t.image_key;
     if (t.image_key) {
-      const img = document.createElement("img");
-      img.loading = "lazy"; img.alt = "";
-      img.src = `/api/image/${encodeURIComponent(t.image_key)}?size=80`;
-      img.onerror = () => { art.classList.add("no-image"); img.remove(); };
-      art.appendChild(img);
+      loadArt(art, t.image_key, 80,
+        (img) => { art.classList.add("no-image"); img.remove(); });
     } else {
       art.classList.add("no-image");
     }
@@ -4339,13 +5722,13 @@
   window.__artistsWallSeq = () => artistsWall.seq;
 
   async function showLibraryWall() {
-    const m = enterFullWall("Library");
+    const m = enterFullWall("Library", true);
     // The library gets the same search as Home — same box, same results — and
     // no header text. enterFullWall sets a breadcrumb, which a genre or label
     // wall needs to say WHICH wall you are on; "Library" over the library is
     // the one place it says nothing you did not already know.
     setCountText("");
-    setTopbarNav(true, false, true);
+    setTopbarNav(true, false, true, true);
     libraryWallActive = true;
     renderLibraryControls();
     libWall.seq++;
@@ -4406,6 +5789,7 @@
       if (name && window.__showLabelAlbums) window.__showLabelAlbums(name);
     });
     wireSectionHeader("home-picks-title", showSmartPicks);
+    wireSectionHeader("home-later-title", showListenLater);
   }
 
   // Weighted-random pick from a list of { title, count }.
@@ -4420,50 +5804,59 @@
   // Render the genre buttons from card descriptors ({label, genre} or
   // {label, group, parent}). Shared by the live loader and the cache repaint;
   // the descriptors are plain data, so they persist and rebuild identically.
+  function buildGenreCard(c) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "home-genre-card";
+    card.textContent = c.label;
+    card.addEventListener("click", () => {
+      if (!window.__applyFilter) return;
+      if (c.group) {
+        // Pick a random sub-genre from the group; the breadcrumb keeps the
+        // group label (e.g. "Rock/Metal"). Refreshing the grid reshuffles
+        // that sub-genre; re-tapping the button picks a new one.
+        const sub = pickWeightedSub(c.group);
+        window.__applyFilter({ type: "genre", value: sub.title, parent: c.parent, label: c.label });
+      } else {
+        window.__applyFilter({ type: "genre", value: c.genre });
+      }
+    });
+    return card;
+  }
   function renderHomeGenres(cards) {
     cards = cards || [];
-    homeGenres.innerHTML = "";
+    if (!homeGenres) return;
     if (!cards.length) {
       homeGenres.innerHTML = '<div class="home-carousel-empty">No genres found.</div>';
       return;
     }
-    const frag = document.createDocumentFragment();
-    for (const c of cards) {
-      const card = document.createElement("button");
-      card.type = "button";
-      card.className = "home-genre-card";
-      card.textContent = c.label;
-      card.addEventListener("click", () => {
-        if (!window.__applyFilter) return;
-        if (c.group) {
-          // Pick a random sub-genre from the group; the breadcrumb keeps the
-          // group label (e.g. "Rock/Metal"). Refreshing the grid reshuffles
-          // that sub-genre; re-tapping the button picks a new one.
-          const sub = pickWeightedSub(c.group);
-          window.__applyFilter({ type: "genre", value: sub.title, parent: c.parent, label: c.label });
-        } else {
-          window.__applyFilter({ type: "genre", value: c.genre });
-        }
-      });
-      frag.appendChild(card);
-    }
-    homeGenres.appendChild(frag);
+    // Keyed on the whole descriptor: a card whose sub-genre list changed is
+    // rebuilt (its click handler closes over that list), the rest are kept.
+    paintRow(homeGenres, cards.map(c => ({ key: "genre:" + JSON.stringify(c), build: () => buildGenreCard(c) })));
   }
 
-  async function loadHomeGenres() {
-    if (!homeGenres) return;
+  async function loadHomeGenres(isCurrent) {
+    if (!homeGenres) return false;
     if (!rowHasContent(homeGenres)) homeGenres.innerHTML = '<div class="home-carousel-empty">Loading…</div>';
     try {
       const [genresRes, groupsRes] = await Promise.all([
         fetch("/api/filters/genres").catch(() => null),
         fetch("/api/home/genre-groups").catch(() => null)
       ]);
+      if (!isCurrent()) return false;
       if ((genresRes && genresRes.status === 503) || (groupsRes && groupsRes.status === 503)) {
         if (!rowHasContent(homeGenres)) homeGenres.innerHTML = '<div class="home-carousel-empty">Waiting for Roon Core…</div>';
-        return;   // keep any cached cards while the index builds
+        return false;   // keep any cached cards while the index builds
       }
-      const genresJ = genresRes ? await genresRes.json().catch(() => ({})) : {};
-      const groupsJ = groupsRes ? await groupsRes.json().catch(() => ({})) : {};
+      // Either half can fail on its own and the other still makes cards — the
+      // genre list alone, or the Rock/Metal and Pop split alone — so a failed
+      // half counts as empty, as it always has. But the row is then only
+      // partly answered: it paints what it has and is asked again on the next
+      // visit or rebuild, rather than being taken as settled.
+      const partial = !genresRes || !genresRes.ok || !groupsRes || !groupsRes.ok;
+      const genresJ = genresRes && genresRes.ok ? await genresRes.json().catch(() => ({})) : {};
+      const groupsJ = groupsRes && groupsRes.ok ? await groupsRes.json().catch(() => ({})) : {};
+      if (!isCurrent()) return false;
       // Pull extra genres up front — splitting Pop/Rock adds a card, and we trim
       // down to an even count afterwards so the 2-column grid has full rows.
       const top = ((genresJ && genresJ.genres) || []).slice(0, 16); // biggest first
@@ -4495,49 +5888,66 @@
 
       if (cards.length) {
         renderHomeGenres(cards);
-        homeSectionsLoaded = true;   // populated — stop retrying on future visits
-        saveHomeCache({ genres: cards });
-      } else if (!rowHasContent(homeGenres)) {
+        if (!partial) saveHomeCache({ genres: cards });
+        return !partial;
+      }
+      if (!rowHasContent(homeGenres)) {
         // Empty 200 (index still building after a restart) — keep the hydrated
         // cards if we have them; only show "No genres found." when nothing is
         // cached, rather than blanking a good cached row.
         renderHomeGenres([]);
+        return !partial;
       }
+      return false;
     } catch (e) {
+      if (!isCurrent()) return false;
       if (!rowHasContent(homeGenres)) homeGenres.innerHTML = '<div class="home-carousel-empty">Couldn’t load genres.</div>';
+      return false;
     }
   }
 
   // Instant open: repaint the last persisted Home rows immediately, before we've
   // even reconnected to Roon. Returns true if it painted the main content, so
   // the boot path can reveal Home right away instead of a blank "Connecting…".
-  // The live loaders (called by showHome once paired) then revalidate silently,
-  // swapping fresh data in without a "Loading…" flash. Restoring each drawn
-  // row's DAY along with its tiles is what makes a reopen free: the row is
-  // already showing today's draw, so showHome finds it fresh and asks for
-  // nothing. A row cached on an earlier day (or by a build that did not store
-  // the day) is not fresh, and reloads.
+  //
+  // What is painted here is never taken as current (v1.8.65). Every row is
+  // asked again as soon as Home loads, and because rows are repainted by key
+  // (paintRow) an answer that matches the copy moves nothing on screen — so the
+  // instant open costs no flash, and a copy that has gone stale is corrected
+  // within a round trip instead of being trusted. The Library row was trusted
+  // outright until then, which is how a row saved weeks earlier went on showing
+  // that day's order and badges for as long as the sort was left alone.
   function hydrateHomeFromCache() {
     const c = readHomeCache();
     if (!c) return false;
     // Order and enablement first: painting into the default order and then
     // reordering is a visible flash on every cold open.
     applyHomeLayout();
+    // The drawn rows' seed is the date, so there is nothing to restore: a copy
+    // drawn today is today's draw, and one from an earlier day is painted
+    // (better than an empty shelf) and replaced by the re-read that follows.
+    rerollHomeRandomRowsIfDue();
     let painted = false;
-    if (c.aotd && homeAotd) { renderHomeAotd(c.aotd.aotd); painted = rowHasContent(homeAotd) || painted; }
+    if (homeToday) {
+      // A saved Album of the day is only painted on the day it was chosen for
+      // (00:01 to 00:01) — never yesterday's on a cold open. The live re-read
+      // that follows brings today's, or none if it has been played.
+      const t = c.today || null;
+      renderHomeToday(t && t.day && t.day === aotdDayKeyLocal() ? t.aotd : null);
+    }
     if (c.random   && homeRandom)   { renderHomeRandom(c.random);                              painted = rowHasContent(homeRandom)   || painted; }
     if (c.artists  && homeArtists)  { renderHomeArtists(c.artists);                            painted = rowHasContent(homeArtists)  || painted; }
-    if (c.library  && homeLibrary)  { renderHomeLibrary(c.library); }
+    // Only when it was cached in the order that is current NOW. For this row a
+    // copy in another order is not "slightly old", it is the WRONG ORDER, and
+    // painting it would flash the previous sort on every cold open. A copy
+    // written before the field existed has no librarySort, so it does not
+    // match and the row simply loads fresh.
+    if (c.library && homeLibrary && c.librarySort === libSortKey()) renderHomeLibrary(c.library);
     if (c.lotw     && homeLotw)     { renderHomeLotw(c.lotw.label, c.lotw.albums); }
     if (c.history  && homeHistory)  { renderHomeHistory(c.history); }
+    if (Array.isArray(c.later) && homeLater) { renderHomeLater(c.later); }
     if (c.genres   && homeGenres)   { renderHomeGenres(c.genres); }
     if (!painted) return false;
-    // Which day each cached row was drawn for. A cache written before these
-    // were stored (or on an earlier day) simply leaves them empty, and the row
-    // reloads — which is the correct answer to both.
-    homeAotdDay    = typeof c.aotdDay    === "string" ? c.aotdDay    : "";
-    homeRandomDay  = typeof c.randomDay  === "string" ? c.randomDay  : "";
-    homeArtistsDay = typeof c.artistsDay === "string" ? c.artistsDay : "";
     // Reveal Home so the cached content is actually on screen while we reconnect.
     if (homeView)     homeView.classList.remove("hidden");
     if (homeSections) homeSections.classList.remove("hidden");
@@ -4553,6 +5963,7 @@
   // 2.4s of "queued 400 of 1179" is the same as never having said it.
   function showToast(msg, kind, ms) {
     toast.textContent = msg;
+    toast.style.bottom = toastBottomAbovePill();
     toast.classList.remove("hidden", "error");
     if (kind === "error") toast.classList.add("error");
     requestAnimationFrame(() => toast.classList.add("show"));
@@ -4670,7 +6081,16 @@
   // rescale by the Roon Core. Rounded to coarse steps so the whole session
   // shares a handful of cache keys (server LRU + browser cache); the 300px
   // floor keeps DPR-1 desktops sharp on wide walls where tiles exceed 200px.
-  const TILE_IMG_SIZE = Math.min(500, Math.max(300, Math.ceil((190 * (window.devicePixelRatio || 1)) / 100) * 100));
+  // Sized from the tile actually drawn (v1.8.77: UI Settings can make a grid
+  // tile two or three times its old width), in device pixels, and held inside
+  // the 300–500 band the server keeps prewarmed on the data volume — above it
+  // every tile would be a fresh Roon Core image call.
+  function tileImgSize() {
+    const gridTile = window.innerWidth / effGridCols();
+    const carouselTile = 150 * parseFloat(uiVal("tile"));
+    const css = Math.max(190, Math.min(gridTile, 600), carouselTile);
+    return Math.min(500, Math.max(300, Math.ceil((css * (window.devicePixelRatio || 1)) / 100) * 100));
+  }
 
   // Source badge for an album payload: "local" | "qobuz" | "tidal", or null
   // when the server couldn't determine it. `a.local` is still honoured so a
@@ -4717,7 +6137,8 @@
     return el;
   }
 
-  const SOURCE_LABEL = { local: "Local albums", qobuz: "Qobuz", tidal: "TIDAL" };
+  // What the badge on a tile MEANS, said on hover: where this album comes from.
+  const SOURCE_LABEL = { local: "Local files", qobuz: "In your Qobuz library", tidal: "In your TIDAL library" };
   function sourceBadge(a) {
     const kind = a.source || (a.local ? "local" : null);
     if (!kind || !SOURCE_LABEL[kind]) return null;
@@ -4726,6 +6147,52 @@
     el.title = SOURCE_LABEL[kind];
     el.setAttribute("aria-label", SOURCE_LABEL[kind]);
     return el;
+  }
+
+  // ARTWORK, WITH A RETRY. `/api/image` answers 503 whenever the extension is
+  // still connecting to the Core and the art is not already in the disk store —
+  //
+  //     if (!core) return res.status(503).end();
+  //
+  // and a cold app open lands squarely in that window, because Home repaints
+  // from its saved copy immediately while pairing takes a second or two. Every
+  // <img> that lost the race fired onerror, and onerror did this:
+  //
+  //     img.onerror = () => { wrap.classList.add("no-image"); img.remove(); };
+  //
+  // — one failure, a music note for the life of the page, even though the art
+  // became available moments later and nothing ever asked again. Which rows
+  // were affected came down to which requests happened to be in flight, so the
+  // same screen would show covers on some carousels and notes on others.
+  //
+  // Retries with a widening gap, then gives up. `r` is not read by the server
+  // (it keys on the path and ?size); it is there so a retry is a genuinely new
+  // request rather than anything a cache could answer from the failure.
+  function loadArt(container, key, size, onGiveUp) {
+    // Inside the function on purpose. This is declared 3000 lines below two of
+    // its callers — hoisting makes the FUNCTION reachable from them, but a
+    // module-level `const` would not be, and CLAUDE.md's declaration-before-use
+    // rule exists because that distinction has bitten this file before.
+    const RETRY_MS = [1200, 3500, 8000];
+    const img = document.createElement("img");
+    img.loading = "lazy"; img.alt = "";
+    const url = `/api/image/${encodeURIComponent(key)}?size=${size}`;
+    let tries = 0;
+    img.onerror = () => {
+      if (tries >= RETRY_MS.length) {
+        if (onGiveUp) onGiveUp(img); else img.remove();
+        return;
+      }
+      const wait = RETRY_MS[tries++];
+      setTimeout(() => {
+        // The tile may have been replaced by a re-render in the meantime;
+        // retrying a detached <img> is a request nobody will ever see.
+        if (img.isConnected) img.src = url + "&r=" + tries;
+      }, wait);
+    };
+    img.src = url;
+    container.appendChild(img);
+    return img;
   }
 
   // Build a single album tile. onClick defaults to opening the album modal,
@@ -4762,19 +6229,14 @@
       // Keys recorded on the element so "what artwork was this tile given" is
       // answerable even after a failed <img> removes itself.
       artWrap.dataset.artKeys = mosaic.slice(0, 4).join(",");
-      for (const k of mosaic.slice(0, 4)) {
-        const img = document.createElement("img");
-        img.loading = "lazy"; img.alt = "";
-        img.src = `/api/image/${encodeURIComponent(k)}?size=${TILE_IMG_SIZE}`;
-        img.onerror = () => img.remove();
-        artWrap.appendChild(img);
-      }
+      for (const k of mosaic.slice(0, 4)) loadArt(artWrap, k, tileImgSize());
     } else if (mosaic.length === 1 || a.image_key) {
-      const img = document.createElement("img");
-      img.loading = "lazy"; img.alt = "";
-      img.src = `/api/image/${encodeURIComponent(mosaic[0] || a.image_key)}?size=${TILE_IMG_SIZE}`;
-      img.onerror = () => { artWrap.classList.add("no-image"); img.remove(); };
-      artWrap.appendChild(img);
+      const key = mosaic[0] || a.image_key;
+      // The key stays on the tile even after a failed <img> removes itself, so
+      // "what artwork was this tile given" is answerable after the fact.
+      artWrap.dataset.artKey = key;
+      loadArt(artWrap, key, tileImgSize(),
+        (img) => { artWrap.classList.add("no-image"); img.remove(); });
     } else {
       artWrap.classList.add("no-image");
     }
@@ -4798,10 +6260,19 @@
     // queued as one.
     const selectable = opts && "selectable" in opts ? !!opts.selectable : true;
     if (selectable) btn.dataset.offset = String(a.offset);
+    // An album tile can be stepped to from the album view (v1.8.66). A playlist
+    // tile (selectable: false) opens a different screen, so it is not one.
+    if (selectable) btn.__albumNav = true;
 
     btn.addEventListener("click", () => {
       if (selectable && albumSelectMode) { handleAlbumTileSelect(btn, a); return; }
-      (onClick || (() => openAlbum(a)))();
+      // The album view this opens remembers the tile it came from, so a swipe
+      // can step to the one beside it. Set only while the opener runs: one
+      // that does not open the album view there and then must not leave it
+      // behind for an unrelated open later.
+      pendingNavTile = selectable ? btn : null;
+      try { (onClick || (() => openAlbum(a)))(); }
+      finally { pendingNavTile = null; }
     });
     if (selectable) {
       // Long press ARMS selection without selecting the tile under the finger.
@@ -4866,6 +6337,9 @@
     // Albums are allowed. Adding one stores its tracks, which means reading the
     // album on the Core first — see /api/user-playlists/add-albums.
     if (addItem) addItem.classList.remove("hidden");
+    // Listen later is for albums; a track cannot be put aside on its own.
+    const laterItem = selMenu && selMenu.querySelector('[data-sel-act="later"]');
+    if (laterItem) laterItem.classList.toggle("hidden", kind !== "albums");
     if (selMenuBtn) {
       selMenuBtn.setAttribute("aria-label",
         `Actions for ${n} selected ${noun}${n === 1 ? "" : "s"}`);
@@ -4948,12 +6422,18 @@
   }
   // Topbar context label: the active filter's value (genre/tag name) with NO
   // count; hidden on the plain wall. Counts were removed from all screens.
-  function updateCountReadout(filteredTotal) {
+  // isWall: called for the random wall itself, which is titled "Random albums"
+  // when unfiltered (v1.8.77) like every other grid screen. Home calls this
+  // too, to clear the title, and must not get one.
+  function updateCountReadout(filteredTotal, isWall) {
     const el = document.getElementById("album-count");
     if (!el) return;
     if (labelsActive) return;   // labels browser manages its own header text
     if (activeFilter) {
       el.textContent = activeFilter.label || activeFilter.value;   // group label (e.g. "Rock/Metal") if set
+      el.classList.remove("hidden");
+    } else if (isWall) {
+      el.textContent = "Random albums";
       el.classList.remove("hidden");
     } else {
       el.textContent = "";
@@ -4961,34 +6441,98 @@
     }
   }
 
-  async function loadRandom() {
-    refreshBtn.disabled = true;
-    // Size the wall grid (phone-fit) and take its count in one measurement;
-    // off-phone applyWallGridSizing returns null and we use computeAlbumCount.
-    const wallCount = applyWallGridSizing();
-    albumCount = wallCount != null ? Math.min(96, wallCount) : computeAlbumCount();
-    renderSkeletons(albumCount);
+  // The random wall's DRAW (v1.8.65). Every loadRandom() is a new one — that is
+  // what Refresh, a new filter and a resize all mean — and while it is on screen
+  // it is re-read with the same seed when the library moves, so the same albums
+  // stay put with current facts. Only the draws made from the snapshot take a
+  // seed (the whole library, or a decade). A genre or tag wall is drawn by Roon
+  // itself on every request: re-reading it would be a new draw, and a round of
+  // Core calls, that nobody asked for — so it stays as drawn until Refresh.
+  let randomWallSeed = 1;
+  let randomWallStamp = null;
+  let randomWallSeq = 0;       // bumped by every new DRAW
+  let randomWallReadSeq = 0;   // bumped by every live re-read of the current draw
+  const randomWallSeeded = () => !activeFilter || activeFilter.type === "decade";
+  // The grid is shared by every wall, so "the random wall is showing" is read
+  // off the tiles themselves: only this wall keys its tiles "random|…".
+  function randomWallOnScreen() {
+    const first = grid.firstElementChild;
+    return !grid.classList.contains("hidden") && !homeOnScreen() &&
+           !!(first && typeof first.__tileKey === "string" && first.__tileKey.startsWith("random|"));
+  }
+
+  // Another screen took the grid (Home, a full wall, Labels): a draw still in
+  // flight must not land on it — its tiles, or since v1.8.77 its "Random
+  // albums" title. The draw owns the Refresh button, so it is handed back.
+  function abandonRandomDraw() {
+    randomWallSeq++;
+    refreshBtn.disabled = false;
+  }
+  window.__abandonRandomDraw = abandonRandomDraw;
+
+  async function loadRandom(opts) {
+    // Wired straight to the Refresh button too, which passes its click event —
+    // so only a real { live: true } counts.
+    const live = !!(opts && opts.live === true);
+    if (!live) {
+      refreshBtn.disabled = true;
+      albumCount = computeAlbumCount();
+      renderSkeletons(albumCount);
+      randomWallSeed = newHomeSeed();
+    }
+    // A draw is abandoned when a newer draw starts. A re-read also when a newer
+    // re-read starts or anything else takes the grid — and it never counts as
+    // a draw, so it cannot orphan one (the draw owns the Refresh button, and
+    // only the newest draw hands it back).
+    const seq = live ? randomWallSeq : ++randomWallSeq;
+    const readSeq = live ? ++randomWallReadSeq : 0;
+    const seeded = randomWallSeeded();
+    const stamp = liveStamp(["library"]);
+    const current = () => seq === randomWallSeq &&
+      (!live || (readSeq === randomWallReadSeq && randomWallOnScreen()));
     try {
-      const r = await fetch(`/api/random-albums?count=${albumCount}${filterQS()}`);
+      const r = await fetch(`/api/random-albums?count=${albumCount}${filterQS()}` +
+                            (seeded ? "&seed=" + randomWallSeed : ""));
+      if (!current()) return;
       if (r.status === 503) {
+        if (live) return;
         const j = await r.json().catch(() => ({}));
         setBanner(j.error || "Waiting for Roon Core. Enable this extension in Roon \u2192 Settings \u2192 Extensions.", true);
         grid.innerHTML = ""; return;
       }
       if (!r.ok) {
+        if (live) return;
         const j = await r.json().catch(() => ({}));
         throw new Error(j.error || `HTTP ${r.status}`);
       }
       const j = await r.json();
-      renderAlbums(j.albums || []);
-      updateCountReadout(j.filtered ? j.total : null);
+      if (!current()) return;
+      const albums = j.albums || [];
+      if (seeded && albums.length) {
+        setBanner(null);
+        const m = document.querySelector("main");
+        const top = m ? m.scrollTop : 0;
+        paintRow(grid, albums.map(a => ({ key: "random|" + albumTileKey(a), build: () => buildAlbumTile(a) })));
+        if (live && m && m.scrollTop !== top) m.scrollTop = top;
+        randomWallStamp = stamp;
+      } else if (!live) {
+        renderAlbums(albums);
+      }
+      if (!live) updateCountReadout(j.filtered ? j.total : null, true);
     } catch (e) {
+      if (live || seq !== randomWallSeq) return;
       setBanner(`Couldn't load albums: ${e.message}`, true);
       grid.innerHTML = "";
     } finally {
-      refreshBtn.disabled = false;
+      if (!live && seq === randomWallSeq) refreshBtn.disabled = false;
     }
   }
+  onLive(() => {
+    if (!randomWallOnScreen() || !randomWallSeeded() || randomWallStamp === liveStamp(["library"])) return;
+    liveWhenIdle("random-wall", () => {
+      if (randomWallOnScreen() && randomWallSeeded()) loadRandom({ live: true });
+    });
+  });
 
   // ----- Zones -----
   async function loadZones() {
@@ -5287,11 +6831,17 @@
         // Close FIRST. showArtistAlbums parks the grid/topbar/labels but knows
         // nothing about the album modal, so with the modal still open the
         // artist grid renders behind it and body scroll stays locked.
+        // The album it was opened from goes with it, so Back on the artist
+        // page comes back to that album rather than to Home (Mandarin's
+        // rule). Not from Now playing: that screen is not an album view.
+        const fromAlbum = (currentAlbum && currentSource !== "now-playing")
+          ? { album: currentAlbum, opts: { source: currentSource, zoneId: currentSourceZoneId, filter: currentDetailFilter } }
+          : null;
         closeModal();
         // The artist view PARKS the labels browser itself (see showArtistAlbums)
         // so its Back can restore it — tearing it down here would lose the open
         // label and leave the restored grid without its labels bar.
-        window.__showArtistAlbums && window.__showArtistAlbums(part.name);
+        window.__showArtistAlbums && window.__showArtistAlbums(part.name, { fromAlbum });
       });
       box.appendChild(btn);
     });
@@ -5300,14 +6850,45 @@
   // transport IIFE, which has no access to closeModal or this renderer.
   window.__renderArtistLinks = renderArtistLinks;
 
+  // The screen Now playing was opened over (v1.8.75). Now playing is this same
+  // modal, so tapping the mini player while an album is open REPLACES that
+  // album — and the only way out was Home. Its Back puts back what it
+  // replaced: the album that was open, or (none) whatever screen is under the
+  // modal, which closing reveals as it was.
+  let npReturn = null;
+
   function openAlbum(album, opts) {
     opts = opts || {};
+    if (opts.source === "now-playing") {
+      const albumOpen = !modal.classList.contains("hidden") && !modal.classList.contains("np-mode");
+      // Re-opened while already on Now playing: keep what it is to go back to.
+      if (albumOpen) {
+        // Where the album was opened from (its prev/next) and how far down it
+        // was scrolled go with it, so Back puts back the screen as it was.
+        const bodyEl = modal.querySelector(".modal-body");
+        npReturn = currentAlbum
+          ? { album: currentAlbum, opts: { source: currentSource, zoneId: currentSourceZoneId, filter: currentDetailFilter },
+              navTile: albumNavTile, navParent: albumNavParent, navKey: albumNavKey,
+              scrollTop: bodyEl ? bodyEl.scrollTop : 0 }
+          : null;
+      } else if (modal.classList.contains("hidden")) {
+        npReturn = null;
+      }
+    } else {
+      npReturn = null;
+    }
     // Album select mode and track select mode both drive the one top-bar menu,
     // so they must never be live together. Opening an album ends the grid
     // selection rather than leaving a count behind that the menu would then
     // act on with the wrong list.
     if (albumSelectMode) exitAlbumSelectMode();
     exitTrackSelectMode();
+    // Where this album was opened from, for stepping to its neighbours
+    // (v1.8.66). Only a tile's own click sets pendingNavTile, so every other
+    // way in — Now playing, a search result, a restored modal — clears it.
+    albumNavTile = pendingNavTile;
+    albumNavParent = albumNavTile ? albumNavTile.parentElement : null;
+    albumNavKey = albumNavTile ? (albumNavTile.__tileKey || null) : null;
     currentAlbum = album;
     window.__currentAlbum = album;
     currentSource = opts.source || "random";
@@ -5343,7 +6924,7 @@
     document.getElementById("album-bio-toggle").classList.add("hidden");
     document.getElementById("album-bio-source").classList.add("hidden");
     document.getElementById("album-bio-text").dataset.clipped = "true";
-    setModalSource(album);   // tile data may already carry it; refreshed below from the detail response
+    setModalQuality(album);   // tile data may already carry it
     if (album.image_key) {
       modalImg.src = `/api/image/${encodeURIComponent(album.image_key)}?size=800`;
       modalImg.style.display = "";
@@ -5355,6 +6936,7 @@
     }
     modal.classList.remove("hidden");
     document.body.style.overflow = "hidden";
+    paintAlbumSteps();
 
     if (isNP) {
       // The now-playing screen is driven live by the transport poll loop;
@@ -5362,7 +6944,10 @@
       if (typeof window.__refreshTransport === "function") window.__refreshTransport();
     } else {
       fetchAlbumDetail(album).catch(err => {
+        // Another album may be open by now; this error is not about it.
+        if (album !== currentAlbum) return;
         modalActs.innerHTML = `<div class="modal-error">${escapeHtml(err.message)}</div>`;
+        markAlbumForHeal();
       });
       fetchAlbumExtras(album).catch(() => { /* extras are non-critical — modal still opens */ });
     }
@@ -5442,27 +7027,351 @@
     return (sel && sel.value) || selectedZoneId || currentSourceZoneId || null;
   }
 
-  async function loadQueue() {
+  // Collapsed by default, remembered for the session. Every play action on this
+  // screen re-pulls the queue, and a fold-out that shut itself on each of those
+  // would be unusable.
+  let queueHistoryOpen = false;
+  // historySelectMode / historySelected are declared with the other view flags
+  // at the top of this scope — liveBusy() reads the mode, and the live code sits
+  // far above this point in the file.
+  // Mirrors lib/queue-history.js. Each track is a full browse navigation, so a
+  // large selection is minutes of Core traffic; the server enforces the same
+  // number and this is only here to say so before the request is made.
+  const HISTORY_MULTI_MAX = 20;
+  // Repaints the fold-out from the state above. Held here because the send
+  // finishes OUTSIDE the render that drew the rows, and without it the Select
+  // button stayed lit and the action bar stayed open over an empty selection
+  // until the queue reload landed 600ms later.
+  let repaintHistory = () => {};
+
+  // What already played, above the live queue.
+  //
+  // Roon's queue reports the current track and what is coming; anything played
+  // or skipped past is gone from it, and there is no queue-history call in the
+  // extension API. These rows are what the extension watched leave the zone.
+  //
+  // They are a RECORD, not a rewindable queue, and the UI has to be honest
+  // about that: tapping one adds it after the current track. Restoring the
+  // queue around it would mean rebuilding every track after it through the
+  // browse hierarchy — roughly eight Core round trips each, behind a play_now
+  // that wipes the live queue first.
+  function renderQueueHistory(list, history) {
+    if (!history.length) return;
+    // The server sends newest first ("the last N"); on screen it reads
+    // oldest-at-the-top so the most recent sits against the Now playing
+    // divider, the way a queue is read.
+    const rows = history.slice().reverse();
+
+    // The disclosure and the actions are ONE element, and it is the element
+    // that sticks. Two sticky rows would each need to know the other's height
+    // to stack without overlapping; one wrapper just works, at any text size.
+    //
+    // Still inside the list rather than floating over it — a bar positioned
+    // above the queue would be a new stacking context on a screen that already
+    // has the transport bar in it, which is how v1.6.58's sheets ended up
+    // underneath something.
+    const head = document.createElement("li");
+    head.className = "q-history-head";
+
+    const bar = document.createElement("div");
+    bar.className = "q-history-bar";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "q-history-toggle";
+    const selBtn = document.createElement("button");
+    selBtn.type = "button";
+    selBtn.className = "q-history-select";
+    bar.appendChild(btn);
+    bar.appendChild(selBtn);
+
+    const actions = document.createElement("div");
+    actions.className = "q-hist-actions hidden";
+    const count = document.createElement("span");
+    count.className = "q-hist-count";
+    const mkAct = (label, cls) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "q-hist-act" + (cls ? " " + cls : "");
+      b.textContent = label;
+      return b;
+    };
+    const actNext  = mkAct("Play next", "primary");
+    const actQueue = mkAct("Add to queue");
+    const actClear = mkAct("Clear");
+    actions.append(count, actNext, actQueue, actClear);
+    head.append(bar, actions);
+
+    const rowEls = rows.map((h) => {
+      const li = document.createElement("li");
+      li.className = "q-hist-row is-tappable";
+
+      // The pick number. Selection order is not display order, so without a
+      // number on the row there is no way to see what order you chose — and
+      // the order is the entire point of selecting more than one.
+      const num = document.createElement("span");
+      num.className = "q-hist-num hidden";
+
+      const art = document.createElement("img");
+      art.className = "q-art";
+      if (h.image_key) art.src = `/api/image/${encodeURIComponent(h.image_key)}?size=120`;
+      else art.style.visibility = "hidden";
+
+      const tx = document.createElement("div"); tx.className = "q-text";
+      const tt = document.createElement("div"); tt.className = "q-title";
+      tt.textContent = h.track || "";
+      const ts = document.createElement("div"); ts.className = "q-sub";
+      ts.textContent = [h.artist, h.album].filter(Boolean).join(" · ");
+      tx.appendChild(tt); tx.appendChild(ts);
+
+      const len = document.createElement("span");
+      len.className = "q-len";
+      // A skip is only legible next to how long the track was — "0:12" alone
+      // reads as a very short track. Anything that counted as played just
+      // shows its length, like every other row.
+      if (!h.played && h.elapsed > 0 && h.duration) {
+        len.textContent = `${fmtDuration(h.elapsed)} / ${fmtDuration(h.duration)}`;
+        len.classList.add("is-skipped");
+        li.classList.add("was-skipped");
+      } else if (h.duration) {
+        len.textContent = fmtDuration(h.duration);
+      }
+
+      li.append(num, art, tx, len);
+      return li;
+    });
+
+    // Which rows are picked, and where each sits in the pick order. Rerun on
+    // every toggle because removing a pick renumbers everything after it.
+    const paintSelection = () => {
+      rowEls.forEach((el, i) => {
+        const at = historySelected.indexOf(i);
+        el.classList.toggle("is-picked", at !== -1);
+        const n = el.querySelector(".q-hist-num");
+        n.textContent = at === -1 ? "" : String(at + 1);
+        n.classList.toggle("hidden", at === -1 || !historySelectMode);
+      });
+      const n = historySelected.length;
+      count.textContent = n ? `${n} selected` : "Tap tracks in play order";
+      for (const b of [actNext, actQueue]) b.disabled = n === 0;
+    };
+
+    const paint = () => {
+      btn.setAttribute("aria-expanded", String(queueHistoryOpen));
+      btn.textContent = (queueHistoryOpen ? "▾ " : "▸ ") +
+        `${rows.length} played earlier`;
+      for (const el of rowEls) el.classList.toggle("hidden", !queueHistoryOpen);
+      // Selecting is only offered while the rows are on screen — a Select
+      // button above a collapsed list acts on things you cannot see.
+      selBtn.classList.toggle("hidden", !queueHistoryOpen);
+      selBtn.textContent = historySelectMode ? "Done" : "Select";
+      selBtn.setAttribute("aria-pressed", String(historySelectMode));
+      actions.classList.toggle("hidden", !queueHistoryOpen || !historySelectMode);
+      // Only pinned while the rows are showing. Collapsed, it is one line above
+      // the Now playing divider and pinning it would park a bar over the live
+      // queue for the whole scroll of it.
+      head.classList.toggle("is-open", queueHistoryOpen);
+      for (const el of rowEls) el.classList.toggle("is-selecting", historySelectMode);
+      paintSelection();
+    };
+
+    btn.addEventListener("click", () => {
+      queueHistoryOpen = !queueHistoryOpen;
+      // Closing the fold-out ends the selection with it: picks that cannot be
+      // seen cannot be checked before acting on them.
+      if (!queueHistoryOpen) { historySelectMode = false; historySelected = []; }
+      paint();
+    });
+    selBtn.addEventListener("click", () => {
+      historySelectMode = !historySelectMode;
+      if (!historySelectMode) historySelected = [];
+      paint();
+    });
+    actClear.addEventListener("click", () => { historySelected = []; paintSelection(); });
+    actNext.addEventListener("click",  () => runHistoryMulti("play_next", rows));
+    actQueue.addEventListener("click", () => runHistoryMulti("queue", rows));
+
+    rowEls.forEach((el, i) => {
+      el.addEventListener("click", () => {
+        if (!historySelectMode) { playHistoryNext(rows[i]); return; }
+        const at = historySelected.indexOf(i);
+        if (at === -1) {
+          if (historySelected.length >= HISTORY_MULTI_MAX) {
+            showToast(`Up to ${HISTORY_MULTI_MAX} tracks at a time`, "error");
+            return;
+          }
+          historySelected.push(i);          // pushed, so the array IS the order
+        } else {
+          historySelected.splice(at, 1);
+        }
+        paintSelection();
+      });
+    });
+
+    // The control first, then what it discloses: collapsed it sits alone at the
+    // top of the list, and expanded the rows run down from it to finish against
+    // the Now playing divider — the order they were played in.
+    list.appendChild(head);
+    for (const el of rowEls) list.appendChild(el);
+    repaintHistory = paint;
+    paint();
+  }
+
+  // Send the selection, in the order it was picked.
+  async function runHistoryMulti(kind, rows) {
+    if (!historySelected.length) return;
+    const picks = historySelected.map(i => rows[i]).filter(Boolean);
+    const verb = kind === "queue" ? "Add" : "Play";
+    const what = picks.length === 1 ? `"${picks[0].track}"` : `${picks.length} tracks`;
+    if (!await confirmDialog(
+      `${verb} ${what} ${kind === "queue" ? "to the end of the queue" : "next"}?`)) return;
+
+    for (const b of document.querySelectorAll(".q-hist-act")) b.disabled = true;
+    showToast(`Adding ${picks.length} track${picks.length === 1 ? "" : "s"}…`,
+              null, TOAST_REPORT_MS);
+    try {
+      const r = await fetch("/api/queue/history-multi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          zone_or_output_id: queueZoneId(),
+          kind,
+          // Selection order. The server decides what order to SEND them in so
+          // they land this way round — see playNextSendOrder.
+          tracks: picks.map(h => ({ track: h.track, artist: h.artist, album: h.album })),
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        showToast(j.error || `Couldn't add those: HTTP ${r.status}`, "error", TOAST_REPORT_MS);
+        return;
+      }
+      // Every part of a partial result is worth saying: which went, which the
+      // library could not find, which Roon refused.
+      let msg = `${kind === "queue" ? "Queued" : "Playing"} ${j.queued} track${j.queued === 1 ? "" : "s"}`;
+      // Name them. "1 not in your library" leaves the user to work out WHICH of
+      // their picks it meant, and the answer decides whether it is a real
+      // absence or something to report.
+      const named = (list, what) => {
+        if (!list || !list.length) return "";
+        const shown = list.slice(0, 3).map(t => `“${t}”`).join(", ");
+        return `, ${shown}${list.length > 3 ? ` and ${list.length - 3} more` : ""} ${what}`;
+      };
+      const missed = (j.unresolved || []).length;
+      const failed = (j.failed || []).length;
+      msg += named(j.unresolved, "not in your library");
+      msg += named(j.failed, "refused by Roon");
+      showToast(msg, (missed || failed) ? "error" : null, TOAST_REPORT_MS);
+      historySelectMode = false;
+      historySelected = [];
+      // Now, not when the reload lands: the send has finished and the controls
+      // have to say so immediately, or they sit there lit over nothing.
+      repaintHistory();
+      setTimeout(loadQueue, 600);
+    } catch (e) {
+      showToast("Couldn't reach the extension", "error");
+    } finally {
+      for (const b of document.querySelectorAll(".q-hist-act")) b.disabled = false;
+    }
+  }
+
+  // Add a played track back, after the current one.
+  async function playHistoryNext(h) {
+    const name = h.track || "this track";
+    if (!await confirmDialog(`Play "${name}" next?`)) return;
+    try {
+      const r = await fetch("/api/queue/play-history-next", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // Re-read at tap time, exactly as the live rows do: these rows belong
+          // to whichever zone the screen is showing now.
+          zone_or_output_id: queueZoneId(),
+          track: h.track, artist: h.artist, album: h.album
+        })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        // "Not in your library" is an outcome, not a fault — a stream, or an
+        // album since removed. Saying which stops it reading as a bug.
+        showToast(j.unresolved
+          ? `Can't play "${name}" again — it isn't in your library`
+          : "Couldn't play that: " + (j.error || `HTTP ${r.status}`), "error");
+        return;
+      }
+      showToast(`Playing "${j.track || name}" next`);
+      setTimeout(loadQueue, 600);
+    } catch (e) {
+      showToast("Couldn't reach the extension", "error");
+    }
+  }
+
+  // Orphans a queue read that a newer one has overtaken. Without it two reads
+  // in flight at once (a zone change as the tab opens) each cleared the list
+  // and then BOTH appended to it — every row twice.
+  let queueSeq = 0;
+  // `silent` is the live re-read (v1.8.65): the Queue tab follows the queue as
+  // it moves — a track ending, something queued from Roon's own app, Roon Radio
+  // topping up — where it used to show what was queued when the tab opened. No
+  // "Loading queue…", nothing repainted when the answer is what is showing, the
+  // new rows swapped in whole with the scroll position kept, and a failure
+  // leaves the list alone rather than replacing it with an error.
+  async function loadQueue(opts) {
+    const silent = !!(opts && opts.silent === true);
     const zoneId = queueZoneId();
     if (!zoneId) return;
     const summary = document.getElementById("queue-summary");
     const list    = document.getElementById("queue-list");
     const empty   = document.getElementById("queue-empty");
-    summary.textContent = "Loading queue…";
-    list.innerHTML = "";
-    empty.classList.add("hidden");
+    const seq = ++queueSeq;
+    if (!silent) {
+      summary.textContent = "Loading queue…";
+      list.innerHTML = "";
+      list.__liveSig = null;
+      // The rows about to be discarded are the ones the picks point at, so the
+      // selection goes with them. Select MODE goes too: leaving it on with an
+      // empty selection shows an action bar over rows nobody has picked yet.
+      historySelectMode = false;
+      historySelected = [];
+      empty.classList.add("hidden");
+    }
     try {
       const r = await fetch(`/api/queue?zone=${encodeURIComponent(zoneId)}`);
+      if (seq !== queueSeq) return;
+      if (silent && !r.ok) return;
       const j = await r.json();
+      if (seq !== queueSeq) return;
       const items = j.items || [];
-      if (!items.length) {
+      const history = Array.isArray(j.history) ? j.history : [];
+      // The same answer as the one on screen: nothing to do.
+      const sig = JSON.stringify([zoneId, items, history]);
+      if (silent && sig === list.__liveSig) return;
+      // A re-read rebuilds the rows, and a selection points at rows. It only
+      // STARTS outside one (liveBusy), but "Select" can be tapped while it is in
+      // the air — then it waits for the selection to end rather than wiping it.
+      if (silent && historySelectMode) { window.__queueMoved(); return; }
+      historySelectMode = false;
+      historySelected = [];
+      // Built off-screen when it replaces a list the user is looking at, and
+      // swapped in at the end, so they never see it empty.
+      const out = silent ? document.createDocumentFragment() : list;
+      // Only truly empty when there is nothing either side of the divider. A
+      // queue that has run out but played twenty tracks is not an empty screen.
+      if (!items.length && !history.length) {
         summary.textContent = "";
+        if (silent) list.textContent = "";
         empty.classList.remove("hidden");
+        list.__liveSig = sig;
         return;
       }
+      empty.classList.add("hidden");
       let totalSec = 0;
       for (const it of items) if (it.length) totalSec += it.length;
-      summary.textContent = `${items.length} track${items.length === 1 ? "" : "s"} · ${fmtDuration(totalSec)} remaining`;
+      summary.textContent = items.length
+        ? `${items.length} track${items.length === 1 ? "" : "s"} · ${fmtDuration(totalSec)} remaining`
+        : "Nothing more queued";
+
+      // Above the "Now playing" divider, because that is where it happened.
+      renderQueueHistory(out, history);
 
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
@@ -5475,7 +7384,7 @@
             '<span class="q-divider-line"></span>' +
             '<span class="q-divider-label">Now playing</span>' +
             '<span class="q-divider-line"></span>';
-          list.appendChild(div);
+          out.appendChild(div);
         }
         const li = document.createElement("li");
         if (i === 0) li.classList.add("is-now");
@@ -5534,12 +7443,29 @@
           });
         }
 
-        list.appendChild(li);
+        out.appendChild(li);
       }
+      if (silent) {
+        const body = modal ? modal.querySelector(".modal-body") : null;
+        const top = body ? body.scrollTop : 0;
+        list.textContent = "";
+        list.appendChild(out);
+        if (body && body.scrollTop !== top) body.scrollTop = top;
+      }
+      list.__liveSig = sig;
     } catch (e) {
+      if (seq !== queueSeq || silent) return;
       summary.textContent = "Couldn't load queue: " + e.message;
     }
   }
+  // Called by the now-playing poll when the zone says its queue has moved.
+  function queueTabOpen() {
+    return !!(modal && !modal.classList.contains("hidden") && modal.classList.contains("tab-queue"));
+  }
+  window.__queueMoved = () => {
+    if (!queueTabOpen()) return;
+    liveWhenIdle("queue", () => { if (queueTabOpen()) loadQueue({ silent: true }); });
+  };
   function fmtDuration(secs) {
     secs = Math.max(0, Math.floor(secs || 0));
     const h = Math.floor(secs / 3600);
@@ -5553,6 +7479,8 @@
     // Track selection belongs to the album that is closing. Leaving it set
     // would arm the next album's rows with someone else's picks.
     exitTrackSelectMode();
+    albumNavTile = albumNavParent = albumNavKey = null;
+    albumDetailHeal = false;
     modal.classList.add("hidden");
     modal.classList.remove("np-mode", "tab-album", "tab-queue");
     document.body.style.overflow = "";
@@ -5562,20 +7490,421 @@
     if (typeof window.__refreshTransport === "function") window.__refreshTransport();
   }
   modal.addEventListener("click", (e) => {
-    if (e.target.closest && e.target.closest("[data-close]")) closeModal();
-  });
-  // np-mode's top-left Home button (the × is hidden there): close the modal
-  // and land on the Home screen, leaving any labels/artist view behind.
-  const modalHomeBtn = document.getElementById("modal-home-btn");
-  if (modalHomeBtn) modalHomeBtn.addEventListener("click", () => {
-    closeModal();
-    showHome();   // showHome resets labels/artist/search state itself
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !modal.classList.contains("hidden")) closeModal();
+    if (!(e.target.closest && e.target.closest("[data-close]"))) return;
+    // On Now playing a close — the backdrop round a reduced card, say — is the
+    // same as its Back: it returns to the album it replaced, if there was one.
+    if (modal.classList.contains("np-mode")) leaveNowPlaying();
+    else closeModal();
   });
 
+  // ---------------------------------------------------------------------------
+  // ALBUM VIEW: PREVIOUS / NEXT (v1.8.66).
+  //
+  // Asked for on the Roon forum: "When looking at a detail card, I'd love to be
+  // able to swipe left or right to see previous/next." Previous and next are the
+  // album tiles either side of the one the card was opened from — the same row,
+  // wall, artist page or label page — so a swipe walks the list the user was
+  // looking at. A step CLICKS that tile rather than calling openAlbum itself,
+  // because each screen opens its albums its own way (Home's tiles insist on
+  // full-library offsets, a genre wall's resolve inside the genre) and the tile
+  // is the one place that knows which.
+  //
+  // Three ways to step, one function: a sideways swipe on the card, the quiet
+  // chevrons on the cover, and the arrow keys. None of them on Now playing (the
+  // zone's screen, not a list), during a track selection, or when nothing is
+  // there that way.
+  // ---------------------------------------------------------------------------
+  // The tile the open album came from — found again by key if a live re-read
+  // replaced it with an identical one (paintRow reuses nodes, so that is rare).
+  function albumNavFrom() {
+    if (albumNavTile && albumNavTile.isConnected) return albumNavTile;
+    if (albumNavKey && albumNavParent && albumNavParent.isConnected) {
+      const again = Array.prototype.find.call(albumNavParent.children, el => el.__tileKey === albumNavKey);
+      if (again) { albumNavTile = again; return again; }
+    }
+    return null;
+  }
+  // The nearest album tile that way, passing over everything else in the list:
+  // section headings, the artist's bio, the "Play something unheard" tile,
+  // skeletons.
+  function albumNeighbour(dir) {
+    let el = albumNavFrom();
+    while (el && (el = dir > 0 ? el.nextElementSibling : el.previousElementSibling)) {
+      if (el.__albumNav && !el.classList.contains("skeleton")) return el;
+    }
+    return null;
+  }
+  function albumStepping() {
+    return !!(modal && !modal.classList.contains("hidden") && !modal.classList.contains("np-mode") &&
+              !trackSelectMode);
+  }
+  function paintAlbumSteps() {
+    const ok = albumStepping();
+    const prev = document.getElementById("modal-prev");
+    const next = document.getElementById("modal-next");
+    if (prev) prev.classList.toggle("hidden", !(ok && albumNeighbour(-1)));
+    if (next) next.classList.toggle("hidden", !(ok && albumNeighbour(+1)));
+  }
+  // Keep the list under the card on the album being looked at, so closing the
+  // card lands on it rather than on the one the walk started from. By hand,
+  // not scrollIntoView: that may scroll every ancestor that can be scrolled,
+  // and the window must never be (see pinWindow).
+  function revealTile(tile) {
+    const row = tile.parentElement;
+    if (row && row.scrollWidth > row.clientWidth + 1) {
+      const r = tile.getBoundingClientRect(), c = row.getBoundingClientRect();
+      if (r.left < c.left) row.scrollLeft -= (c.left - r.left) + 16;
+      else if (r.right > c.right) row.scrollLeft += (r.right - c.right) + 16;
+    }
+    const main = document.querySelector("main");
+    if (main) {
+      // Published on the shell (.app), so read where it is inherited: from
+      // <html> it is not set at all, and the bar overlays the top of <main>.
+      const topbar = parseFloat(getComputedStyle(main).getPropertyValue("--topbar-h")) || 0;
+      const r = tile.getBoundingClientRect(), c = main.getBoundingClientRect();
+      const top = c.top + topbar + 8, bottom = c.bottom - 120;   // clear of the bar and the transport pill
+      if (r.top < top) main.scrollTop -= (top - r.top);
+      else if (r.bottom > bottom) main.scrollTop += (r.bottom - bottom);
+    }
+  }
+  const modalBodyEl = modal ? modal.querySelector(".modal-body") : null;
+  function clearAlbumDrag() {
+    if (!modalBodyEl) return;
+    modalBodyEl.style.transform = "";
+    modalBodyEl.style.opacity = "";
+  }
+  // Play a short animation on the card that NOTHING waits for. The step
+  // itself has already happened by the time this runs: a step that waited for
+  // `onfinish` would be stranded whenever the animation clock stops — a page
+  // put in the background mid-swipe pauses every animation on it. The timer is
+  // a safety net for the same case: the card is never left drawn at the
+  // animation's first frame.
+  function animateCard(frames, ms) {
+    const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!modalBodyEl || still || typeof modalBodyEl.animate !== "function") return;
+    const a = modalBodyEl.animate(frames, { duration: ms, easing: "ease-out" });
+    setTimeout(() => {
+      try { a.cancel(); } catch (e) { /* already finished and gone — nothing to undo */ }
+    }, ms + 400);
+  }
+  function stepAlbum(dir) {
+    if (!albumStepping()) return false;
+    const to = albumNeighbour(dir);
+    if (!to) return false;
+    clearAlbumDrag();
+    // The tile's own opener: openAlbum repaints the card synchronously, and the
+    // tile becomes the one the NEXT step counts from.
+    to.click();
+    revealTile(to);
+    // The new album arrives from the side the finger came from.
+    const w = Math.round(Math.min(90, window.innerWidth * 0.25));
+    animateCard([{ transform: "translateX(" + (dir > 0 ? w : -w) + "px)", opacity: 0.4 },
+                 { transform: "translateX(0px)", opacity: 1 }], 200);
+    return true;
+  }
+  {
+    const prev = document.getElementById("modal-prev");
+    const next = document.getElementById("modal-next");
+    // stopPropagation: the cover sits inside the card, and a tap meant for the
+    // chevron is not a tap on anything under it.
+    if (prev) prev.addEventListener("click", (e) => { e.stopPropagation(); stepAlbum(-1); });
+    if (next) next.addEventListener("click", (e) => { e.stopPropagation(); stepAlbum(+1); });
+  }
+  // Nothing is open over the card. Every sheet, dialog and overlay stacks above
+  // the album view, so whatever is hit at the middle of the card's visible part
+  // says whether the album view still has the screen — one question that
+  // covers them all, including ones added later.
+  function albumViewOnTop() {
+    if (!modalBodyEl) return false;
+    const b = modalBodyEl.getBoundingClientRect();
+    const l = Math.max(b.left, 0), r = Math.min(b.right, window.innerWidth);
+    const t = Math.max(b.top, 0), btm = Math.min(b.bottom, window.innerHeight);
+    if (r <= l || btm <= t) return false;
+    const hit = document.elementFromPoint((l + r) / 2, (t + btm) / 2);
+    return !!hit && modal.contains(hit);
+  }
+  // The arrow keys, while the album view itself has the keyboard — not from a
+  // text field, and not with a sheet or dialog open over the card: the album
+  // would change underneath something that was opened about it.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!albumStepping()) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (t && t !== document && t !== document.body && !modal.contains(t)) return;
+    if (!albumViewOnTop()) return;
+    if (stepAlbum(e.key === "ArrowRight" ? +1 : -1)) e.preventDefault();
+  });
+  // The swipe. Passive listeners, so vertical scrolling of the card is never
+  // held up: the gesture is only claimed once it has gone clearly sideways,
+  // and then only followed (a third of the distance, as a cue), never
+  // prevented. Not from the screen's edges (the system's own back gestures
+  // start there), not from a control that drags (a slider), and not from
+  // inside something that scrolls sideways itself.
+  if (modalBodyEl) {
+    const EDGE = 24;
+    let sx = 0, sy = 0, axis = null, tracking = false;
+    const scrollsSideways = (el) => {
+      for (; el && el !== modalBodyEl; el = el.parentElement) {
+        if (el.scrollWidth > el.clientWidth + 1) {
+          const ox = getComputedStyle(el).overflowX;
+          if (ox === "auto" || ox === "scroll") return true;
+        }
+      }
+      return false;
+    };
+    const springBack = () => {
+      const from = modalBodyEl.style.transform;
+      if (!from) return;
+      const fromOpacity = modalBodyEl.style.opacity || "1";
+      // Cleared first: the animation draws over the inline style while it
+      // runs, and when it ends (or is cut short) the card is where it belongs.
+      clearAlbumDrag();
+      animateCard([{ transform: from, opacity: fromOpacity },
+                   { transform: "translateX(0px)", opacity: 1 }], 160);
+    };
+    modalBodyEl.addEventListener("touchstart", (e) => {
+      // A second finger ends the swipe: put back a card the first one moved.
+      if (tracking) springBack();
+      tracking = false;
+      if (e.touches.length !== 1 || !albumStepping()) return;
+      const t = e.touches[0];
+      if (t.clientX < EDGE || t.clientX > window.innerWidth - EDGE) return;
+      const tag = e.target && e.target.tagName;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag || "") || scrollsSideways(e.target)) return;
+      sx = t.clientX; sy = t.clientY; axis = null; tracking = true;
+    }, { passive: true });
+    modalBodyEl.addEventListener("touchmove", (e) => {
+      if (!tracking || e.touches.length !== 1) return;
+      const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+      if (!axis && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+        axis = Math.abs(dx) > Math.abs(dy) * 1.3 ? "x" : "y";
+      }
+      if (axis !== "x") return;
+      // Followed only towards a neighbour that exists: dragging at an end of the
+      // list does nothing, which says so as plainly as a bounce would.
+      if (!albumNeighbour(dx < 0 ? +1 : -1)) { clearAlbumDrag(); return; }
+      modalBodyEl.style.transform = "translateX(" + Math.round(dx / 3) + "px)";
+      modalBodyEl.style.opacity = String(Math.max(0.55, 1 - Math.abs(dx) / 700));
+    }, { passive: true });
+    modalBodyEl.addEventListener("touchend", (e) => {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      const far = Math.abs(dx) > Math.max(60, window.innerWidth * 0.18) && Math.abs(dx) > Math.abs(dy) * 1.3;
+      if (axis === "x" && far && stepAlbum(dx < 0 ? +1 : -1)) return;
+      springBack();
+    }, { passive: true });
+    modalBodyEl.addEventListener("touchcancel", () => {
+      if (!tracking) return;
+      tracking = false;
+      springBack();
+    }, { passive: true });
+  }
+  // np-mode's top-left Back (v1.8.75; it was Home, which always went Home):
+  // back to the screen before the mini player was tapped — the album that was
+  // open, or the screen under the modal, which closing leaves exactly as it was.
+  function leaveNowPlaying() {
+    const back = npReturn;
+    npReturn = null;
+    closeModal();
+    if (!back) return;
+    // Reopened as if from its tile, so previous / next, the swipe and the
+    // arrow keys still walk the list it came from.
+    pendingNavTile = back.navTile && back.navTile.isConnected ? back.navTile : null;
+    try { openAlbum(back.album, back.opts); }
+    finally { pendingNavTile = null; }
+    if (!albumNavTile && back.navParent) {
+      albumNavTile = back.navTile; albumNavParent = back.navParent; albumNavKey = back.navKey;
+      paintAlbumSteps();
+    }
+    // And scrolled back to where it was, once the track list is long enough
+    // to hold that position again (it loads after the panel opens).
+    const want = back.scrollTop || 0;
+    if (want > 0) {
+      const bodyEl = modal.querySelector(".modal-body");
+      let tries = 0;
+      const settle = () => {
+        // Stop if the panel was closed or something else was opened meanwhile.
+        if (!bodyEl || modal.classList.contains("hidden") || currentAlbum !== back.album) return;
+        if (bodyEl.scrollHeight - bodyEl.clientHeight >= want) { bodyEl.scrollTop = want; return; }
+        if (++tries < 20) setTimeout(settle, 100);
+      };
+      setTimeout(settle, 50);
+    }
+  }
+  const modalHomeBtn = document.getElementById("modal-home-btn");
+  if (modalHomeBtn) modalHomeBtn.addEventListener("click", leaveNowPlaying);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || modal.classList.contains("hidden")) return;
+    if (modal.classList.contains("np-mode")) leaveNowPlaying();
+    else closeModal();
+  });
+
+  // The album view's corner button names what it does at each size: a back
+  // chevron while the album view fills the screen, an × from 720px up, where it
+  // is a card over the page (the glyph swaps in CSS at the same width).
+  {
+    const closeBtn = document.getElementById("modal-close-btn");
+    const card = window.matchMedia ? window.matchMedia("(min-width: 720px)") : null;
+    const label = () => {
+      if (!closeBtn) return;
+      const word = card && card.matches ? "Close" : "Back";
+      closeBtn.setAttribute("aria-label", word);
+      closeBtn.title = word;
+    };
+    label();
+    if (card) {
+      if (card.addEventListener) card.addEventListener("change", label);
+      else if (card.addListener) card.addListener(label);   // older Safari
+    }
+    // Now playing's corner button: on a desktop — a large screen driven by a
+    // mouse — it CLOSES the screen (×), full size or reduced; on a phone or a
+    // tablet it goes BACK (‹). The same test as the CSS that swaps the glyph,
+    // and the same action either way (leaveNowPlaying).
+    const npBtn = document.getElementById("modal-home-btn");
+    const desktop = window.matchMedia
+      ? window.matchMedia("(min-width: 1024px) and (hover: hover) and (pointer: fine)") : null;
+    const npLabel = () => {
+      if (!npBtn) return;
+      const word = desktop && desktop.matches ? "Close" : "Back";
+      npBtn.setAttribute("aria-label", word);
+      npBtn.title = word;
+    };
+    npLabel();
+    if (desktop) {
+      if (desktop.addEventListener) desktop.addEventListener("change", npLabel);
+      else if (desktop.addListener) desktop.addListener(npLabel);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // NOW PLAYING, REDUCED (v1.8.75) — large screens only.
+  //
+  // On a big desktop the full-screen Now playing hides everything. Reduce size
+  // turns it into a card the size of the album view's; the same button then
+  // reads "Full size". The card is dragged by its top strip (not by its
+  // buttons, its tabs or anything inside the body). The choice is remembered
+  // on this device; the position is not — every opening starts centred.
+  // ---------------------------------------------------------------------------
+  {
+    const sizeBtn = document.getElementById("modal-np-size-btn");
+    const panel = modal.querySelector(".modal-panel");
+    const SIZE_KEY = "rra-np-reduced";
+    const large = window.matchMedia ? window.matchMedia("(min-width: 1200px) and (min-height: 700px)") : null;
+    let reduced = false;
+    try { reduced = localStorage.getItem(SIZE_KEY) === "1"; }
+    catch (e) { /* storage blocked — full size, the default */ }
+    let dx = 0, dy = 0;
+
+    const place = () => { if (panel) panel.style.transform = (dx || dy) ? "translate(" + dx + "px," + dy + "px)" : ""; };
+    function paintSize() {
+      const on = reduced && !!(large && large.matches) && modal.classList.contains("np-mode");
+      if (modal.classList.contains("np-reduced") !== on) modal.classList.toggle("np-reduced", on);
+      if (!on) { dx = 0; dy = 0; place(); }
+      if (sizeBtn) {
+        sizeBtn.setAttribute("aria-pressed", on ? "true" : "false");
+        sizeBtn.setAttribute("aria-label", on ? "Full size" : "Reduce size");
+        sizeBtn.title = on ? "Full size" : "Reduce size";
+      }
+    }
+    if (sizeBtn) sizeBtn.addEventListener("click", () => {
+      reduced = !modal.classList.contains("np-reduced");
+      try { localStorage.setItem(SIZE_KEY, reduced ? "1" : "0"); }
+      catch (e) { /* storage blocked — it still applies for this visit */ }
+      dx = 0; dy = 0;
+      paintSize();
+    });
+    if (large) {
+      if (large.addEventListener) large.addEventListener("change", paintSize);
+      else if (large.addListener) large.addListener(paintSize);
+    }
+    // Opening and closing come and go through the classes on the modal, so the
+    // state follows them: a fresh opening is centred.
+    // Every write below is guarded by a check that it CHANGES something:
+    // classList.remove() rewrites the class attribute even when the token is
+    // absent, and that write would wake this observer again, for ever.
+    new MutationObserver(() => {
+      if (modal.classList.contains("hidden") || !modal.classList.contains("np-mode")) {
+        if (modal.classList.contains("np-reduced")) modal.classList.remove("np-reduced");
+        if (dx || dy) { dx = 0; dy = 0; place(); }
+      } else if (reduced && !modal.classList.contains("np-reduced") && large && large.matches) {
+        paintSize();
+      }
+    }).observe(modal, { attributes: true, attributeFilter: ["class"] });
+
+    // Drag by the top strip: a press on the panel above its body's content —
+    // never on a button, a tab or anything that is itself interactive.
+    const STRIP = 56;
+    let drag = null;
+    if (panel) panel.addEventListener("pointerdown", (e) => {
+      if (!modal.classList.contains("np-reduced") || e.button !== 0) return;
+      if (e.target.closest("button, a, input, select, .modal-tabs, [role='button']")) return;
+      const box = panel.getBoundingClientRect();
+      if (e.clientY - box.top > STRIP) return;
+      drag = { id: e.pointerId, x: e.clientX - dx, y: e.clientY - dy,
+               baseLeft: box.left - dx, baseTop: box.top - dy, w: box.width, h: box.height };
+      panel.classList.add("is-dragging");
+      try { panel.setPointerCapture(e.pointerId); } catch (err) { /* capture is a nicety; the move handler still works */ }
+      e.preventDefault();
+    });
+    if (panel) panel.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      // Kept wholly on screen, so its corner buttons can never be dragged out
+      // of reach.
+      const minX = -drag.baseLeft, maxX = Math.max(minX, window.innerWidth - drag.baseLeft - drag.w);
+      const minY = -drag.baseTop,  maxY = Math.max(minY, window.innerHeight - drag.baseTop - drag.h);
+      dx = Math.max(minX, Math.min(maxX, e.clientX - drag.x));
+      dy = Math.max(minY, Math.min(maxY, e.clientY - drag.y));
+      place();
+    });
+    const endDrag = (e) => {
+      if (!drag || (e && e.pointerId !== drag.id)) return;
+      drag = null;
+      if (panel) panel.classList.remove("is-dragging");
+    };
+    if (panel) {
+      panel.addEventListener("pointerup", endDrag);
+      panel.addEventListener("pointercancel", endDrag);
+    }
+    paintSize();
+  }
+
+  // The album view heals itself (v1.8.68). An error line or a "your Roon
+  // library changed" note says the list this album was opened from has gone out
+  // of date. When the library watch re-reads the library the snapshot revision
+  // moves, and the album is asked for again — the server finds it by identity
+  // in the fresh snapshot — rather than waiting for someone to close and reopen
+  // it, which is what the note used to have to tell them to do.
+  function healAlbumDetail() {
+    liveWhenIdle("album-heal", () => {
+      if (!albumDetailHeal || !currentAlbum || !modal ||
+          modal.classList.contains("hidden") || modal.classList.contains("np-mode")) return;
+      const album = currentAlbum;
+      fetchAlbumDetail(album).catch(err => {
+        if (album !== currentAlbum) return;
+        modalActs.innerHTML = `<div class="modal-error">${escapeHtml(err.message)}</div>`;
+        markAlbumForHeal();
+      });
+    });
+  }
+  onLive((changed) => {
+    if (albumDetailHeal && changed.has("snapshot")) healAlbumDetail();
+  });
+  // The answer on screen is out of date. If the library was re-read while it
+  // was on its way, the revision moved before this flag went up — the listener
+  // above heard it with nothing to heal, and will not hear it again until the
+  // NEXT library change. So compare against the revision it was asked under.
+  function markAlbumForHeal() {
+    albumDetailHeal = true;
+    if (liveStamp(["snapshot"]) !== albumDetailAskedAt) healAlbumDetail();
+  }
+
   async function fetchAlbumDetail(album) {
+    albumDetailHeal = false;   // set again below if this answer is out of date too
+    albumDetailAskedAt = liveStamp(["snapshot"]);
     // Send the album's identity so the server can detect a stale offset
     // (library changed since the tile rendered) and relocate — or 409 —
     // instead of returning whatever album now sits at that position.
@@ -5646,10 +7975,28 @@
       first = false;
     }
     const overflow = available.slice(ROW_ACTIONS);
-    if (overflow.length) {
-      modalActs.appendChild(buildOverflowMenu(
-        overflow.map(k => ({ label: labels[k], onClick: (b) => invoke(k, b) })),
-        { label: "More playback actions" }));
+    const menuItems = overflow.map(k => ({ label: labels[k], onClick: (b) => invoke(k, b) }));
+    // Listen later (v1.8.67), under the same ⋯ as Next / Shuffle / Radio. Put
+    // aside under ROON's strings for the album — the ones the server just
+    // answered with — so the entry resolves straight back to this record.
+    const laterTitle = (j.album && j.album.title) || album.title || "";
+    const laterArtist = (j.album && j.album.subtitle) || album.subtitle || "";
+    if (available.length && laterTitle) {
+      let onList = !!j.listen_later;
+      const laterLabel = () => (onList ? "Remove from Listen later" : "Listen later");
+      menuItems.push({
+        label: laterLabel(),
+        onClick: async (b) => {
+          const got = await setListenLater({ title: laterTitle, artist: laterArtist }, !onList);
+          if (got === null) return;   // not saved — already reported
+          onList = got;
+          b.textContent = laterLabel();
+          showToast(onList ? "Put aside in Listen later" : "Taken off Listen later", "ok");
+        }
+      });
+    }
+    if (menuItems.length) {
+      modalActs.appendChild(buildOverflowMenu(menuItems, { label: "More actions" }));
     }
     if (!available.length) {
       // "No playback actions available" was true and useless — it described
@@ -5666,6 +8013,7 @@
       err.textContent = "Roon offered no playback options for this album." +
                         libraryChangingAdvice(!!j.library_moved);
       modalActs.appendChild(err);
+      markAlbumForHeal();
     }
 
     // Tracks — each row is tappable and reveals Play now / Queue for that
@@ -5685,6 +8033,7 @@
         : "Roon sent an incomplete track list.") +
         libraryChangingAdvice(!!j.library_moved);
       modalActs.appendChild(note);
+      markAlbumForHeal();
     }
     if (trackList.length === 0) {
       if (!j.partial && j.library_moved) {
@@ -5693,6 +8042,7 @@
         note.textContent = "Roon returned no tracks for this album." +
                            libraryChangingAdvice(!!j.library_moved);
         modalActs.appendChild(note);
+        markAlbumForHeal();
       }
       trackWrap.classList.add("hidden");
     } else {
@@ -5758,6 +8108,7 @@
     // the row expanded under a set of circles reads as both at once.
     modalTracks.querySelectorAll(".t-row.is-open").forEach(closeTrackRow);
     updateTrackSelection();
+    paintAlbumSteps();   // no stepping away from a selection being made
   }
 
   function exitTrackSelectMode() {
@@ -5773,6 +8124,7 @@
       });
     }
     refreshSelectMenu("tracks", 0);
+    paintAlbumSteps();
   }
 
   function toggleTrackSelected(li, track, index) {
@@ -5915,7 +8267,10 @@
     if (!album) return;
     const params = new URLSearchParams({
       title:  album.title    || "",
-      artist: album.subtitle || ""
+      artist: album.subtitle || "",
+      // This screen shows the full release date, so it asks the server to look
+      // the day up if it has only the year (the other callers do not wait).
+      day:    "1"
     });
     const r = await fetch(`/api/album/extras?${params}`);
     if (!r.ok) return;
@@ -5925,12 +8280,63 @@
     renderExtras(j, album);
   }
 
+  // "2026-09-25" as the device writes a date ("25 September 2026" or
+  // "September 25, 2026"), "2026-09" as a month, "2026" as it is. Read as UTC,
+  // because a bare date parsed in a timezone west of Greenwich is the evening
+  // before. "" for anything else.
+  function formatReleaseDate(s) {
+    const m = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/.exec(String(s || ""));
+    if (!m) return "";
+    if (!m[2]) return m[1];
+    const opts = { year: "numeric", month: "long", timeZone: "UTC" };
+    if (m[3]) opts.day = "numeric";
+    const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, m[3] ? Number(m[3]) : 1));
+    // "2026-13-40" would roll over into another month rather than fail.
+    if (isNaN(d.getTime()) || d.getUTCMonth() !== Number(m[2]) - 1 ||
+        (m[3] && d.getUTCDate() !== Number(m[3]))) return m[1];
+    try { return d.toLocaleDateString(undefined, opts); }
+    catch (e) { return m[1]; /* no Intl on this device: the year is still right */ }
+  }
+
+  // The open album's date, re-read when the release days move (v1.8.65). The
+  // page waits 1.5 s for a day lookup and shows the year if it is not back by
+  // then; this is how the day reaches the page once it lands, instead of on
+  // the next visit. Only ever rewrites the date renderExtras drew — never adds
+  // one (renderExtras may still be about to), and never replaces a date with
+  // nothing.
+  async function refreshModalReleaseDate(album) {
+    if (!album || !modalSub || !modalSub.querySelector(".modal-release-date")) return;
+    try {
+      const params = new URLSearchParams({ title: album.title || "", artist: album.subtitle || "" });
+      const r = await fetch("/api/album/release-date?" + params);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (album !== currentAlbum) return;
+      const text = formatReleaseDate(j && j.release_date);
+      const el = modalSub.querySelector(".modal-release-date");
+      if (el && text && el.textContent !== " · " + text) el.textContent = " · " + text;
+    } catch (e) {
+      // Offline, or the server restarting: the date shown stays, and the next
+      // change asks again.
+    }
+  }
+  onLive((changed) => {
+    if (!changed.has("dates") && !changed.has("library")) return;
+    if (!modal || modal.classList.contains("hidden") || !currentAlbum) return;
+    refreshModalReleaseDate(currentAlbum);
+  });
+
   function renderExtras(extras, album) {
-    // 1. Append year + label to subtitle line (artist button already present)
-    const yearToShow = extras.year || (extras.album && extras.album.year ? String(extras.album.year) : "");
+    // 1. Append the release date + label to subtitle line (artist button
+    // already present). The date is the one the Release date sort orders this
+    // album by, to the day wherever one is known (v1.8.62); the year the page
+    // showed before is the fallback.
+    const yearToShow = formatReleaseDate(extras.release_date) || extras.year ||
+      (extras.album && extras.album.year ? String(extras.album.year) : "");
     if (yearToShow) {
       const yearSpan = document.createElement("span");
-      yearSpan.className = "modal-subtitle-year";
+      // modal-release-date: the one span refreshModalReleaseDate() may rewrite.
+      yearSpan.className = "modal-subtitle-year modal-release-date";
       yearSpan.textContent = " · " + yearToShow;
       modalSub.appendChild(yearSpan);
     }
@@ -5990,6 +8396,30 @@
         srcLink.classList.remove("hidden");
       } else {
         srcLink.classList.add("hidden");
+      }
+
+      // WHOSE WORDS THESE ARE, when that is not the same as where the link
+      // goes. A Pitchfork-reviewed album now shows WIKIPEDIA's description
+      // (their own prose never leaves the server), and the only link beside it
+      // says "Read the full review on Pitchfork" — which would read as though
+      // the paragraph above it were Pitchfork's. It is not, and one line saying
+      // so is the difference between a citation and a misattribution.
+      const textSrc = document.getElementById("album-bio-text-source");
+      if (textSrc) {
+        const ds = extras.album.description_source;
+        const show = !!(extras.album.description && ds && ds !== extras.album.source);
+        if (show && extras.album.description_url) {
+          textSrc.innerHTML = "";
+          const a = document.createElement("a");
+          a.href = extras.album.description_url;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = "From " + ds;
+          textSrc.appendChild(a);
+        } else if (show) {
+          textSrc.textContent = "From " + ds;
+        }
+        textSrc.classList.toggle("hidden", !show);
       }
 
       section.classList.remove("hidden");
@@ -6335,12 +8765,11 @@
       if (e.key === "Escape") closeSearch();
     });
 
-    // The X clears the text and keeps the field open, so a retype needs no
-    // second tap on the glass. Closing is the tap-away gesture.
     // The X does the whole job in one tap: drop the results, put back the
     // screen underneath, and collapse the field to the glass. It used to clear
     // and keep the caret, so a second tap was needed to close and the wall was
-    // left blank in between.
+    // left blank in between. (Rouen's X clears first and closes on a second
+    // tap; this build keeps the one-tap close the owner asked for in 0.4.33.)
     clear.addEventListener("click", () => {
       closeSearch();
     });
@@ -6453,7 +8882,7 @@
       markActive();
       close();
       if (window.__showWall) window.__showWall();   // reveal the album grid (leave Home)
-      updateCountReadout(null);
+      updateCountReadout(null, true);
       loadRandom();
     }
     window.__applyFilter = applyFilter;   // used by the Home "Browse by genre" cards
@@ -6680,6 +9109,8 @@
     }
 
     function exitLabels() {
+      closeLabelSearch(false);
+      showLabelTools(false);
       mode = null;
       labelsActive = false;
       _lastLabelCount = -1;
@@ -6714,6 +9145,7 @@
       if (labelUnmergeSheet) labelUnmergeSheet.classList.add("hidden");
       if (labelsBar) labelsBar.classList.add("hidden");
       labelsBtn.classList.remove("is-active");
+      showLabelTools(false);   // the borrowing view sets its own bar
       // Stops the list re-poll (guarded on mode === "list") from repainting
       // label tiles over the borrowing view.
       mode = null;
@@ -6728,6 +9160,7 @@
       labelsActive        = true;
       labelsBtn.classList.add("is-active");
       if (labelsBar) labelsBar.classList.toggle("hidden", state.barHidden);
+      showLabelTools(state.mode === "list");
     }
     window.__parkLabels   = parkLabels;
     window.__unparkLabels = unparkLabels;
@@ -6772,7 +9205,7 @@
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "logo-candidate-btn";
-          btn.title = c.title || "";
+          btn.title = c.title ? "Use this logo — " + c.title : "Use this logo";
           const img = document.createElement("img");
           img.src = c.img;
           img.alt = c.title || "";
@@ -6850,13 +9283,14 @@
         exitAlbumSelectMode(); closeLabelLogoSheet(); currentLabelName = null; currentLabelLogoUrl = null;
       }
       const restoreScroll = !isRepoll && _labelsScrollSaved > 0;
+      if (!isRepoll && window.__abandonRandomDraw) window.__abandonRandomDraw();
       mode = "list";
       labelsActive = true;
       leaveLibraryWall();   // labels own the shared grid now — stop the wall's infinite scroll
-      clearWallGridSizing();   // labels grid uses its own layout, not the wall's phone-fit
       { const _hv = document.getElementById("home-view"); if (_hv) _hv.classList.add("hidden"); }
       grid.classList.remove("hidden");
       if (window.__setTopbarNav) window.__setTopbarNav(true, false, false);   // Back (to Home), no Refresh, no search
+      showLabelTools(true);   // the label list's own search and order
       labelsBtn.classList.add("is-active");
       if (labelsBar) labelsBar.classList.add("hidden");
       setBanner(null);
@@ -6906,11 +9340,16 @@
         // Only re-render tiles on first load or when the scan finishes.
         // During an active scan, just update the count text so the grid stays
         // stable — no flash every 5 s as new labels trickle in.
+        // Kept current on every poll, so the search covers labels found since
+        // the first paint; the TILES still only redraw as before.
+        labelsAll = labels;
+        labelsScanning = !!j.scanning;
         if (_lastLabelCount <= 0 || !j.scanning) {
-          renderLabelTiles(labels);
-          const oldLink = grid.querySelector(".scan-log-link");
-          if (oldLink) oldLink.remove();
-          if (!j.scanning) grid.appendChild(makeScanLogLink());
+          // A deep link lands on one label: a filter that would hide it goes.
+          if (_labelsScrollTarget) closeLabelSearch(false);
+          // The scan's last answer always redraws — an equal count is not the
+          // same labels, and the filter makes an equal count likelier.
+          paintLabelList(!j.scanning);
           if (_labelsScrollTarget && mainEl) {
             // Arrived via a deep-link (album view / search chip). Scroll the grid
             // to that label's tile so "back" lands on it instead of the top.
@@ -6940,6 +9379,126 @@
         setTimeout(() => { if (mode === "list") showLabelsList(true); }, 10000);
       }
     }
+
+    // ----- The label list's search and order (v1.8.77) -----
+    //
+    // A filter over the labels already fetched, so typing never asks the
+    // server anything. The order is "# to Z" — names that do not start with a
+    // letter (digits, punctuation) first, then A to Z — or exactly the
+    // reverse, remembered per device.
+    let labelsAll = [];
+    let labelsScanning = false;
+    const LABEL_DIR_KEY = "rra-label-dir";
+    let labelsDesc = false;
+    try { labelsDesc = localStorage.getItem(LABEL_DIR_KEY) === "desc"; }
+    catch (e) {} // localStorage optional — # to Z is the default
+    const labelTools   = document.getElementById("labels-tools");
+    const labelOrderBtn = document.getElementById("labels-order");
+    const labelOrderTxt = document.getElementById("labels-order-txt");
+    const labelSearchOpen = document.getElementById("labels-search-open");
+    const labelSearchRow  = document.getElementById("labels-search-row");
+    const labelSearchIn   = document.getElementById("labels-search-input");
+    const labelSearchX    = document.getElementById("labels-search-clear");
+    const topbarEl = document.querySelector(".topbar");
+
+    const foldName = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const startsWithLetter = (t) => /^\p{L}/u.test(String(t || "").trim());
+    function labelSort(a, b) {
+      const ba = startsWithLetter(a.title) ? 1 : 0, bb = startsWithLetter(b.title) ? 1 : 0;
+      const c = ba !== bb ? ba - bb
+        : String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base", numeric: true });
+      return labelsDesc ? -c : c;
+    }
+
+    function paintLabelOrder() {
+      if (labelOrderTxt) labelOrderTxt.textContent = labelsDesc ? "Z–#" : "#–Z";
+      if (labelOrderBtn) {
+        const now = labelsDesc ? "Z to #" : "# to Z", next = labelsDesc ? "# to Z" : "Z to #";
+        labelOrderBtn.setAttribute("aria-label", "Labels " + now + ". Show " + next);
+        labelOrderBtn.setAttribute("title", "Show " + next);
+        labelOrderBtn.setAttribute("aria-pressed", String(labelsDesc));
+      }
+    }
+
+    // force: the filter or the order changed, so the tiles differ even when
+    // their COUNT does not (renderLabelTiles skips a redraw on an equal count).
+    function paintLabelList(force) {
+      if (mode !== "list") return;
+      const q = labelSearchIn ? foldName(labelSearchIn.value.trim()) : "";
+      const shown = labelsAll
+        .filter(lb => !q || foldName(lb.title).indexOf(q) > -1)
+        .sort(labelSort);
+      if (force) _lastLabelCount = -1;
+      renderLabelTiles(shown);
+      const oldEmpty = grid.querySelector(".labels-empty");
+      if (oldEmpty) oldEmpty.remove();
+      if (!shown.length && q) {
+        const p = document.createElement("p");
+        p.className = "labels-empty";
+        p.textContent = "No labels match \u201c" + labelSearchIn.value.trim() + "\u201d.";
+        grid.appendChild(p);
+      }
+      const oldLink = grid.querySelector(".scan-log-link");
+      if (oldLink) oldLink.remove();
+      if (!labelsScanning) grid.appendChild(makeScanLogLink());
+    }
+
+    function openLabelSearch() {
+      if (!labelSearchRow) return;
+      labelSearchRow.classList.add("open");
+      if (labelTools) labelTools.classList.add("is-open");
+      if (topbarEl) topbarEl.classList.add("labels-searching");
+      if (labelSearchOpen) { labelSearchOpen.classList.add("hidden"); labelSearchOpen.setAttribute("aria-expanded", "true"); }
+      if (labelSearchIn) labelSearchIn.focus();
+    }
+    // Closing always clears, as Home's does: a field that reopens holding an
+    // old query over an unfiltered list is a state that cannot be read.
+    function closeLabelSearch(repaint) {
+      if (!labelSearchRow) return;
+      const had = labelSearchIn && labelSearchIn.value.trim();
+      if (labelSearchIn) { labelSearchIn.value = ""; labelSearchIn.blur(); }
+      labelSearchRow.classList.remove("open");
+      if (labelTools) labelTools.classList.remove("is-open");
+      if (topbarEl) topbarEl.classList.remove("labels-searching");
+      if (labelSearchOpen) { labelSearchOpen.classList.remove("hidden"); labelSearchOpen.setAttribute("aria-expanded", "false"); }
+      if (repaint && had) paintLabelList(true);
+    }
+    function showLabelTools(on) {
+      if (!labelTools) return;
+      labelTools.classList.toggle("hidden", !on);
+      // The title only steps aside while the field is visible to take its place.
+      if (topbarEl) topbarEl.classList.toggle("labels-searching", !!on && !!labelSearchRow && labelSearchRow.classList.contains("open"));
+    }
+    window.__showLabelTools = showLabelTools;
+    paintLabelOrder();
+
+    if (labelSearchOpen) labelSearchOpen.addEventListener("click", (e) => { e.stopPropagation(); openLabelSearch(); });
+    if (labelSearchIn) {
+      let t = null;
+      labelSearchIn.addEventListener("input", () => {
+        clearTimeout(t);
+        t = setTimeout(() => { if (mainEl) mainEl.scrollTop = 0; paintLabelList(true); }, 80);
+      });
+      labelSearchIn.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeLabelSearch(true);
+        if (e.key === "Enter") labelSearchIn.blur();   // put the keyboard away, keep the filter
+      });
+    }
+    // The X as Home's: holding text it clears and stays open; empty, it closes.
+    if (labelSearchX) labelSearchX.addEventListener("click", () => {
+      if (!labelSearchIn || !labelSearchIn.value.trim()) { closeLabelSearch(true); return; }
+      labelSearchIn.value = "";
+      paintLabelList(true);
+      labelSearchIn.focus();
+    });
+    if (labelOrderBtn) labelOrderBtn.addEventListener("click", () => {
+      labelsDesc = !labelsDesc;
+      try { localStorage.setItem(LABEL_DIR_KEY, labelsDesc ? "desc" : "asc"); }
+      catch (e) {} // localStorage optional — the order still holds for this session
+      paintLabelOrder();
+      if (mainEl) mainEl.scrollTop = 0;
+      paintLabelList(true);
+    });
 
     function setLabelTextArt(artEl, title) {
       artEl.className = "album-art-wrap is-label-text";
@@ -6986,7 +9545,7 @@
           const mergedEl = document.createElement("div");
           mergedEl.className = "album-merged-info";
           mergedEl.textContent = lb.mergedFrom.length + " merged";
-          mergedEl.title = "Tap to manage merged labels";
+          mergedEl.title = "Manage merged labels";
           mergedEl.addEventListener("click", (e) => {
             e.stopPropagation();
             if (!labelsSelectMode) showUnmergeSheet(lb.title, lb.mergedFrom);
@@ -7033,7 +9592,6 @@
       mode = "albums";
       labelsActive = true;
       leaveLibraryWall();   // label albums own the shared grid now — stop the wall's infinite scroll
-      clearWallGridSizing();   // label-album grid uses its own layout, not the wall's phone-fit
       { const _hv = document.getElementById("home-view"); if (_hv) _hv.classList.add("hidden"); }
       grid.classList.remove("hidden");
       if (window.__setTopbarNav) window.__setTopbarNav(true, false, false);   // Back (to Home), no Refresh, no search
@@ -7043,35 +9601,67 @@
       setBanner(null);
       setCountText(name);
       renderSkeletons(computeAlbumCount());
+      await readLabelAlbums(name, false);
+    }
+
+    // v1.8.65: the label page follows the library and the label scan while it
+    // is open — an album filed under the label as the scan reaches it appears
+    // on the page, with no Back and in again. `live` is that re-read: the
+    // scroll kept, unchanged tiles kept, and a failure leaving the page as is.
+    const LABEL_ALBUMS_DEPS = ["labels", "library"];
+    let labelAlbumsStamp = null;
+    let labelAlbumsSeq = 0;
+    const labelAlbumsOnScreen = () => labelsActive && mode === "albums" && !!currentLabelName &&
+      !(window.__artistViewActive && window.__artistViewActive());
+    async function readLabelAlbums(name, live) {
+      const seq = ++labelAlbumsSeq;
+      const stamp = liveStamp(LABEL_ALBUMS_DEPS);
+      // A label switched to (or away from) while this was in the air owns the
+      // grid now; its answer must not be painted over by this one.
+      const current = () => seq === labelAlbumsSeq && labelsActive && mode === "albums" &&
+                            currentLabelName === name;
       try {
         const r = await fetch("/api/label-albums?label=" + encodeURIComponent(name) +
                               "&order=" + encodeURIComponent(labelOrder()));
         const j = await r.json();
-        if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+        if (!current()) return;
+        if (!r.ok) {
+          if (live) return;
+          throw new Error(j.error || ("HTTP " + r.status));
+        }
+        labelAlbumsStamp = stamp;
         currentLabelLogoUrl = j.logo_url || null; // expose to logo picker
         const albums = j.albums || [];
         if (!albums.length) {
+          if (live) return;   // never blank a page mid-read; the next change says more
           grid.innerHTML = "";
           setBanner("No albums found for this label.", false);
           return;
         }
-        setCountText(name);
-        grid.innerHTML = "";
-        const frag = document.createDocumentFragment();
-        for (const a of albums) {
-          // Label albums carry FULL-LIBRARY offsets; without the explicit
-          // filter:null override a lingering genre/tag filter would resolve
-          // them against the wrong (filtered) list — the offset misses, and
-          // the stale-offset defense correctly refuses with "library changed"
-          // even though nothing did. (Same override Home rows use.)
-          frag.appendChild(buildAlbumTile(a, () => openAlbum(a, { filter: null })));
-        }
-        grid.appendChild(frag);
+        if (!live) setCountText(name);
+        const top = mainEl ? mainEl.scrollTop : 0;
+        // Label albums carry FULL-LIBRARY offsets; without the explicit
+        // filter:null override a lingering genre/tag filter would resolve
+        // them against the wrong (filtered) list — the offset misses, and
+        // the stale-offset defense correctly refuses with "library changed"
+        // even though nothing did. (Same override Home rows use.)
+        paintRow(grid, albums.map(a => ({
+          key: "label|" + albumTileKey(a),
+          build: () => buildAlbumTile(a, () => openAlbum(a, { filter: null })),
+        })));
+        if (live && mainEl && mainEl.scrollTop !== top) mainEl.scrollTop = top;
       } catch (e) {
+        if (live || !current()) return;
         grid.innerHTML = "";
         setBanner("Couldn't load albums: " + e.message, true);
       }
     }
+    onLive(() => {
+      if (!labelAlbumsOnScreen() || labelAlbumsStamp === liveStamp(LABEL_ALBUMS_DEPS)) return;
+      liveWhenIdle("label-albums", () => {
+        if (labelAlbumsOnScreen()) readLabelAlbums(currentLabelName, true);
+      });
+    });
 
     if (labelsBack) labelsBack.addEventListener("click", () => showLabelsList());
 
@@ -7152,6 +9742,25 @@
     }
   }
 
+  // Put every selected album aside (v1.8.67). One request each, in order — a
+  // selection is a handful of albums, and one failing must not lose the rest.
+  async function laterAlbumMulti() {
+    const picked = albumSelected.slice();
+    if (!picked.length) return;
+    let ok = 0;
+    for (const a of picked) {
+      if (!a.title) continue;
+      const got = await setListenLater({ title: a.title, artist: a.subtitle || "" }, true);
+      if (got) ok++;
+    }
+    if (ok) {
+      showToast(ok === picked.length
+        ? "Put " + ok + " album" + (ok === 1 ? "" : "s") + " aside in Listen later"
+        : "Put " + ok + " of " + picked.length + " albums aside in Listen later", "ok");
+      exitAlbumSelectMode();
+    }
+  }
+
   if (albumActionCancelBtn) albumActionCancelBtn.addEventListener("click", exitAlbumSelectMode);
 
   // ----- Select-menu wiring -------------------------------------------------
@@ -7178,6 +9787,7 @@
         return;
       }
       if (act === "add") { addSelectionToPlaylist(); return; }
+      if (act === "later") { if (selMenuKind === "albums") laterAlbumMulti(); return; }
       if (selMenuKind === "tracks") invokeTrackMulti(act);
       else invokeAlbumMulti(act);
     });
@@ -7214,6 +9824,134 @@
     }
   };
 
+  // ===========================================================================
+  // WALL DISPLAY ⇄ REMOTE (v1.8.66).
+  //
+  // Asked for on the Roon forum by someone running both pages on one iPad in a
+  // kiosk browser: a way to flip between the remote and the wall display, and a
+  // timer that goes back to the display once the remote has been left alone —
+  // the display as the remote's screensaver.
+  //
+  // Both ways are an ordinary navigation in the same tab: "Wall display" in the
+  // side menu here, "Remote" on the display (shown when it is tapped). Going TO
+  // the display pushes a history entry and marks the tab (sessionStorage), and
+  // the display's way back is then history.back(): the remote comes back as it
+  // was left when the browser has kept the page, the browser's own Back agrees
+  // with the button, and flipping a hundred times leaves two entries rather
+  // than two hundred. A display opened any other way (a kiosk's start page, a
+  // bookmark) has no remote behind it, so it loads one.
+  //
+  // The display is sent THIS remote's zone: it is this remote's screen, and a
+  // display left to find "the first zone playing" can show a room the remote
+  // is not controlling.
+  //
+  // The timer is PER DEVICE and off unless chosen — the wall iPad wants it, the
+  // phone in a pocket does not. It never throws work away: it waits while
+  // Settings, a sheet, the label tools or a selection is open. And it does
+  // nothing while the wall display is switched off, because the page it would
+  // open says only that.
+  // ===========================================================================
+  const DISPLAY_IDLE_KEY = "rra-display-idle";        // minutes, this device; absent = never
+  const DISPLAY_FROM_KEY = "rra-display-from-remote"; // sessionStorage; display.js reads it
+  const DISPLAY_IDLE_CHOICES = [0, 1, 2, 5, 10, 15, 30, 60];
+  // The server's switch as last read. __applyFeatureMenu keeps it: at boot, and
+  // whenever the settings revision moves, since any device may flip it.
+  let wallDisplayOn = false;
+  let displayIdleMins = 0;
+  try {
+    const v = parseInt(localStorage.getItem(DISPLAY_IDLE_KEY) || "0", 10);
+    if (DISPLAY_IDLE_CHOICES.indexOf(v) > -1) displayIdleMins = v;
+  } catch (e) { /* private browsing — never, the default */ }
+  let displayIdleAt = Date.now();     // when anyone last touched this page
+  let displayIdleTimer = null;
+
+  function openWallDisplay() {
+    clearTimeout(displayIdleTimer);
+    displayIdleTimer = null;
+    try { sessionStorage.setItem(DISPLAY_FROM_KEY, "1"); }
+    catch (e) { /* the display then loads a fresh remote rather than going back — still a way back */ }
+    location.assign("/display" + (selectedZoneId ? "?zone=" + encodeURIComponent(selectedZoneId) : ""));
+  }
+  window.__openWallDisplay = openWallDisplay;
+
+  // Open work the timer must not throw away: picks being made, a sheet (an
+  // import's result, a playlist being named), Settings, the label tools.
+  function displayIdleHeld() {
+    if (albumSelectMode || trackSelectMode || historySelectMode) return true;
+    if (document.querySelector(".lib-sheet-backdrop")) return true;
+    for (const id of ["settings-overlay", "label-merge-bar", "label-unmerge-sheet", "logo-url-sheet"]) {
+      const el = document.getElementById(id);
+      if (el && !el.classList.contains("hidden")) return true;
+    }
+    return false;
+  }
+  function armDisplayIdle(wait) {
+    clearTimeout(displayIdleTimer);
+    displayIdleTimer = null;
+    if (!displayIdleMins || document.hidden) return;
+    const due = wait != null ? wait : displayIdleAt + displayIdleMins * 60000 - Date.now();
+    displayIdleTimer = setTimeout(checkDisplayIdle, Math.max(1000, due));
+  }
+  function checkDisplayIdle() {
+    displayIdleTimer = null;
+    if (!displayIdleMins || document.hidden) return;   // re-armed when shown again
+    if (Date.now() - displayIdleAt < displayIdleMins * 60000) { armDisplayIdle(); return; }
+    // Held, or the display is off: look again shortly rather than starting the
+    // count over. The page HAS been left alone all this time, so it goes soon
+    // after the sheet closes or the switch is turned on.
+    if (!wallDisplayOn || displayIdleHeld()) { armDisplayIdle(15000); return; }
+    openWallDisplay();
+  }
+  {
+    const touched = () => { displayIdleAt = Date.now(); };
+    // Every way a person can be at this page. Not `scroll`: the app scrolls
+    // itself (a revealed tile, a list put back), and a person who scrolls has
+    // touched, wheeled or pressed a key to do it.
+    for (const ev of ["pointerdown", "keydown", "wheel", "touchstart"]) {
+      document.addEventListener(ev, touched, { capture: true, passive: true });
+    }
+    // A mouse that MOVED. Browsers send moves of their own when the page
+    // changes under a resting pointer, and the progress bar changes it four
+    // times a second — counted, those would keep a desktop awake for ever.
+    let mx = null, my = null;
+    document.addEventListener("pointermove", (e) => {
+      if (mx !== null && Math.abs(e.clientX - mx) + Math.abs(e.clientY - my) < 4) return;
+      mx = e.clientX; my = e.clientY;
+      touched();
+    }, { capture: true, passive: true });
+    window.addEventListener("focus", touched);
+    // A hidden page has nobody to hand over from, and coming back is a touch.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) { clearTimeout(displayIdleTimer); displayIdleTimer = null; return; }
+      touched();
+      armDisplayIdle();
+    });
+    // Arriving — a load, or back from the display. The tab's mark is spent, and
+    // a page the browser kept comes back with the clock it left with, which
+    // would read as however long the display was up and send it straight back.
+    const arrived = () => {
+      try { sessionStorage.removeItem(DISPLAY_FROM_KEY); }
+      catch (e) { /* nothing could have been stored, then */ }
+      touched();
+      armDisplayIdle();
+    };
+    window.addEventListener("pageshow", (e) => { if (e.persisted) arrived(); });
+    arrived();
+
+    const sel = document.getElementById("display-idle-select");
+    if (sel) {
+      sel.value = String(displayIdleMins);
+      sel.addEventListener("change", () => {
+        const v = parseInt(sel.value, 10);
+        displayIdleMins = DISPLAY_IDLE_CHOICES.indexOf(v) > -1 ? v : 0;
+        try { localStorage.setItem(DISPLAY_IDLE_KEY, String(displayIdleMins)); }
+        catch (e) { /* holds for this session, which beats not at all */ }
+        touched();
+        armDisplayIdle();
+      });
+    }
+  }
+
   // Reflect the opt-in features into the side menu.
   //
   // A menu entry for a feature that is switched off leads to a screen that can
@@ -7233,6 +9971,16 @@
     if (picksItem && typeof state.picks === "boolean") {
       picksItem.classList.toggle("hidden", !state.picks);
     }
+    const discoverItem = document.getElementById("menu-item-discover");
+    if (discoverItem && typeof state.discover === "boolean") {
+      discoverItem.classList.toggle("hidden", !state.discover);
+    }
+    // The wall display: its menu entry, and whether the idle timer may open it.
+    if (typeof state.display === "boolean") {
+      wallDisplayOn = state.display;
+      const displayItem = document.getElementById("menu-item-display");
+      if (displayItem) displayItem.classList.toggle("hidden", !state.display);
+    }
   };
 
   // Ask at boot. Two independent calls, so an older server or a transient
@@ -7247,6 +9995,21 @@
       const r = await fetch("/api/settings/smart-picks");
       if (r.ok) state.picks = !!(await r.json()).enabled;
     } catch (e) { /* leave the Smart Picks entry as the markup has it */ }
+    try {
+      const r = await fetch("/api/settings/discover");
+      if (r.ok) state.discover = !!(await r.json()).enabled;
+    } catch (e) {
+      // Left as the markup has it, which for Discover is HIDDEN — unlike the
+      // two above it is off for everyone until asked for, so a failed lookup
+      // must not offer a menu entry that leads to an empty screen.
+    }
+    try {
+      const r = await fetch("/api/settings/display");
+      if (r.ok) state.display = !!(await r.json()).enabled;
+    } catch (e) {
+      // Hidden, as the markup has it, and the idle timer stays put: with the
+      // switch unknown, /display may only say "turned off".
+    }
     window.__applyFeatureMenu(state);
   }
 
@@ -7299,7 +10062,7 @@
           return;
         }
       } catch (e) {} // /api/status fetch failed — server not ready yet, fall through to "Waiting" banner
-      setBanner("Waiting for Roon Core. Open Roon → Settings → Extensions and click Enable on “Random Albums”.");
+      setBanner("Waiting for Roon Core. Open Roon → Settings → Extensions and click Enable on “Rouen Lite (Android)”.");
       await new Promise(r => setTimeout(r, 2000));
     }
     setBanner("Still not paired with Roon. Check that this extension is enabled in Roon → Settings → Extensions.", true);
@@ -7313,7 +10076,9 @@
 (() => {
   const bar       = document.getElementById("mini-transport");
   const titleEl   = document.getElementById("mt-title");
+  const kickerEl  = document.getElementById("mt-kicker");
   const artistEl  = document.getElementById("mt-artist");
+  const artEl     = document.getElementById("mt-art");
   const btnPP     = document.getElementById("mt-playpause");
   const btnZone   = document.getElementById("mt-zone");
   const zonePop   = document.getElementById("mt-zone-popover");
@@ -7479,6 +10244,11 @@
   let npBaseAt = 0;             // Date.now() when npBase was set
   let npWasPlaying = false;     // play state over the interval just elapsed
   let npSeekHold = 0;           // ignore server re-baselining until this time
+  // The last position the server reported, to tell a MOVING feed from a stuck
+  // one. See the reconcile in refreshTransport for why a repeated value must
+  // not be treated as news.
+  let npPrevSrv = null;
+
   // "Is audio actually advancing", which is NOT the same question as "should the
   // button show a pause icon" — the two icon sites below deliberately still
   // count `loading`, because somebody who pressed play wants to see that it
@@ -7599,6 +10369,23 @@
     } catch (e) {} // localStorage optional — transport bar persistence is best-effort
   }
 
+  // The cover for the playing track. Hidden rather than broken when the zone
+  // reports no art (a stream, a zone mid-handshake): an empty <img> draws the
+  // browser's broken-image glyph, which looks like a fault.
+  function paintTransportArt(imageKey) {
+    if (!artEl) return;
+    if (imageKey) {
+      const src = `/api/image/${encodeURIComponent(imageKey)}?size=120`;
+      // Guarded: assigning the same src restarts the request on some browsers,
+      // and this runs off a 1.5s poll.
+      if (artEl.getAttribute("src") !== src) artEl.setAttribute("src", src);
+      artEl.classList.remove("hidden");
+    } else {
+      artEl.removeAttribute("src");
+      artEl.classList.add("hidden");
+    }
+  }
+
   function restoreTransportState() {
     try {
       const saved = JSON.parse(localStorage.getItem("rra-transport") || "null");
@@ -7606,6 +10393,7 @@
       titleEl.textContent  = saved.line1;
       const sub = [saved.line2, saved.line3].filter(Boolean).join(" · ");
       artistEl.textContent = sub || "—";
+      paintTransportArt(saved.image_key);
       bar.classList.remove("hidden");
     } catch (e) {} // corrupt localStorage — transport bar stays hidden, no action needed
   }
@@ -7632,11 +10420,42 @@
     }
   }
 
+  // What the zone says about its QUEUE, as one string (v1.8.65): the track now
+  // playing, how much is queued behind it, and shuffle, which reorders it. The
+  // Queue tab is re-read when this moves, so it follows a track ending, a
+  // queue edit from Roon's own app and Roon Radio topping up — and costs
+  // nothing at all while the queue is still, which is almost all of the time.
+  //
+  // Only moves WITHIN one zone count. Switching zones is not the queue moving:
+  // the zone selector's own handler reloads the Queue tab for the new zone, and
+  // firing here as well asked the Core for the same queue twice.
+  let lastQueueSig = null;
+  let lastQueueZone = null;
+  function queueSigOf(zone) {
+    if (!zone) return "";
+    const np = zone.now_playing || {};
+    return JSON.stringify([np.line1 || "", np.line2 || "", np.line3 || "", np.length || 0,
+                           zone.queue_items_remaining === undefined ? null : zone.queue_items_remaining,
+                           !!(zone.settings && zone.settings.shuffle)]);
+  }
+
   function renderZone(zone) {
     currentZone = zone;
+    {
+      const qs = queueSigOf(zone);
+      const zid = zone ? zone.zone_id : null;
+      if (qs !== lastQueueSig || zid !== lastQueueZone) {
+        // Not on the first read (the state the tab was opened in), and not on
+        // a zone switch (see above).
+        const moved = lastQueueSig !== null && zid !== null && zid === lastQueueZone;
+        lastQueueSig = qs;
+        lastQueueZone = zid;
+        if (moved && window.__queueMoved) window.__queueMoved();
+      }
+    }
     const np = zone && zone.now_playing;
     if (!np) {
-      npLen = 0; npSetBase(0);
+      npLen = 0; npSetBase(0); npPrevSrv = null;
       paintBarProgress();
       refreshVisibility();
       updateNpScreen();
@@ -7650,14 +10469,17 @@
     const volOutput = (zone.outputs || []).find(o => o.volume);
     const muted = (zone.outputs || []).some(o => o.is_muted);
     const playing = zone.state === "playing" || zone.state === "loading";
-    const barSig = [np.line1, np.line2, np.line3, zone.state, muted].join("|");
+    const kicker = zone.display_name || "";
+    const barSig = [np.line1, np.line2, np.line3, np.image_key, zone.state, muted, kicker].join("|");
     if (barSig !== lastBarSig) {
       lastBarSig = barSig;
+      if (kickerEl) kickerEl.textContent = kicker;
 
       // Title = track, subtitle = artist · album
       titleEl.textContent  = np.line1 || "—";
       const sub = [np.line2, np.line3].filter(Boolean).join(" · ");
       artistEl.textContent = sub || "—";
+      paintTransportArt(np.image_key);
 
       // Play/pause state
       iconPlay .classList.toggle("hidden",  playing);
@@ -7732,8 +10554,26 @@
     // counted up to a poll interval of the wrong state. Both bypass the seek
     // hold: gating the track change behind it meant scrubbing to the end of a
     // track — a normal way to skip on — opened the next one pinned at 100%.
+    // A server position that has not MOVED since the last poll is not news,
+    // it is a stuck feed — and re-baselining to it is how a stuck feed turns
+    // into a sawtooth: the local clock counts up, crosses the 3s threshold,
+    // gets yanked back to the same stale number, and starts again. Reported
+    // as "0 to 4 seconds then returns to 0, and repeats all the time", which
+    // is exactly the period this threshold and the poll interval produce.
+    //
+    // Reconcile against a value that has CHANGED, therefore. When the feed is
+    // stuck the local wall clock is the better answer anyway: the track is
+    // playing, so time really is passing, whatever the zone last said.
+    //
+    // A track change or a play/pause transition still takes the server's
+    // position outright even when the number repeats — both are unambiguous
+    // new information, and at a track change the repeat is usually a genuine
+    // 0. Our own seeks are exact and keep their own hold (npSeekHold).
+    const srvMoved = npPrevSrv === null || srv !== npPrevSrv;
+    npPrevSrv = srv;
+
     if (npLen !== prevLen || stateChanged) npSetBase(srv);
-    else if (Date.now() >= npSeekHold && Math.abs(srv - npNow()) > 3) npSetBase(srv);
+    else if (srvMoved && Date.now() >= npSeekHold && Math.abs(srv - npNow()) > 3) npSetBase(srv);
     paintBarProgress();
 
     refreshVisibility();
@@ -7860,6 +10700,9 @@
       npCur.textContent = "0:00"; npTot.textContent = "0:00";
     }
     paintSeek(seekPos);
+    // Cheap on every poll: loadWaveform returns immediately unless the track
+    // key actually changed, so this is a string compare, not a fetch.
+    loadWaveform();
 
     // Volume — show the controls only when the endpoint has a controllable
     // volume; otherwise show "Volume control is fixed" (matches Roon).
@@ -7902,6 +10745,257 @@
   // `pos` is passed in rather than read back out of the input: the input is
   // step-quantised, so round-tripping through it threw away the sub-second part
   // and the fill could only ever move in whole-second jumps.
+  /* ---------------- Waveform ---------------- */
+  /*
+   * The shape of the track, drawn under the seek bar.
+   *
+   * Local files and streamed ones alike: Roon sends audio to the endpoint and
+   * never to an extension, so the server reads a local file directly and
+   * fetches a streamed track from Qobuz or TIDAL with the user's own account to
+   * measure it. Either way this end is the same — it asks /api/waveform for a
+   * few thousand levels and draws them; a track the server cannot identify
+   * answers with none and keeps the plain bar.
+   *
+   * The canvas is decoration UNDER the range input, never a replacement for it:
+   * the input keeps the drag, the keyboard, the thumb and the disabled state,
+   * and if any of this fails the bar is exactly what it was before.
+   */
+  const npWave = document.getElementById("np-wave");
+  const npProgressEl = document.querySelector(".np-progress");
+  let npWavePeaks = null;     // Uint8Array for the current track, or null
+  let npWaveKey = "";         // which track those peaks are for
+  let npWaveReq = 0;          // generation, so a slow answer cannot land late
+
+  // Redraw when the canvas changes size. drawWave sizes its bars from the
+  // canvas's width AT THE TIME IT DRAWS, and while a track is paused nothing
+  // else redraws it — so a reflow after the draw (the theme's web font
+  // arriving and moving the time labels, a rotation, a resize) left the
+  // shape stretched to the old width, its silences a couple of pixels off
+  // the playhead (v1.8.74, found when the fonts were added).
+  if (npWave && typeof ResizeObserver === "function") {
+    let lastW = -1, lastH = -1;
+    new ResizeObserver(() => {
+      const w = npWave.clientWidth, h = npWave.clientHeight;
+      if (w === lastW && h === lastH) return;
+      lastW = w; lastH = h;
+      if (npWavePeaks && npWavePeaks.length) drawWave();
+    }).observe(npWave);
+  }
+
+  function npWaveIdentity() {
+    const np = (currentZone && currentZone.now_playing) || null;
+    if (!np) return null;
+    const t3 = np.three_line || {};
+    const track  = t3.line1 || np.line1 || "";
+    const artist = t3.line2 || np.line2 || "";
+    const album  = t3.line3 || np.line3 || "";
+    return track ? { track, artist, album, key: track + " " + album } : null;
+  }
+
+  function drawWave(pos) {
+    if (!npWave || !npProgressEl) return;
+    const peaks = npWavePeaks;
+    if (!peaks || !peaks.length) {
+      npWave.classList.add("hidden");
+      npProgressEl.classList.remove("has-wave");
+      return;
+    }
+    npWave.classList.remove("hidden");
+    npProgressEl.classList.add("has-wave");
+
+    // Size the backing store to the DEVICE pixels actually on screen, or the
+    // bars are soft on every phone made in the last decade.
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    const w = Math.max(1, Math.round(npWave.clientWidth));
+    const h = Math.max(1, Math.round(npWave.clientHeight));
+    if (npWave.width !== w * dpr || npWave.height !== h * dpr) {
+      npWave.width = w * dpr; npWave.height = h * dpr;
+    }
+    const ctx = npWave.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const cs = getComputedStyle(document.documentElement);
+    const played = cs.getPropertyValue("--accent").trim() || "#4cb7e6";
+    // The track ahead is drawn in the TEXT colour, not the border colour: it is
+    // the shape of the music and it should be as legible as the title above it.
+    // `--text` is near-white on the dark palettes and near-black on the light
+    // ones, so "white" here means "reads clearly", in both.
+    const ahead  = cs.getPropertyValue("--text").trim() || "#e9eaec";
+    const at = Number.isFinite(pos) ? pos : npNow();
+    const frac = npLen > 0 ? Math.max(0, Math.min(1, at / npLen)) : 0;
+
+    /*
+     * WHERE THE THUMB ACTUALLY IS, which is not frac * width.
+     *
+     * A range input cannot let its thumb hang off either end, so the CENTRE
+     * travels from thumbW/2 to width - thumbW/2 rather than from 0 to width.
+     * The bars were laid from 0 to w regardless, so the two mappings from TIME
+     * to X disagreed by thumbW * (0.5 - frac): half a thumb ahead of the music
+     * at the start, level in the middle, half a thumb behind it at the end. On
+     * a phone that is seven pixels of a ~350px bar — several seconds of a
+     * five-minute track — and it reads as the waveform failing to keep up.
+     * Zero in the middle, which is how it survived being looked at.
+     *
+     * So the shape is inset to the thumb's travel and both are computed from
+     * `span`. A peak is then under the dot at the moment you hear it, at every
+     * point in the track rather than only halfway through.
+     */
+    // Read from the PROGRESS block, which is where --seek-thumb is declared —
+    // a custom property inherits downward, so asking documentElement (its
+    // ancestor, not its descendant) would silently get nothing and fall back.
+    const thumbW = parseFloat(
+      getComputedStyle(npProgressEl).getPropertyValue("--seek-thumb")) || 14;
+    const inset = thumbW / 2;
+    const span = Math.max(1, w - thumbW);
+    const head = inset + frac * span;
+
+    /*
+     * ONE BAR PER DEVICE-PIXEL PITCH, not per 2 CSS pixels.
+     *
+     * A phone has three device pixels to every CSS one and the old step threw
+     * two of them away: ~190 bars for a five-minute track, a second and a half
+     * each, which is a coarse picture of a record however well it is measured.
+     * Two device pixels of ink and one of gap gives ~360 on the same phone, and
+     * each one lands on a whole device pixel, so they stay separate instead of
+     * blurring into a band. The store holds 4000 values, so there is data for
+     * them.
+     *
+     * Drawn in DEVICE pixels for that reason — the transform is dropped here
+     * and put back at the end. A screen with no pixels to spare keeps the old
+     * one-and-one, because at 1x a two-pixel bar and a one-pixel gap is a
+     * different, worse drawing rather than a finer one.
+     */
+    const pitch = dpr >= 2 ? 3 : 2;
+    const ink = pitch - 1;
+    const devSpan = span * dpr, devInset = inset * dpr, devHead = head * dpr;
+    const bars = Math.max(1, Math.floor(devSpan / pitch));
+    // Fractional so the bars fill the travel exactly; the LEFT EDGE of each is
+    // rounded, which is what keeps them crisp.
+    const step = devSpan / bars;
+    const mid = Math.round((h / 2) * dpr);
+    const height = (h - 2) * dpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    for (let i = 0; i < bars; i++) {
+      /*
+       * Folded the way the server folds, and for the same reason: these are RMS
+       * levels, so the RMS of them is exactly the level of the whole span — a
+       * bar drawn from eleven stored values is the same height it would be if
+       * the track had been analysed straight into this many buckets. A MAXIMUM
+       * here would put the flattening straight back, because the loudest bucket
+       * in a bar of a limited record is the same number in every bar of it.
+       */
+      const a = Math.floor(i * peaks.length / bars);
+      const b = Math.min(peaks.length, Math.max(a + 1, Math.floor((i + 1) * peaks.length / bars)));
+      let sum = 0;
+      for (let j = a; j < b; j++) sum += peaks[j] * peaks[j];
+      const v = Math.sqrt(sum / (b - a));
+      /*
+       * NOT ROUNDED TO A WHOLE PIXEL. Everything up to here is exact and then
+       * the height used to be snapped to a pixel, which threw away more than
+       * the stored value ever had: at 34px a whole pixel is 2.9% of full scale
+       * against a stored value good to 0.4%. A fractional height antialiases
+       * the two END CAPS and nothing else — the bar stays on whole device
+       * pixels horizontally, so the top edge gains precision rather than the
+       * whole shape losing crispness.
+       *
+       * The floor stays, in device pixels: silence is a line rather than a gap,
+       * because a gap reads as "the waveform stopped loading".
+       */
+      const barH = Math.max(1, (v / 255) * height);
+      const x = Math.round(devInset + i * step);
+      // A bar counts as played once its MIDDLE is behind the playhead, so the
+      // boundary lands where the dot is rather than a bar's width either side.
+      const done = (x + ink / 2) <= devHead;
+      ctx.fillStyle = done ? played : ahead;
+      // The played side goes to full strength so the accent still reads as the
+      // position marker against a now-bright track ahead of it.
+      ctx.globalAlpha = done ? 1 : 0.72;
+      // Centred on the midline exactly. Rounding the offset as well as the
+      // height pushed an odd-numbered bar half a pixel upwards, every time.
+      ctx.fillRect(x, mid - barH / 2, ink, barH);
+    }
+    ctx.globalAlpha = 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // The switch's state, fetched once. loadWaveformEnabled() in the settings
+  // module also writes window.__waveformOn, but that only runs when the
+  // Settings pane is opened — without this the waveform stayed invisible on a
+  // fresh load until you happened to go and look at the setting.
+  let waveFlagPending = null;
+  function waveformOn() {
+    if (window.__waveformOn !== undefined) return Promise.resolve(window.__waveformOn);
+    if (!waveFlagPending) {
+      waveFlagPending = fetch("/api/settings/waveform")
+        .then(r => (r.ok ? r.json() : null))
+        .then(j => { window.__waveformOn = !!(j && j.enabled); return window.__waveformOn; })
+        .catch(() => { window.__waveformOn = false; return false; });
+    }
+    return waveFlagPending;
+  }
+
+  async function loadWaveform() {
+    if (!npWave) return;
+    const on = await waveformOn();
+    const id = npWaveIdentity();
+    if (!id || !on) {
+      npWavePeaks = null; npWaveKey = "";
+      drawWave();
+      return;
+    }
+    if (id.key === npWaveKey) return;    // same track: what we have still applies
+    npWaveKey = id.key;
+    npWavePeaks = null;
+    drawWave();                          // plain bar while we ask
+    const mine = ++npWaveReq;
+    try {
+      // The LENGTH goes with it. For a streaming track the server has no file
+      // and matches the track on the service by title AND duration — without
+      // this it cannot tell a song from a remaster of it that shares the title,
+      // so it declines rather than guessing and nothing is ever drawn.
+      const q = "track=" + encodeURIComponent(id.track) +
+                "&album=" + encodeURIComponent(id.album) +
+                "&artist=" + encodeURIComponent(id.artist) +
+                "&length=" + encodeURIComponent(npLen || 0);
+      const r = await fetch("/api/waveform?" + q);
+      if (!r.ok) return;
+      const j = await r.json();
+      // The track may have moved on while the server was decoding. Landing a
+      // stale waveform under a different song is worse than none: it looks
+      // authoritative and it is simply the wrong shape.
+      //
+      // The KEY check is the one that does the work, and it catches two things:
+      // a skip (the key is now the next track's) and the setting being switched
+      // off mid-decode (__repaintWaveform blanks the key without touching the
+      // generation). The generation is belt and braces — every path that bumps
+      // it without changing the key is a repeat request for the SAME track, so
+      // a late answer there is the right shape anyway. It stays because it is
+      // what keeps this correct if the key logic is ever changed.
+      if (mine !== npWaveReq || npWaveKey !== id.key) return;
+      // "busy" means the server is decoding a DIFFERENT track and will be free
+      // in a moment. Leaving the key set would latch this track to no waveform
+      // for as long as it plays, so drop it and let the next poll ask again —
+      // the request costs nothing while the server is busy, because it answers
+      // without decoding.
+      if (j && j.reason === "busy") { npWaveKey = ""; return; }
+      if (!j || !j.peaks) return;
+      const bin = atob(j.peaks);
+      const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      npWavePeaks = u8;
+      drawWave();
+    } catch (e) {
+      /* No waveform is a normal answer — a streaming track, an undecodable
+         file, the server busy. The plain bar is already showing. */
+    }
+  }
+
+  // The settings switch repaints through this rather than reaching into the
+  // module: turning it off must clear a waveform already on screen.
+  window.__repaintWaveform = () => { npWaveKey = ""; loadWaveform(); };
+
   function paintSeek(pos) {
     if (!npSeek) return;
     const max = parseFloat(npSeek.max) || 0;
@@ -7910,6 +11004,23 @@
     // entirely rather than reading zero.
     const val = Number.isFinite(pos) ? pos : (parseFloat(npSeek.value) || 0);
     const pct = max > 0 ? Math.max(0, Math.min(100, (val / max) * 100)) : 0;
+
+    // The waveform carries the same progress, from the same number, so the two
+    // can never disagree about where the track is. Drawn FIRST because this is
+    // what adds and removes .has-wave, which the fill below reads.
+    drawWave(val);
+
+    // With a waveform showing, the range's own 4px track draws a line straight
+    // through the middle of the shape, and the canvas already paints the
+    // played/unplayed split. The stylesheet sets --seek-fill to transparent for
+    // that case, but an INLINE custom property beats any stylesheet rule
+    // however specific, so it has to be REMOVED here rather than overridden —
+    // writing the gradient unconditionally is what put a grey line across the
+    // waveform in v1.7.90.
+    if (npProgressEl && npProgressEl.classList.contains("has-wave")) {
+      npSeek.style.removeProperty("--seek-fill");
+      return;
+    }
     npSeek.style.setProperty("--seek-fill",
       "linear-gradient(to right, var(--accent) 0%, var(--accent) " + pct + "%, " +
       "var(--border) " + pct + "%, var(--border) 100%)");
@@ -8007,13 +11118,12 @@
         body: JSON.stringify(Object.assign({ zone_or_output_id: currentZone.zone_id }, patch))
       });
       const j = await r.json().catch(() => ({}));
+      // Shuffle and repeat only — Roon Radio moved to Settings → Playback in
+      // v1.7.71, where the exclusivity rule announces itself by the two
+      // switches moving. So a failure is the only thing left to report here.
       if (!r.ok) {
         console.warn("zone-settings failed:", j.error || r.status);
         if (window.__showToast) window.__showToast(j.error || "Could not change that", "error");
-      } else if (j.random_album_radio_stands_down && window.__showToast) {
-        // Roon Radio and the app's own Random Album Radio would fight over the
-        // same queue, so ours stands down. Say so instead of looking broken.
-        window.__showToast("Roon Radio on — Random Album Radio stands down for this zone");
       }
     } catch (e) {
       // Network blip. The finally below still re-polls, so the buttons resync.
@@ -8498,10 +11608,104 @@
   const zoneSel = document.getElementById("zone-select");
   if (zoneSel) zoneSel.addEventListener("change", fetchState);
 
+  // v1.7.81 gave the pill a backdrop-filter and stripped it here for the
+  // duration of every scroll, so the look and the frame rate could coexist.
+  // Both halves of that are gone as of v1.7.85: `saturate()` brightens whatever
+  // shows through the pill, so the filtered and unfiltered states never looked
+  // alike no matter how opaque the background got, and the pill is now
+  // translucent with no filter at all. Nothing styles .is-scrolling any more,
+  // so the listener that set it — a capture-phase document scroll handler with
+  // a 260ms settle timer — has gone with it rather than being left to toggle a
+  // class on every scroll frame for nothing.
+
   // Boot — restore last known state instantly, then let the poll loop refresh it.
   restoreTransportState();
   startPolling();
 })();
+
+/* ------------------------------------------------------------------ */
+/*  Top bar height -> --topbar-h                                       */
+/* ------------------------------------------------------------------ */
+/* v1.7.88. The top bar overlays the scroller now, so album art passes under
+   it and shows through the veil. The cost of taking it out of the flow is that
+   <main> has to reserve its height itself, and that height is not a constant:
+   it grows with the status-bar inset, with the scan-progress strip appearing,
+   and with the search row opening.
+   So it is MEASURED rather than guessed. style.css carries a fallback for the
+   frame before this runs (and for no-JS); this replaces it with the real
+   number and keeps it current. .filter-bar sticks to the same variable, which
+   until now hard-coded 56px and had to be kept in step by hand. */
+(() => {
+  const bar = document.querySelector(".topbar");
+  const app = document.querySelector(".app");
+  if (!bar || !app) return;
+
+  let last = -1;
+  const publish = () => {
+    // Rounded UP: half a pixel short leaves a hairline of album art peeking
+    // above the first row, which reads as a rendering fault rather than a
+    // design. A pixel of extra reserve is invisible.
+    const h = Math.ceil(bar.getBoundingClientRect().height);
+    if (h > 0 && h !== last) {
+      last = h;
+      app.style.setProperty("--topbar-h", h + "px");
+    }
+  };
+  publish();
+
+  if (typeof ResizeObserver === "function") {
+    /*
+     * BORDER BOX, NOT THE DEFAULT CONTENT BOX — and the difference is the
+     * whole bug this line fixes.
+     *
+     * What is published is `getBoundingClientRect().height`, which INCLUDES
+     * padding. The bar's padding is `calc(12px + env(safe-area-inset-top))`,
+     * so the inset is inside it. A ResizeObserver with default options
+     * watches the CONTENT box, which the inset is not part of — so a change
+     * to the safe area could move the bar's real height without the observer
+     * ever firing, and `--topbar-h` would keep a value from the orientation
+     * before. `main` reserves that number as padding, so the Home screen
+     * opened one whole inset too far down, with an empty band above the first
+     * row. Reported after rotating, which is the one thing that changes an
+     * inset.
+     */
+    new ResizeObserver(publish).observe(bar, { box: "border-box" });
+  }
+  /*
+   * AND the viewport events as well, not as a fallback.
+   *
+   * The observer is the right primary — it catches the search row opening,
+   * which fires nothing else — but an inset can change with no box change at
+   * all, and a rotation is not an instant: iOS fires orientationchange before
+   * the web view has finished resizing, so a value read on the event can be
+   * from mid-transition. Sampled again as it settles, the same way the window
+   * pin and the diagnostic panel sample a turn, and `h !== last` means the
+   * extra reads cost a comparison and nothing else.
+   */
+  const republish = () => { publish(); setTimeout(publish, 300); setTimeout(publish, 1000); };
+  window.addEventListener("resize", republish, { passive: true });
+  window.addEventListener("orientationchange", republish, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", republish, { passive: true });
+  }
+})();
+
+/* ------------------------------------------------------------------ */
+/*  Where a toast sits: ABOVE the now-playing pill, never over it.     */
+/* ------------------------------------------------------------------ */
+// The pill floats at the bottom of every screen, and both toasts used to be
+// fixed at a bottom offset smaller than its height — so a message sat on top
+// of the transport, covering the very controls it was often reporting on.
+// Measured rather than guessed: the pill's height follows its artwork, the
+// home-indicator inset and the Now-playing screen (which hides it). Returns
+// a CSS length for `bottom`, or "" to leave the stylesheet's own value.
+function toastBottomAbovePill() {
+  const pill = document.getElementById("mini-transport");
+  if (!pill || pill.classList.contains("hidden")) return "";
+  const r = pill.getBoundingClientRect();
+  if (!r.height || r.top >= window.innerHeight) return "";
+  return Math.round(window.innerHeight - r.top + 12) + "px";
+}
 
 /* ------------------------------------------------------------------ */
 /*  Settings info-icon toasts                                         */
@@ -8529,9 +11733,23 @@
   function showToast(text) {
     const t = getToast();
     t.textContent = text;
+    t.style.bottom = toastBottomAbovePill();
     t.classList.add("visible");
     clearTimeout(dismissTimer);
-    dismissTimer = setTimeout(hideToast, 5000);
+    // Long enough to READ: 5s was gone halfway through the longer notes.
+    // About a fifth of a second a word on top of four seconds, at most 25s;
+    // any tap elsewhere still closes it at once.
+    const words = String(text || "").split(/\s+/).length;
+    dismissTimer = setTimeout(hideToast, Math.min(25000, 4000 + words * 220));
+  }
+
+  // Every ⓘ was announced as just "Info". Name each after the setting it
+  // explains, read from the label it sits in.
+  for (const btn of document.querySelectorAll(".settings-info-btn")) {
+    if (btn.getAttribute("aria-label") && btn.getAttribute("aria-label") !== "Info") continue;
+    const host = btn.closest(".settings-label, .settings-block-title");
+    const name = host ? host.textContent.replace(/[ⓘ\u24D8]/g, "").trim() : "";
+    btn.setAttribute("aria-label", name ? "About " + name : "More information");
   }
 
   document.addEventListener("click", (e) => {
@@ -8552,13 +11770,21 @@
   const overlay   = document.getElementById("share-overlay");
   const frame     = document.getElementById("share-frame");
   const actions   = document.getElementById("share-actions");
+  const linksEl   = document.getElementById("share-links");
+  const similarEl = document.getElementById("share-similar");
+  const similarLs = document.getElementById("share-similar-list");
   const hintEl    = document.getElementById("share-hint");
   const errEl     = document.getElementById("share-err");
   const modalBtn  = document.getElementById("modal-share-btn");
 
+  // The card is drawn in Manrope, which ships with the app (public/fonts,
+  // v1.8.74 — it used to come from Google Fonts). Waited for so the card's
+  // text is measured in the face it is drawn in, but never for more than two
+  // seconds: a font that has not arrived by then draws in the fallback rather
+  // than holding the card up.
   async function ensureFont() {
     if (!document.fonts || !document.fonts.load) return;
-    try {
+    const loaded = (async () => {
       await Promise.all([
         document.fonts.load('700 42px Manrope'),
         document.fonts.load('400 28px Manrope'),
@@ -8566,14 +11792,22 @@
         document.fonts.load('400 22px Manrope')
       ]);
       await document.fonts.ready;
-    } catch { /* fall back */ }
+    })().catch(() => { /* fall back to the system face */ });
+    await Promise.race([loaded, new Promise(r => setTimeout(r, 2000))]);
   }
 
   function close() {
+    // Anything still in flight for the record that was on screen is no longer
+    // wanted: without this a card or a suggestions row can arrive after the
+    // sheet has been shut and paint into it.
+    shareSeq++;
     overlay.classList.add("hidden");
     frame.innerHTML =
       `<div class="share-placeholder"><div class="share-spinner"></div><div>Generating card…</div></div>`;
     actions.innerHTML = "";
+    if (linksEl) { linksEl.innerHTML = ""; linksEl.classList.add("hidden"); }
+    if (similarEl && similarLs) { similarLs.innerHTML = ""; similarEl.classList.add("hidden"); }
+    lastActs = [];
     hintEl.textContent = "";
     errEl.textContent  = "";
   }
@@ -8584,68 +11818,95 @@
     if (e.key === "Escape" && !overlay.classList.contains("hidden")) close();
   });
 
-  // The release year the card prints, out of an /api/album/extras answer.
-  function yearOf(j) {
-    if (!j) return "";
-    if (j.year) return String(j.year);
-    if (j.album && j.album.year) return String(j.album.year);
-    return "";
-  }
-
-  // Everything else the card draws, out of the SAME answer. None of this costs
-  // a request: /api/album/extras was already being fetched for the year and
-  // the rest of it thrown away — the blurb the album screen shows, and the
-  // Pitchfork score it already draws as a chip.
+  // ---------------------------------------------------------------------------
+  // What the card draws, out of one /api/album/extras answer.
   //
-  // The blurb is the album's and only the album's. An artist bio is in that
-  // payload too and is deliberately not used: this is a card about a record.
+  // Release year, label, the album's description (Wikipedia's, Qobuz's as a
+  // fallback — never Pitchfork's prose, which the server never sends), whose
+  // words those are, Pitchfork's number and Best New Music flag, and the link
+  // chips. The description is trimmed to what the card has room for: about ten
+  // sentences, 1400 characters — sharecard.js's DESC_MAX is set FROM this.
+  // ---------------------------------------------------------------------------
   function extraOf(j) {
-    const a = (j && j.album) || null;
+    const out = {
+      release: "", label: "", review: "", reviewSource: "",
+      links: null, score: null, bestNew: false
+    };
+    if (!j) return out;
+    if (j.links) out.links = j.links;
+    if (j.year) out.release = String(j.year);
+    const a = j.album || null;
+    if (a && a.year && !out.release) out.release = String(a.year);
+    if (a && a.label) out.label = String(a.label);
+    // Pitchfork's number and their Best New Music flag — never their prose.
+    // The chip under the card is the link to read it at theirs.
+    if (a && a.score != null) out.score = a.score;
+    if (a && a.isBestNewMusic) out.bestNew = true;
+    const desc = a && a.description;
+    if (desc) {
+      let t = String(desc).trim();
+      const sentences = t.match(/[^.!?]+[.!?]+/g);
+      if (sentences && sentences.length > 10) {
+        t = sentences.slice(0, 10).join(" ").trim();
+      }
+      if (t.length > 1400) t = t.slice(0, 1398).replace(/\s+\S*$/, "") + "…";
+      out.review = t;
+      // Whose prose the card ends up showing. NOT `source`, which says where
+      // the link goes — the server keeps them apart on purpose, or Wikipedia's
+      // writing under a "read it at Pitchfork" link would be a misattribution
+      // pointing the other way.
+      if (a.description_source) out.reviewSource = String(a.description_source);
+    }
+    return out;
+  }
+  const EMPTY_EXTRA = extraOf(null);
+  // A later answer fills what an earlier one lacked, and never blanks a field.
+  function mergeExtra(a, b) {
     return {
-      release: yearOf(j),
-      bio: (a && a.description) || "",
-      bioSource: (a && a.source) || "",
-      score: a && typeof a.score === "number" ? a.score : null,
-      isBestNewMusic: !!(a && a.isBestNewMusic)
+      release: b.release || a.release,
+      label: b.label || a.label,
+      review: b.review || a.review,
+      reviewSource: b.review ? b.reviewSource : a.reviewSource,
+      links: b.links || a.links,
+      score: b.score != null ? b.score : a.score,
+      bestNew: b.bestNew || a.bestNew
     };
   }
-
-  const EMPTY_EXTRA = { release: "", bio: "", bioSource: "", score: null, isBestNewMusic: false };
-
-  // Bumped on every open(), so a late redraw cannot land on a card the user
-  // has since closed or replaced with a different album's.
-  let renderToken = 0;
 
   /*
    * Public entry point — called from album modal share button + mini transport.
    *
-   * WHY THE CARD USED TO TAKE SECONDS, AND WHAT IT WAITS FOR NOW.
-   *
-   * The one fact the card carries that the app does not already hold is the
-   * release date, and it was fetched by awaiting /api/album/extras before a
-   * single pixel was drawn. On MusicD Server that endpoint answers out of the
-   * album row the server already has, which is why its card is instant. Here
-   * it is a chain of outside lookups — MusicBrainz, two Wikipedia searches,
-   * two summaries, a Pitchfork review page — run one after another from a
-   * phone, behind a 1.1s rate gate and 6s/12s timeouts. Several seconds of
-   * spinner for one four-digit number, and the rest of that answer (the blurb,
-   * the score, the label) never reaches the card at all: it was fetched,
-   * trimmed to ten sentences, and handed to a renderer that ignores it.
-   *
-   * So the card no longer waits on the network to draw. `fast=1` is answered
-   * from what the app already knows — the cached lookup, and the year store
-   * the library's Decade filter is built on — and never opens a socket. Only
-   * when that genuinely has no year is the full lookup fired, and then it is
-   * fired WITHOUT being awaited: the card is already on screen, and it is
-   * redrawn once if an answer turns up while it is still open.
+   * THE CARD DOES NOT WAIT ON THE NETWORK TO DRAW (this build's, since 0.4.x).
+   * On Rouen /api/album/extras answers out of the server's own database. Here
+   * it is a chain of outside lookups — MusicBrainz, Wikipedia searches and
+   * summaries, a Pitchfork page — run from a phone behind a rate gate. So
+   * `fast=1` is asked first: answered from what the app already knows (the
+   * cached lookup and the year store) and never opening a socket. Only when
+   * that is short of something is the full lookup fired, and it is given a
+   * SHORT head start rather than awaited: a description makes the card grow,
+   * so one that lands a beat later would push the card taller while you look
+   * at it — 600ms lets it win the race and the card is drawn once. Past that
+   * the card is drawn without it and redrawn if the answer adds something.
    */
   async function open(input) {
     const title  = input.title  || "";
     const artist = input.artist || "";
     if (!title) return;
 
-    const token = ++renderToken;
+    /*
+     * WHICH OPEN THIS IS. Stamped here, at the top, and not where each
+     * asynchronous piece is issued — because two opens can finish their awaits
+     * OUT OF ORDER and the later stamp then belongs to the earlier record.
+     * Everything this open paints is gated on still being the current one,
+     * the card included, and close() bumps it too.
+     */
+    const mySeq = ++shareSeq;
+    const current = () => mySeq === shareSeq && !overlay.classList.contains("hidden");
+
     actions.innerHTML = "";
+    if (linksEl) { linksEl.innerHTML = ""; linksEl.classList.add("hidden"); }
+    if (similarEl && similarLs) { similarLs.innerHTML = ""; similarEl.classList.add("hidden"); }
+    lastActs = [];
     hintEl.textContent = "";
     errEl.textContent  = "";
     frame.innerHTML =
@@ -8662,34 +11923,22 @@
         if (r.ok) fastExtra = extraOf(await r.json());
       } catch { /* keep blank */ }
 
-      // Only worth asking the slow way when the fast answer was short of
-      // something. It also teaches the server the year, so the next card for
-      // this album is complete without any of this.
-      //
-      // The blurb is now part of "short of something", and it is the reason
-      // this fires more often than it used to: fast=1 answers from the caches
-      // only, so a card opened straight from the mini transport can have a
-      // year and no words. Opened from the album screen — which is where the
-      // Share button lives — both are already warm.
-      const wantLate = !fastExtra.release || !fastExtra.bio;
+      const wantLate = !fastExtra.release || !fastExtra.review;
       const late = !wantLate ? null :
         fetch("/api/album/extras?" + params, { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : null))
           .then(extraOf)
           .catch(() => EMPTY_EXTRA);
 
-      // size=800 is the size the album modal and the now-playing screen ask
-      // for, so the picture the card needs is already in the WebView's cache
-      // and in the app's own art cache by the time the Share button is
-      // pressed. 1000 was a fourth distinct rendering of the same sleeve and
-      // shared a cache entry with nothing, so every card fetched a fresh
-      // megapixel from the Core — and the `t=` cache-buster on it made sure
-      // the second card for the same album did too. The card draws the cover
-      // at 424px and its softened ground at 24px; 800 is already generous.
+      // size=800 is the size the album view and Now playing already loaded, so
+      // the picture is in the WebView's cache and the app's art cache by the
+      // time Share is pressed. No `t=` cache-buster: that made every card pull
+      // a fresh megapixel off the Core, twice for the same album.
       const coverUrl = input.image_key
         ? `/api/image/${encodeURIComponent(input.image_key)}?size=800`
         : "";
 
+      let shownLinks = null;
       const paint = async (extra) => {
         const blob = await ShareCard.render({
           coverUrl,
@@ -8697,69 +11946,507 @@
           title,
           artist,
           releaseRaw: extra.release,
-          bio: extra.bio,
-          bioSource: extra.bioSource,
+          label: extra.label,
+          review: extra.review,
+          reviewSource: extra.reviewSource,
           score: extra.score,
-          isBestNewMusic: extra.isBestNewMusic
+          bestNewMusic: extra.bestNew
         });
-        // A card nobody is looking at any more is not worth showing, and the
-        // actions below would hand Share the wrong picture.
-        if (token !== renderToken || overlay.classList.contains("hidden")) return;
+        // Superseded while rendering: another record's card is on screen (or
+        // the sheet is closed), and this one must not paint over it.
+        if (!current()) return false;
         const dataUrl = await blobToDataUrl(blob);
-        if (token !== renderToken || overlay.classList.contains("hidden")) return;
+        if (!current()) return false;
         frame.innerHTML = `<img src="${dataUrl}" alt="Share card">`;
         buildActions(blob, title, artist);
+        if (extra.links && extra.links !== shownLinks) {
+          shownLinks = extra.links;
+          renderLinks(extra.links);
+          // The card's own Qobuz chip lands on the download store for exactly
+          // the same reason the suggestions did, so it gets the same upgrade.
+          upgradeQobuzChip(title, artist, mySeq);
+        }
+        return true;
       };
 
-      const merge = (a, b) => ({
-        release: b.release || a.release,
-        bio: b.bio || a.bio,
-        bioSource: b.bioSource || a.bioSource,
-        score: b.score != null ? b.score : a.score,
-        isBestNewMusic: b.isBestNewMusic || a.isBestNewMusic
-      });
-
-      // A SHORT HEAD START, NOT A WAIT. A blurb makes the card grow, so one
-      // that lands a beat after the first paint pushes the card taller while
-      // you are looking at it. Give the lookup a moment to win the race and
-      // the card is drawn once, at its final size.
-      //
-      // Bounded, because the other end is Wikipedia by way of somebody's
-      // phone: past this the spinner has been up too long and a card that
-      // reflows is better than no card. It only happens at all when the fast
-      // path came back short — from the album screen, where Share lives, the
-      // blurb is already cached and nothing is awaited.
       let painted = fastExtra;
       if (late) {
         const headStart = await Promise.race([
           late,
           new Promise((res) => setTimeout(() => res(null), 600))
         ]);
-        if (headStart) painted = merge(fastExtra, headStart);
+        if (headStart) painted = mergeExtra(fastExtra, headStart);
       }
+      if (!current()) return;
       await paint(painted);
+      // AFTER the card, and deliberately not awaited: this costs several Deezer
+      // calls and the card must not wait behind it.
+      loadSimilar(artist, mySeq);
 
       if (late) {
         late.then((full) => {
           // Redraw only if the slow answer adds something to what is ALREADY
-          // on screen — which, after a won head start, is usually nothing. A
-          // card that reflows for no visible change is worse than one that
-          // doesn't.
+          // on screen. A card that reflows for no visible change is worse
+          // than one that doesn't.
           const better = (full.release && full.release !== painted.release) ||
-                         (full.bio && full.bio !== painted.bio) ||
-                         (full.score != null && full.score !== painted.score);
-          if (!better) return;
-          if (token !== renderToken || overlay.classList.contains("hidden")) return;
-          return paint(merge(painted, full));
+                         (full.review && full.review !== painted.review) ||
+                         (full.score != null && full.score !== painted.score) ||
+                         (full.links && !painted.links);
+          if (!better || !current()) return;
+          painted = mergeExtra(painted, full);
+          return paint(painted);
         }).catch(() => { /* the card without it is already on screen */ });
       }
     } catch (e) {
-      if (token !== renderToken) return;
+      if (mySeq !== shareSeq) return;   // a superseded open's failure is not news
       frame.innerHTML = `<div class="share-placeholder">Could not generate the card.</div>`;
       errEl.textContent = (e && e.message) ? e.message : String(e);
     }
   }
   window.__openShareCard = open;
+  /*
+   * The row builder and the Qobuz upgrade, published for the Discover screen.
+   *
+   * They live in THIS closure because everything they depend on does — the
+   * default-service preference, the chips that set it, the share sequence that
+   * orphans a superseded open. Discover is in the main closure (it needs the
+   * wall, the banner and the grid), so the two halves reach each other the way
+   * every other pair in this file does: one named window.__ export rather than
+   * a second copy of the rules about where a tap goes.
+   */
+  window.__goRow = goRow;
+  window.__upgradeQobuzLinks = upgradeQobuzLinks;
+
+  /*
+   * The services and review sites under the card.
+   *
+   * Every url is built server-side by lib/share-links.js and arrives on the
+   * extras response the card already waits for, so there is no second request
+   * and nothing renders twice. The labels are constants from that module —
+   * never anything off the record, which is what keeps one six-line chip from
+   * setting the height of the whole grid.
+   *
+   * rel="noreferrer" as well as noopener: these are search pages on other
+   * people's sites, and there is no reason to tell them which library sent the
+   * visitor.
+   */
+  // Bumped by every open() and by close(), so anything still in flight can ask
+  // whether it is still wanted. See the note at the top of open().
+  let shareSeq = 0;
+
+  /*
+   * THE DEFAULT SERVICE — where a suggestion goes when the record is not in
+   * the library.
+   *
+   * PER DEVICE, IN localStorage, which is the Share Card app's choice and the
+   * right one: the phone and the tablet across the house can reasonably differ,
+   * and a display preference is not worth a server write. Every touch of
+   * storage is guarded — it throws outright in a private window — and the
+   * fallback is the first service that is switched on rather than a hardcoded
+   * name, so a user who has turned Qobuz off is never sent to it.
+   *
+   * SET BY HOLDING A SERVICE CHIP, the gesture the Share Card app uses, and
+   * also from Settings -> Share Card. The gesture is the discoverable one once
+   * you know it; the setting is the discoverable one before that.
+   */
+  const SHARE_PREF_KEY = "musicd-share-service";
+
+  function preferredService(available) {
+    const list = available || [];
+    let stored = null;
+    try { stored = localStorage.getItem(SHARE_PREF_KEY); }
+    catch (e) { /* private browsing — the fallback below stands */ }
+    // A remembered service that is now switched off (or was removed from the
+    // build) must not win: it would send a tap somewhere the user cannot see.
+    if (stored && (!list.length || list.indexOf(stored) > -1)) return stored;
+    return list.length ? list[0] : "qobuz";
+  }
+
+  window.__preferredService = preferredService;
+
+  function setPreferredService(id) {
+    if (!id) return;
+    try { localStorage.setItem(SHARE_PREF_KEY, id); }
+    catch (e) { /* the choice lasts this session, which beats none */ }
+    markPreferredChip();
+    renderLinks(lastLinks);       // the tick moves
+    renderSimilar(lastActs);      // and so does where the suggestions point
+    // Switching TO Qobuz means the rows now point at search links that have
+    // never been upgraded, so they get the same treatment they would have had
+    // if Qobuz had been the default when they were drawn.
+    const seq = shareSeq;
+    upgradeQobuzLinks(lastActs, {
+      container: similarLs, current: () => seq === shareSeq,
+      album: a => a.album, artist: a => a.name,
+    });
+    if (window.__showToast) {
+      const svc = (lastLinks && lastLinks.services || []).find(x => x.id === id);
+      window.__showToast((svc ? svc.name : id) + " is now the default", "ok");
+    }
+  }
+
+  /** Exactly one chip carries the tick, so the old one has to lose it. */
+  function markPreferredChip() {
+    if (!linksEl) return;
+    const chips = linksEl.querySelectorAll("a[data-service]");
+    const ids = Array.prototype.map.call(chips, c => c.dataset.service);
+    const chosen = preferredService(ids);
+    for (const chip of chips) {
+      const mine = chip.dataset.service === chosen;
+      chip.classList.toggle("is-default", mine);
+      chip.setAttribute("aria-pressed", mine ? "true" : "false");
+    }
+  }
+
+  /*
+   * A HOLD, NOT A TAP, AND THE TAP STILL HAS TO WORK.
+   *
+   * There is no long-press event, so it is a timer armed on touchstart and
+   * cancelled by a move or a lift. When it fires, the click that follows on
+   * both platforms has to be swallowed, or choosing a service would also open
+   * it. contextmenu covers the desktop right-click and is what iOS raises when
+   * the callout is suppressed — preventing it is what stops a held chip
+   * showing a link preview instead of choosing.
+   */
+  const HOLD_MS = 500;
+  function holdToPrefer(chip, id) {
+    let timer = null, held = false;
+    const cancel = () => { if (timer) clearTimeout(timer); timer = null; };
+    chip.addEventListener("touchstart", () => {
+      held = false; cancel();
+      timer = setTimeout(() => { held = true; setPreferredService(id); }, HOLD_MS);
+    }, { passive: true });
+    chip.addEventListener("touchmove",   cancel, { passive: true });
+    chip.addEventListener("touchend",    cancel);
+    chip.addEventListener("touchcancel", cancel);
+    chip.addEventListener("click", (e) => {
+      if (!held) return;
+      held = false;
+      e.preventDefault();      // the hold already did something
+    });
+    chip.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      setPreferredService(id);
+    });
+  }
+
+  // What is currently on screen, so a change of default can repaint both rows
+  // without asking the server again.
+  let lastLinks = null;
+  let lastActs  = [];
+
+  /*
+   * "If you like this" — three acts, each with one record.
+   *
+   * Never blocks the card and never reports a failure: a suggestion row is the
+   * page's business, and an error message where three names should be is worse
+   * than the row simply not being there.
+   */
+  async function loadSimilar(artist, seq) {
+    if (!similarEl || !similarLs || !artist) return;
+    let acts = [];
+    try {
+      const r = await fetch("/api/similar?artist=" + encodeURIComponent(artist));
+      if (!r.ok) return;
+      const j = await r.json();
+      acts = (j && j.acts) || [];
+    } catch (e) { return; }      // no row, no message
+    if (seq !== shareSeq) return;   // the sheet moved on, or closed
+    lastActs = acts;
+    renderSimilar(acts);
+    upgradeQobuzLinks(acts, {
+      container: similarLs, current: () => seq === shareSeq,
+      album: a => a.album, artist: a => a.name,
+    });
+  }
+
+  /*
+   * A Qobuz search link lands on their DOWNLOAD STORE and never opens the app.
+   * Only an album id does — see lib/qobuz-deeplink.js for why no search URL
+   * anywhere can. Getting an id costs a page read on the server, so it happens
+   * AFTER the rows are on screen and never before them: a suggestion must not
+   * wait on it, and a failure leaves the search link that was already there.
+   *
+   * ONLY WHEN QOBUZ IS THE DEFAULT, because that is the only link the rows
+   * actually point at. Switching the default to Qobuz later runs this again.
+   *
+   * The row is found again by what it LINKS TO rather than held onto: the list
+   * may have been rebuilt while a lookup was in flight (a change of default
+   * repaints it), and a reference to a discarded node would upgrade nothing.
+   */
+  async function upgradeQobuzLinks(items, opts) {
+    opts = opts || {};
+    const box     = opts.container;
+    const current = typeof opts.current === "function" ? opts.current : () => true;
+    const albumOf = opts.album  || (x => x.album);
+    const artistOf = opts.artist || (x => x.name);
+    if (!box) return;
+    for (const item of (items || [])) {
+      if (!current()) return;                       // the screen moved on
+      const album = item && albumOf(item);
+      if (!item || !album || item.in_library) continue;
+      const svc = (item.services || []).find(x => x.id === "qobuz");
+      if (!svc || !svc.url) continue;
+      const ids = (item.services || []).map(x => x.id);
+      if (preferredService(ids) !== "qobuz") continue;
+      if (svc.url.indexOf("open.qobuz.com") === 0) continue;   // already upgraded
+      try {
+        const params = new URLSearchParams({ album, artist: artistOf(item) || "" });
+        const r = await fetch("/api/qobuz-link?" + params);
+        if (!r.ok) continue;
+        const j = await r.json();
+        if (!j || !j.url) continue;
+        if (!current()) return;
+        const before = svc.url;
+        // Remember it on the item, so a repaint (a change of default and back)
+        // keeps the good link instead of asking again.
+        svc.url = j.url;
+        const row = box.querySelector('a[href="' + cssEscapeUrl(before) + '"]');
+        if (row) row.href = j.url;
+      } catch (e) { /* the search link is still there, which is not nothing */ }
+    }
+  }
+
+  /*
+   * The card's Qobuz chip, upgraded the same way and for the same reason.
+   * Separate from the suggestions only because it is one link rather than
+   * three and it is about the record on the card, not about an act like it.
+   */
+  async function upgradeQobuzChip(title, artist, seq) {
+    if (!linksEl || !title) return;
+    const svc = (lastLinks && lastLinks.services || []).find(x => x.id === "qobuz");
+    if (!svc || !svc.url || svc.url.indexOf("open.qobuz.com") === 0) return;
+    try {
+      const params = new URLSearchParams({ album: title, artist: artist || "" });
+      const r = await fetch("/api/qobuz-link?" + params);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (!j || !j.url || seq !== shareSeq) return;
+      const before = svc.url;
+      svc.url = j.url;
+      const chip = linksEl.querySelector('a[href="' + cssEscapeUrl(before) + '"]');
+      if (chip) chip.href = j.url;
+    } catch (e) { /* the search link is still there */ }
+  }
+
+  /** Quotes and backslashes, so a URL can sit inside an attribute selector. */
+  function cssEscapeUrl(value) {
+    return String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  /*
+   * Each suggestion is somewhere to GO, not a line of text.
+   *
+   *   IN THE LIBRARY -> a button that queues it. The server resolved it and
+   *     sent the offset plus the library's own title and artist, and those go
+   *     with the request: /api/play relocates a drifted offset rather than
+   *     playing whatever now sits at it, and that guarantee is worth nothing
+   *     if the caller does not send the identity to check against.
+   *   NOT IN THE LIBRARY -> a link to the default service's search for it.
+   *
+   * The two are visibly different before they are tapped, because "this adds
+   * to your queue" and "this leaves the app" should not look the same.
+   */
+  /*
+   * ONE ROW BUILDER, used by the suggestions under the card and by the
+   * Discover screen. They ask different questions — "acts like this one" and
+   * "new records by acts you play" — but the answer is the same KIND of thing
+   * in both: a record that is either in the library or on a service, and the
+   * rules about which (send the library's own identity with a queue, leave via
+   * the default service otherwise) must not have two implementations that can
+   * drift apart. The caller supplies the two lines; everything about where the
+   * row GOES lives here.
+   *
+   * @param {object} item     { in_library, offset, library_title,
+   *                            library_subtitle, services[] }
+   * @param {string} primary  the bold line
+   * @param {string} sub      the quiet line, or ""
+   */
+  function goRow(item, primary, sub, art) {
+    const label = document.createElement("span");
+    label.className = "share-similar-name";
+    label.textContent = primary;
+    const rec = document.createElement("span");
+    rec.className = "share-similar-rec";
+    if (sub) rec.textContent = sub;
+
+    /*
+     * WITH ARTWORK, the two lines become a column beside the cover; without it
+     * they stay direct children of the row exactly as before.
+     *
+     * Two shapes rather than one, deliberately. The suggestions under the share
+     * card are a compact list inside a sheet and carry no artwork — that is
+     * the older decision and this must not quietly change it — while Discover
+     * is a full screen of RECORDS, where a wall of text is the odd one out.
+     * Callers that pass no art get byte-identical markup to before.
+     */
+    let holder = null;
+    if (art) {
+      holder = document.createElement("span");
+      holder.className = "row-text";
+      holder.appendChild(label);
+      if (sub) holder.appendChild(rec);
+    }
+    const fill = (row) => {
+      if (art) { row.appendChild(rowArt(art)); row.appendChild(holder); }
+      else { row.appendChild(label); if (sub) row.appendChild(rec); }
+    };
+
+    let row;
+    if (item.in_library && typeof item.offset === "number") {
+      row = document.createElement("button");
+      row.type = "button";
+      row.className = "share-similar-act is-library";
+      fill(row);
+      row.appendChild(tagEl("Queue"));
+      row.addEventListener("click", () => queueSuggestion(item, row));
+    } else {
+      const ids = (item.services || []).map(x => x.id);
+      const svc = (item.services || []).find(x => x.id === preferredService(ids));
+      if (svc) {
+        row = document.createElement("a");
+        row.className = "share-similar-act is-service";
+        row.href = svc.url;
+        row.target = "_blank";
+        row.rel = "noopener noreferrer";
+        fill(row);
+        row.appendChild(tagEl(svc.name));
+      } else {
+        // Nothing to link to — every service switched off, or no record was
+        // named. Still shown, because the name itself is the answer.
+        row = document.createElement("div");
+        row.className = "share-similar-act";
+        fill(row);
+      }
+    }
+    if (art) row.classList.add("has-art");
+    return row;
+  }
+
+  /*
+   * A row's cover, in a box that holds its place whether or not the image ever
+   * arrives.
+   *
+   * THE TILE IS ALWAYS THERE AND THE IMAGE IS WHAT IS OPTIONAL. These covers
+   * come from a third party (Deezer, for a record the library does not have),
+   * so some fraction of them will 404, be blocked, or simply not exist — and
+   * an <img> with a dead src draws the browser's broken-image glyph, which
+   * reads as "this app is broken" rather than "this record has no cover". On
+   * error the img removes itself and the empty tile stands, so every row keeps
+   * the same shape either way.
+   */
+  function rowArt(url) {
+    const box = document.createElement("span");
+    box.className = "row-art";
+    // What this tile was ASKED for, kept on the box rather than only on the
+    // img: the img removes itself when the cover does not load, and without
+    // this there is then nothing left to say which URL was tried — neither for
+    // a person looking at the row nor for a test asserting that an in-library
+    // record used Roon's art rather than a streaming service's.
+    box.dataset.artSrc = url;
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.alt = "";
+    img.addEventListener("error", () => {
+      box.dataset.artFailed = "1";
+      if (img.parentNode) img.parentNode.removeChild(img);
+    });
+    img.src = url;
+    box.appendChild(img);
+    return box;
+  }
+
+  function renderSimilar(acts) {
+    if (!similarEl || !similarLs) return;
+    similarLs.innerHTML = "";
+    for (const act of (acts || [])) {
+      if (!act || !act.name) continue;
+      // An act whose records could not be named is still worth showing, so the
+      // record line is optional rather than the row being dropped.
+      const sub = act.album
+        ? (act.year ? act.album + " \u00b7 " + act.year : act.album) : "";
+      similarLs.appendChild(goRow(act, act.name, sub));
+    }
+    similarEl.classList.toggle("hidden", !similarLs.children.length);
+  }
+
+  function tagEl(text) {
+    const t = document.createElement("span");
+    t.className = "share-similar-tag";
+    t.textContent = text;
+    return t;
+  }
+
+  /*
+   * Queue a suggestion that is in the library.
+   *
+   * Sends the LIBRARY's title and artist, not Deezer's: /api/play compares the
+   * identity against what sits at the offset and relocates or refuses when
+   * they disagree, and Deezer's punctuation is not Roon's.
+   */
+  async function queueSuggestion(act, row) {
+    const zone = (window.__selectedZoneId && window.__selectedZoneId()) || null;
+    if (!zone) { if (window.__showToast) window.__showToast("Pick a zone first", "err"); return; }
+    if (row.dataset.busy === "1") return;
+    row.dataset.busy = "1";
+    const tag = row.querySelector(".share-similar-tag");
+    const was = tag ? tag.textContent : "";
+    if (tag) tag.textContent = "\u2026";
+    try {
+      const r = await fetch("/api/play", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          offset:   act.offset,
+          title:    act.library_title    || act.album || "",
+          subtitle: act.library_subtitle || "",
+          zone_or_output_id: zone,
+          kind: "queue",
+        })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+      if (typeof j.offset === "number" && j.offset >= 0) act.offset = j.offset;
+      if (tag) tag.textContent = "Queued";
+      if (window.__showToast) window.__showToast("Queued " + (act.album || act.name), "ok");
+    } catch (e) {
+      if (tag) tag.textContent = was;
+      if (window.__showToast) window.__showToast("Couldn't queue that", "err");
+    } finally {
+      row.dataset.busy = "";
+    }
+  }
+
+  function renderLinks(links) {
+    if (!linksEl) return;
+    lastLinks = links || null;
+    linksEl.innerHTML = "";
+    const all = [
+      ...((links && links.services) || []).map(l => ({ link: l, review: false })),
+      ...((links && links.reviews)  || []).map(l => ({ link: l, review: true  })),
+    ];
+    for (const { link, review } of all) {
+      if (!link || !link.url) continue;
+      const a = document.createElement("a");
+      a.className = "share-link" + (review ? " is-review" : "");
+      a.href = link.url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      // textContent, not innerHTML: the label is a constant today, and this is
+      // what keeps it harmless if it ever stops being one.
+      a.textContent = link.chip || link.name || link.id;
+      // Only a SERVICE can be the default — a review site is not somewhere to
+      // hear a record, so holding one does nothing.
+      if (!review) {
+        a.dataset.service = link.id;
+        holdToPrefer(a, link.id);
+      }
+      linksEl.appendChild(a);
+    }
+    // An empty row is a gap under the card, not a row.
+    linksEl.classList.toggle("hidden", !linksEl.children.length);
+    markPreferredChip();
+  }
 
   function buildActions(blob, title, artist) {
     actions.innerHTML = "";
@@ -8818,6 +12505,7 @@
     b.innerHTML = `${iconSvg}<span>${label}</span>`;
     return b;
   }
+
   function icon(name) {
     const I = {
       share:    '<polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>',
@@ -9034,48 +12722,144 @@
   // queue runs out", so both on means two things racing to fill one queue: the
   // server switches the other off, and these read back from it rather than
   // assuming it did — a change the Core rejects must not leave a switch lit.
-  async function loadRadio() {
-    if (!zoneSelect || !zoneSelect.value) return;
-    const zone = zoneSelect.value;
-    try {
-      const r = await fetch("/api/radio?zone=" + encodeURIComponent(zone), { cache: "no-store" });
-      if (r.ok && radioToggle) { const j = await r.json(); radioToggle.checked = !!j.enabled; }
-    } catch (e) {} // network error loading radio state — toggle stays at default, non-critical
-    try {
-      const r = await fetch("/api/zone-state?zone=" + encodeURIComponent(zone), { cache: "no-store" });
-      if (r.ok && roonRadioToggle) {
-        const j = await r.json();
-        const settings = j && j.zone && j.zone.settings;
-        roonRadioToggle.checked = !!(settings && settings.auto_radio);
-      }
-    } catch (e) {} // same: non-critical, the switch stays where it was
+  //
+  // Every paint and every write of the two switches is stamped with a
+  // generation. Only the newest may paint.
+  //
+  // Serialising the writes (below) stops two of them being in flight at once,
+  // but it cannot stop an answer arriving after the user has tapped again — and
+  // that answer, painted, drags both switches back to the state before the tap.
+  // Reads carry a generation for the same reason: loadRadio() is two round
+  // trips, and a tap during them must win.
+  let radioGen = 0, radioInFlight = false, radioQueued = null;
+
+  function paintRadios(s) {
+    if (!s) return;
+    if (radioToggle)     radioToggle.checked     = !!s.own;
+    if (roonRadioToggle) roonRadioToggle.checked = !!s.roon;
   }
+
+  // Read both switches for a zone. `gen` is passed by callers that already hold
+  // one (a write falling back to a re-read); anyone else is the newest intent
+  // and takes a fresh one.
+  async function loadRadio(zoneId, gen) {
+    if (!zoneSelect || !zoneSelect.value) return;
+    const zone = zoneId || zoneSelect.value;
+    const g = (gen === undefined) ? ++radioGen : gen;
+    // Together rather than one after the other: sequential awaits painted the
+    // two switches a beat apart every time the pane opened.
+    const [own, roon] = await Promise.all([
+      fetch("/api/radio?zone=" + encodeURIComponent(zone), { cache: "no-store" })
+        .then(r => (r.ok ? r.json() : null))
+        .then(j => (j ? !!j.enabled : null))
+        .catch(() => null),   // network error — null means "don't know", below
+      fetch("/api/zone-state?zone=" + encodeURIComponent(zone), { cache: "no-store" })
+        .then(r => (r.ok ? r.json() : null))
+        .then(j => {
+          const s = j && j.zone && j.zone.settings;
+          return j ? !!(s && s.auto_radio) : null;
+        })
+        .catch(() => null),
+    ]);
+    // A newer tap or read happened while these were in the air. Its answer is
+    // the current truth and this one would undo it.
+    if (g !== radioGen) return;
+    // null is "don't know" — leave that switch where it is rather than
+    // reporting a radio off because the request for it failed.
+    if (own  !== null && radioToggle)     radioToggle.checked     = own;
+    if (roon !== null && roonRadioToggle) roonRadioToggle.checked = roon;
+  }
+  // One radio write, bounded.
+  //
+  // Bounded for the reason postVolume is: neither route answers until Roon's
+  // change_settings callback fires, and a Core that drops mid-call never
+  // settles the promise. With the in-flight guard below that would leave the
+  // switches queueing behind a request that never returns — dead until reload,
+  // which is the v1.7.69 volume bug wearing a different hat.
+  //
+  // Returns the server's `radios` block, or null when it refused or failed —
+  // the caller re-reads rather than trusting the switch the user moved.
+  async function postRadio(which, on, zoneId) {
+    const ctl = typeof AbortController === "function" ? new AbortController() : null;
+    const t   = ctl ? setTimeout(() => ctl.abort(), 5000) : null;
+    try {
+      const r = await fetch(which === "own" ? "/api/radio" : "/api/zone-settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(which === "own"
+          ? { zone: zoneId, enabled: on }
+          : { zone_or_output_id: zoneId, auto_radio: on }),
+        signal: ctl ? ctl.signal : undefined,
+      });
+      const j = await r.json().catch(() => null);
+      return (r.ok && j && j.radios) ? j.radios : null;
+    } finally {
+      if (t) clearTimeout(t);
+    }
+  }
+
+  // Drive one switch. Serialised, latest-wins — the volume control's shape
+  // (v1.7.69), for its reasons and one of its own.
+  //
+  // The two switches write to DIFFERENT endpoints, so with nothing holding them
+  // apart a quick Random-on then Roon-on puts two requests in flight at once.
+  // They finish in whatever order the Core answers, the older answer paints
+  // last, and the switches settle on the tap before last. On the server the two
+  // routes are reading and writing the same zone set concurrently, and the
+  // interleaving where each cancels the other's radio leaves BOTH off.
+  async function writeRadio(which, on) {
+    if (!zoneSelect || !zoneSelect.value) return;
+    const zoneId = zoneSelect.value;
+
+    // Show the rule NOW: as this switch comes on, the other goes off. It is a
+    // rule the client knows and the server is about to confirm, and waiting for
+    // a Core round trip to draw it left the other switch lit for long enough to
+    // read as broken — displaying, of all things, the both-on state the rule
+    // exists to prevent. Reconciled against the server's answer below, the same
+    // trade the volume slider makes. Only for ON: the rule is "at most one",
+    // so switching a radio off says nothing about the other.
+    if (on) paintRadios(which === "own" ? { own: true, roon: false }
+                                        : { own: false, roon: true });
+
+    const gen = ++radioGen;
+    if (radioInFlight) { radioQueued = { which, on, zoneId, gen }; return; }
+    radioInFlight = true;
+    let job = { which, on, zoneId, gen };
+    try {
+      while (job) {
+        let radios = null;
+        // Inside the loop, so one failed write does not abandon a tap already
+        // queued behind it and already painted.
+        try { radios = await postRadio(job.which, job.on, job.zoneId); }
+        catch (e) { radios = null; }   // blip, or the 5s timeout above
+        // Superseded: a newer tap is queued or already painted, and this answer
+        // describes the state before it.
+        if (job.gen === radioGen) {
+          if (radios) paintRadios(radios);
+          // Refused or never landed. We don't know what the server did, so go
+          // and look rather than leave the switch showing a change that may
+          // never have happened.
+          else loadRadio(job.zoneId, job.gen);
+        }
+        job = radioQueued; radioQueued = null;
+      }
+    } finally {
+      // In a finally so an unexpected throw cannot wedge every later tap.
+      radioInFlight = false;
+    }
+  }
+
   if (radioToggle) {
-    radioToggle.addEventListener("change", async () => {
-      if (!zoneSelect || !zoneSelect.value) return;
-      try {
-        await fetch("/api/radio", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ zone: zoneSelect.value, enabled: radioToggle.checked })
-        });
-      } catch (e) {} // network error toggling radio — toggle UI already updated, best-effort
-      loadRadio();
-    });
+    radioToggle.addEventListener("change", () => writeRadio("own", radioToggle.checked));
   }
   if (roonRadioToggle) {
-    roonRadioToggle.addEventListener("change", async () => {
-      if (!zoneSelect || !zoneSelect.value) return;
-      try {
-        await fetch("/api/zone-settings", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            zone_or_output_id: zoneSelect.value, auto_radio: roonRadioToggle.checked
-          })
-        });
-      } catch (e) {} // best-effort; loadRadio below re-reads the truth either way
-      loadRadio();
-    });
+    roonRadioToggle.addEventListener("change", () => writeRadio("roon", roonRadioToggle.checked));
   }
+  // The switches belong to the selected zone, and nothing re-read them when it
+  // changed: with the Playback pane open, changing zone left both showing the
+  // PREVIOUS zone's radios — and the next tap wrote that stale reading to the
+  // new zone. Runs alongside the other two listeners on this select (the active
+  // zone, and the now-playing refresh); it only reads.
+  if (zoneSelect) zoneSelect.addEventListener("change", () => loadRadio());
 
   let versionLoaded = false;
   async function loadVersion() {
@@ -9087,8 +12871,8 @@
         if (s && s.current) {
           const parts = (s.current || "").split(".");
           versionEl.textContent = parts.length >= 3
-            ? "MusicD Remote v" + parts[0] + "." + parts[1] + " (Build " + parts[2] + ")"
-            : "MusicD Remote v" + s.current;
+            ? "Rouen Lite v" + parts[0] + "." + parts[1] + " (Build " + parts[2] + ")"
+            : "Rouen Lite v" + s.current;
           versionLoaded = true;
         }
       }
@@ -9121,7 +12905,40 @@
     });
   }
 
+  // The key boxes say whether the key that is set WORKS (v1.8.74): the server
+  // tries it against its service (see keyCheck in index.js). A key that works
+  // shows a ✓ in its box and "Working" in the placeholder; one the service
+  // refused shows ✗; no answer from the service shows nothing either way.
+  function paintKeyCheck(input, badge, j, emptyHint) {
+    const state = j && j.set ? j.check : null;
+    if (badge) {
+      badge.classList.toggle("hidden", state !== "ok" && state !== "invalid");
+      badge.classList.toggle("is-ok", state === "ok");
+      badge.classList.toggle("is-bad", state === "invalid");
+      badge.textContent = state === "ok" ? "✓" : state === "invalid" ? "✕" : "";
+      badge.setAttribute("aria-label", state === "ok" ? "Key checked and working"
+        : state === "invalid" ? "Key refused by the service" : "");
+      badge.title = badge.getAttribute("aria-label");
+    }
+    if (input) {
+      input.classList.toggle("is-ok", state === "ok");
+      input.classList.toggle("is-bad", state === "invalid");
+      input.placeholder = !(j && j.set) ? emptyHint
+        : state === "ok" ? "Checked and working — " + j.masked
+        : state === "invalid" ? "Not accepted — paste a new one"
+        : "Saved — " + j.masked;
+    }
+  }
+  function keyStatusText(j, envName) {
+    if (!j.set) return "Not set";
+    const where = j.source === "env" ? " — from the install command (" + envName + "). Saving here overrides it." : "";
+    if (j.check === "ok") return "✓ Checked and working: " + j.masked + where;
+    if (j.check === "invalid") return "The service refused this key (" + j.masked + "). Check it was copied in full." + where;
+    return "Current: " + j.masked + " — couldn’t reach the service to check it." + where;
+  }
+
   const discogsTokenInput  = document.getElementById("discogs-token-input");
+  const discogsTokenCheck  = document.getElementById("discogs-token-check");
   const discogsTokenSave   = document.getElementById("discogs-token-save");
   const discogsTokenStatus = document.getElementById("discogs-token-status");
 
@@ -9129,9 +12946,12 @@
     try {
       const r = await fetch("/api/settings/discogs-token");
       const j = await r.json();
-      if (discogsTokenStatus) {
-        discogsTokenStatus.textContent = j.set ? ("Current: " + j.masked) : "Not set";
-      }
+      // Naming where an env-seeded key came from is the whole point of
+      // reporting the source: without it a key set by the install command
+      // looks identical to a saved one, and editing settings.json to change
+      // it appears to do nothing.
+      if (discogsTokenStatus) discogsTokenStatus.textContent = keyStatusText(j, "RRA_DISCOGS_KEY");
+      paintKeyCheck(discogsTokenInput, discogsTokenCheck, j, "Paste personal access token…");
     } catch (_) { /* display-only status — if the fetch fails, silence is fine; status just stays stale */ }
   }
 
@@ -9149,7 +12969,10 @@
         const j = await r.json();
         if (j.ok) {
           if (discogsTokenInput) discogsTokenInput.value = "";
-          showToast(j.saved === false ? "Token set but file write failed — won't persist after restart" : "Discogs token saved", j.saved === false ? "error" : "ok");
+          showToast(j.saved === false ? "Token set but file write failed — won't persist after restart"
+            : j.check === "ok" ? "Discogs token saved — checked and working"
+            : j.check === "invalid" ? "Saved, but Discogs refused this token" : "Discogs token saved",
+            (j.saved === false || j.check === "invalid") ? "error" : "ok");
           loadDiscogsToken();
         } else {
           showToast(j.error || "Failed to save token", "error");
@@ -9163,6 +12986,7 @@
   }
 
   const fanartKeyInput  = document.getElementById("fanart-key-input");
+  const fanartKeyCheck  = document.getElementById("fanart-key-check");
   const fanartKeySave   = document.getElementById("fanart-key-save");
   const fanartKeyStatus = document.getElementById("fanart-key-status");
 
@@ -9170,9 +12994,9 @@
     try {
       const r = await fetch("/api/settings/fanart-key");
       const j = await r.json();
-      if (fanartKeyStatus) {
-        fanartKeyStatus.textContent = j.set ? ("Current: " + j.masked) : "Not set";
-      }
+      // Same reasoning as the Discogs status above: say where it came from.
+      if (fanartKeyStatus) fanartKeyStatus.textContent = keyStatusText(j, "RRA_FANART_KEY");
+      paintKeyCheck(fanartKeyInput, fanartKeyCheck, j, "Paste FanArt.tv API key…");
     } catch (_) { /* display-only status — if the fetch fails, silence is fine; status just stays stale */ }
   }
 
@@ -9190,7 +13014,10 @@
         const j = await r.json();
         if (j.ok) {
           if (fanartKeyInput) fanartKeyInput.value = "";
-          showToast(j.saved === false ? "Key set but file write failed — won't persist after restart" : "FanArt.tv key saved", j.saved === false ? "error" : "ok");
+          showToast(j.saved === false ? "Key set but file write failed — won't persist after restart"
+            : j.check === "ok" ? "FanArt.tv key saved — checked and working"
+            : j.check === "invalid" ? "Saved, but FanArt.tv refused this key" : "FanArt.tv key saved",
+            (j.saved === false || j.check === "invalid") ? "error" : "ok");
           loadFanartKey();
         } else {
           showToast(j.error || "Failed to save key", "error");
@@ -9246,6 +13073,150 @@
   // The Qobuz and Tidal account controls are not in this build — see the
   // note where the service browser used to live. Nothing loads their status
   // and nothing gates a top-bar button on it, because neither button exists.
+
+  // ----- Share card: services and reviews -----
+  //
+  // Both lists are BUILT FROM THE SERVER'S ANSWER rather than from markup, for
+  // the same reason the theme picker is built from the THEMES table: the list
+  // of what can be linked to lives in lib/share-links.js, and a hand-written
+  // copy here would be a second place for it to be wrong. The screen shows
+  // what CAN be shown, which is why the endpoint serves the full table
+  // alongside the enabled set and not just the set.
+  //
+  // Saving sends the whole array, never a delta. An empty array is a real
+  // answer — "all of them off" — and the server tells the two apart by
+  // Array.isArray, so a user who switches everything off gets what they asked
+  // for instead of the defaults back.
+  const shareServicesList = document.getElementById("share-services-list");
+  const shareReviewsList  = document.getElementById("share-reviews-list");
+  let shareLinkState = null;   // { services: {all, enabled}, reviews: {...} }
+
+  function renderShareToggles(listEl, group, onSave) {
+    if (!listEl || !group) return;
+    listEl.innerHTML = "";
+    const on = new Set(group.enabled || []);
+    for (const item of group.all || []) {
+      const row = document.createElement("div");
+      row.className = "settings-row";
+
+      const label = document.createElement("span");
+      label.className = "settings-label";
+      // The chip label where there is one, so this screen reads the same as
+      // the row it controls — "AllMusic artist", not "AllMusic" twice.
+      label.textContent = item.chip || item.name;
+
+      const sw = document.createElement("label");
+      sw.className = "switch";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = on.has(item.id);
+      input.setAttribute("aria-label", item.chip || item.name);
+      input.dataset.id = item.id;
+      const track = document.createElement("span");
+      track.className = "switch-track";
+      const thumb = document.createElement("span");
+      thumb.className = "switch-thumb";
+      track.appendChild(thumb);
+      sw.appendChild(input); sw.appendChild(track);
+
+      input.addEventListener("change", () => {
+        // Read the whole list off the DOM rather than tracking a set: what is
+        // on screen IS the answer being saved, so the two cannot drift.
+        const ids = Array.prototype.filter
+          .call(listEl.querySelectorAll('input[type="checkbox"]'), c => c.checked)
+          .map(c => c.dataset.id);
+        group.enabled = ids;
+        onSave(ids);
+        // Switching a service off can invalidate the default, so the list of
+        // candidates is rebuilt from what is left.
+        if (listEl === shareServicesList) renderShareDefault(group);
+      });
+
+      row.appendChild(label); row.appendChild(sw);
+      listEl.appendChild(row);
+    }
+  }
+
+  async function saveShareLinks(patch) {
+    try {
+      const r = await fetch("/api/settings/share-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch)
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+    } catch (e) {
+      if (window.__showToast) window.__showToast("Couldn't save that", "err");
+    }
+  }
+
+  /*
+   * The default service, in Settings as well as on the chip.
+   *
+   * THE SAME localStorage KEY the share sheet uses — one preference, two ways
+   * in. It is per device and not a server setting (see the note beside
+   * preferredService in the share module), which is why this reads and writes
+   * storage directly rather than posting anything.
+   *
+   * The list is the ENABLED services only: offering a default that is switched
+   * off would send a tap somewhere the user has already said they do not want.
+   * Turning off the current default therefore changes it, so the select is
+   * rebuilt whenever the toggles are.
+   */
+  const shareDefaultSel = document.getElementById("share-default-service");
+  const SHARE_PREF_KEY_SETTINGS = "musicd-share-service";
+
+  function renderShareDefault(group) {
+    if (!shareDefaultSel || !group) return;
+    const all = group.all || [];
+    const on  = new Set(group.enabled || []);
+    const enabled = all.filter(s => on.has(s.id));
+    shareDefaultSel.innerHTML = "";
+    if (!enabled.length) {
+      const o = document.createElement("option");
+      o.textContent = "No services switched on";
+      o.value = "";
+      shareDefaultSel.appendChild(o);
+      shareDefaultSel.disabled = true;
+      return;
+    }
+    shareDefaultSel.disabled = false;
+    let stored = null;
+    try { stored = localStorage.getItem(SHARE_PREF_KEY_SETTINGS); }
+    catch (e) { /* private browsing */ }
+    const chosen = (stored && enabled.some(s => s.id === stored)) ? stored : enabled[0].id;
+    for (const svc of enabled) {
+      const o = document.createElement("option");
+      o.value = svc.id;
+      o.textContent = svc.name;
+      o.selected = svc.id === chosen;
+      shareDefaultSel.appendChild(o);
+    }
+  }
+
+  if (shareDefaultSel) {
+    shareDefaultSel.addEventListener("change", () => {
+      const id = shareDefaultSel.value;
+      if (!id) return;
+      try { localStorage.setItem(SHARE_PREF_KEY_SETTINGS, id); }
+      catch (e) { /* the choice lasts this session */ }
+    });
+  }
+
+  async function loadShareLinkSettings() {
+    if (!shareServicesList && !shareReviewsList) return;
+    try {
+      const r = await fetch("/api/settings/share-links");
+      if (!r.ok) return;
+      shareLinkState = await r.json();
+      renderShareToggles(shareServicesList, shareLinkState.services,
+        ids => saveShareLinks({ services: ids }));
+      renderShareToggles(shareReviewsList, shareLinkState.reviews,
+        ids => saveShareLinks({ reviews: ids }));
+      renderShareDefault(shareLinkState.services);
+    } catch (e) { /* the panes stay empty; nothing else depends on them */ }
+  }
+  loadShareLinkSettings();
 
   // Settings is a two-level view: a category home list and one pane per
   // category. Only one .settings-view is visible at a time. The controls and
@@ -9448,7 +13419,7 @@
   // 4am costs nothing, the same work at 8pm competes with whatever Roon is
   // doing while somebody is listening.
   const picksHour    = document.getElementById("picks-hour");
-  const picksAutoAdd = document.getElementById("picks-autoadd");
+  const picksDest    = document.getElementById("picks-dest");
   const picksRebuild = document.getElementById("picks-rebuild");
   const picksNote    = document.getElementById("picks-service-note");
 
@@ -9479,7 +13450,7 @@
   const picksEnabled = document.getElementById("picks-enabled");
 
   async function loadSmartPicksSettings() {
-    if (!picksHour && !picksAutoAdd && !picksEnabled) return;
+    if (!picksHour && !picksDest && !picksEnabled) return;
     try {
       const r = await fetch("/api/settings/smart-picks");
       if (!r.ok) return;
@@ -9488,7 +13459,10 @@
       // A device that was not the one that flipped the switch catches up here.
       if (window.__applyFeatureMenu) window.__applyFeatureMenu({ picks: !!j.enabled });
       if (picksHour && Number.isFinite(j.hour)) picksHour.value = String(j.hour);
-      if (picksAutoAdd) picksAutoAdd.checked = !!j.auto_add;
+      if (picksDest && typeof j.dest === "string") {
+        picksDest.value = j.dest;
+        picksDest.dataset.saved = j.dest;   // what a refused change goes back to
+      }
       if (picksNote) {
         picksNote.textContent = j.service_ready
           ? "Picks you were not offered automatically are always yours to accept or reject."
@@ -9521,14 +13495,17 @@
       }
     });
   }
-  if (picksAutoAdd) {
-    picksAutoAdd.addEventListener("change", async () => {
-      const on = picksAutoAdd.checked;
-      if (await saveSmartPicksSettings({ auto_add: on })) {
-        showToast(on ? "Picks will be added automatically"
-                     : "Every pick will ask before adding");
+  if (picksDest) {
+    picksDest.addEventListener("change", async () => {
+      const dest = picksDest.value;
+      if (await saveSmartPicksSettings({ dest })) {
+        picksDest.dataset.saved = dest;
+        showToast(dest === "library" ? "Picks will be added to your library"
+                : dest === "later"   ? "Picks will go to Listen later — your library is left alone"
+                :                      "Every pick will ask first");
       } else {
-        picksAutoAdd.checked = !on;   // the server refused — do not lie about it
+        // The server refused — put back the destination it is actually using.
+        if (picksDest.dataset.saved) picksDest.value = picksDest.dataset.saved;
       }
     });
   }
@@ -9547,6 +13524,173 @@
       } finally {
         picksRebuild.disabled = false;
         picksRebuild.textContent = orig;
+      }
+    });
+  }
+
+  // ----- Discover --------------------------------------------------------
+  // Up to eighty Deezer reads in a row, once a day. The hour matters for the
+  // same reason Smart Picks' does — not because it competes with Roon (nothing
+  // here touches the Core) but because a burst of outbound calls belongs at an
+  // hour nobody is listening.
+  const discEnabled = document.getElementById("discover-enabled");
+  const discHour    = document.getElementById("discover-hour");
+  const discRebuild = document.getElementById("discover-rebuild");
+  const discNote    = document.getElementById("discover-note");
+
+  if (discHour && !discHour.options.length) {
+    for (let h = 0; h < 24; h++) {
+      const o = document.createElement("option");
+      o.value = String(h);
+      o.textContent = (h < 10 ? "0" + h : String(h)) + ":00";
+      discHour.appendChild(o);
+    }
+  }
+
+  async function saveDiscoverSettings(patch) {
+    try {
+      const r = await fetch("/api/settings/discover", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch)
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) { showToast(j.error || "Couldn't save", "error"); return false; }
+      return true;
+    } catch (e) {
+      showToast("Couldn't save: " + e.message, "error");
+      return false;
+    }
+  }
+
+  async function loadDiscoverSettings() {
+    if (!discEnabled && !discHour) return;
+    try {
+      const r = await fetch("/api/settings/discover");
+      if (!r.ok) return;
+      const j = await r.json();
+      if (discEnabled) discEnabled.checked = !!j.enabled;
+      // A device that was not the one that flipped the switch catches up here.
+      if (window.__applyFeatureMenu) window.__applyFeatureMenu({ discover: !!j.enabled });
+      if (discHour && Number.isFinite(j.hour)) discHour.value = String(j.hour);
+      if (discNote) {
+        // The numbers come from the SERVER rather than being written into the
+        // copy, so the sentence cannot end up describing a window or a seed
+        // count that the build no longer uses.
+        discNote.textContent = "Reads your play history for the " +
+          (j.seed_count || 40) + " artists you return to most, and looks for " +
+          "records they have released in the last " + (j.window_days || 60) +
+          " days. Nothing here touches your Roon Core.";
+      }
+    } catch (e) {
+      // Settings show their last values; the pane is not the place to report a
+      // transient fetch failure.
+    }
+  }
+
+  if (discEnabled) {
+    discEnabled.addEventListener("change", async () => {
+      const on = discEnabled.checked;
+      if (await saveDiscoverSettings({ enabled: on })) {
+        showToast(on ? "Discover on — the first list builds at the scheduled hour"
+                     : "Discover off — nothing runs in the background");
+        if (window.__applyFeatureMenu) window.__applyFeatureMenu({ discover: on });
+      } else {
+        discEnabled.checked = !on;   // the server refused — do not lie about it
+      }
+    });
+  }
+
+  if (discHour) {
+    discHour.addEventListener("change", async () => {
+      const h = parseInt(discHour.value, 10);
+      if (await saveDiscoverSettings({ hour: h })) {
+        showToast("Discover will look at " + (h < 10 ? "0" + h : h) + ":00");
+      }
+    });
+  }
+
+  if (discRebuild) {
+    discRebuild.addEventListener("click", async () => {
+      discRebuild.disabled = true;
+      const orig = discRebuild.textContent;
+      discRebuild.textContent = "\u2026";
+      try {
+        const r = await fetch("/api/discover/rebuild", { method: "POST" });
+        const j = await r.json().catch(() => ({}));
+        showToast(r.ok ? "Looking for new records — check back in a minute"
+                       : (j.error || "Couldn't refresh"), r.ok ? "ok" : "error");
+      } catch (e) {
+        showToast("Couldn't refresh: " + e.message, "error");
+      } finally {
+        discRebuild.disabled = false;
+        discRebuild.textContent = orig;
+      }
+    });
+  }
+
+  // ----- Waveform on/off -----
+  const waveEnabledEl = document.getElementById("waveform-enabled");
+  const waveEnabledNote = document.getElementById("waveform-enabled-note");
+  async function loadWaveformEnabled() {
+    if (!waveEnabledEl) return;
+    try {
+      const r = await fetch("/api/settings/waveform");
+      if (!r.ok) return;
+      const j = await r.json();
+      waveEnabledEl.checked = !!j.enabled;
+      window.__waveformOn = !!j.enabled;
+      showQobuzSecretState(j);
+      if (waveEnabledNote) {
+        waveEnabledNote.textContent = j.enabled
+          ? "On. Local files, and Qobuz and TIDAL tracks when that service is connected."
+          : "Off. The progress bar stays a plain line.";
+      }
+    } catch (e) { /* keep the last shown value */ }
+  }
+  // ----- Qobuz app secret (streaming waveforms) -----
+  // Blank is the default and the off switch: with no secret the server never
+  // asks Qobuz for audio and streaming tracks keep the plain bar.
+  const qSecStatus = document.getElementById("qobuz-secret-status");
+
+  // No controls of its own any more: one Qobuz sign-in under Streaming accounts
+  // covers browsing, favourites and waveforms alike, so this only reports what
+  // that sign-in means for waveforms.
+  function showQobuzSecretState(j) {
+    if (!qSecStatus) return;
+    if (j && j.qobuz_connected) {
+      qSecStatus.textContent = "Using your Qobuz sign-in. Qobuz tracks will show a " +
+        "waveform once analysed.";
+      return;
+    }
+    if (j && j.qobuz_secret_set) {
+      qSecStatus.textContent = "Using saved credentials from an earlier version. " +
+        "Reconnect Qobuz under Streaming accounts to replace them.";
+      return;
+    }
+    qSecStatus.textContent = "Connect Qobuz under Streaming accounts to enable this. " +
+      "Qobuz tracks keep the plain bar until then.";
+  }
+
+  if (waveEnabledEl) {
+    waveEnabledEl.addEventListener("change", async () => {
+      const on = waveEnabledEl.checked;
+      try {
+        const r = await fetch("/api/settings/waveform", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: on })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) throw new Error(j.error || "Couldn't save");
+        window.__waveformOn = on;
+        showToast(on ? "Waveform on \u2014 tracks show their shape as they play"
+                     : "Waveform off");
+        loadWaveformEnabled();
+        // Repaint now rather than at the next track change, so the switch is
+        // seen to do something.
+        if (window.__repaintWaveform) window.__repaintWaveform();
+      } catch (e) {
+        waveEnabledEl.checked = !on;   // the server refused — do not lie about it
+        showToast(e.message, "error");
       }
     });
   }
@@ -9598,9 +13742,14 @@
   // the globals below, so a row can never appear in one and not the other.
   const homeRowsList = document.getElementById("home-rows-list");
   let homeRowsDraft = [];
+  let rowDrag = null;   // the drag under way, if any — one at a time
 
   function renderHomeRowsList() {
     if (!homeRowsList) return;
+    // Never redraw under a finger. A save from the drag before can answer
+    // while the next one is under way; rebuilding then would pull the row out
+    // of the hand. The drag's own save redraws when it is let go.
+    if (rowDrag) return;
     homeRowsList.innerHTML = "";
     const titles = window.__homeRowTitles ? window.__homeRowTitles() : {};
     for (const row of homeRowsDraft) {
@@ -9656,72 +13805,124 @@
   }
 
   // Hold the grip, then drag. Pointer events so one code path covers touch and
-  // mouse; the list reorders live under the finger and the draft array is
-  // rewritten from the DOM on drop, so the two can never disagree.
+  // mouse. The row FOLLOWS the finger (a transform, so nothing reflows under
+  // it), its neighbours reorder as it passes their middles, the page scrolls by
+  // itself when the finger nears an edge, and letting go saves — the draft is
+  // read back out of the DOM, so the two can never disagree.
   //
-  // The listeners are on the DOCUMENT, not on the grip, and that is the whole
-  // point. The original captured the pointer to the grip — but the grip lives
-  // inside the row being dragged, and reordering moves that row in the DOM.
-  // Moving a node drops any pointer capture it holds, so the first swap threw
-  // the capture away: no more pointermove, and crucially no pointerup, so the
-  // drop handler that SAVES never ran. The list reordered under the finger and
-  // nothing was ever written down, which is precisely how it behaved — the new
-  // order right there on screen, and the old one back on the next visit.
-  function attachRowDrag(li, grip) {
-    let dragging = false;
-    let onMove = null;
-    let onEnd = null;
-
-    grip.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      if (dragging) return;
-      dragging = true;
-      li.classList.add("is-dragging");
-      onMove = (ev) => move(ev);
-      onEnd = () => end();
-      document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", onEnd);
-      document.addEventListener("pointercancel", onEnd);
-    });
-
-    function move(e) {
-      if (!dragging || !homeRowsList) return;
-      // Which sibling is under the pointer? Compare against each row's middle
-      // so the swap happens when the dragged row has genuinely passed it,
-      // rather than flickering on every pixel.
-      const items = [...homeRowsList.querySelectorAll(".home-row-item")];
-      for (const other of items) {
-        if (other === li) continue;
-        const r = other.getBoundingClientRect();
-        const mid = r.top + r.height / 2;
-        if (e.clientY < mid && other.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_FOLLOWING) {
-          homeRowsList.insertBefore(li, other);
-          break;
-        }
-        if (e.clientY > mid && other.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_PRECEDING) {
-          homeRowsList.insertBefore(li, other.nextSibling);
-          break;
-        }
-      }
+  // v1.8.77: the move/up listeners live on the WINDOW for the life of a drag,
+  // never on the grip, and the dragged row itself is never moved. They were on
+  // the grip, behind setPointerCapture — and the row was moved with
+  // insertBefore, which takes the grip out of the document for an instant. A capturing element that leaves the document
+  // loses its capture, so after the FIRST swap the grip heard nothing more:
+  // the row stopped following, and pointerup (the save) never arrived. A
+  // second tap on the grip was what finally fired it, which is why a row only
+  // "stuck" when its handle was tapped again, and reverted otherwise.
+  function rowScroller(el) {
+    for (let p = el && el.parentElement; p; p = p.parentElement) {
+      const oy = getComputedStyle(p).overflowY;
+      if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
     }
+    return null;
+  }
 
-    function end() {
-      if (!dragging) return;
-      dragging = false;
-      li.classList.remove("is-dragging");
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onEnd);
-      document.removeEventListener("pointercancel", onEnd);
-      onMove = null;
-      onEnd = null;
-      // The DOM is the truth now — read the order back out of it rather than
-      // trying to mirror every move into the array as it happened.
-      if (homeRowsList) {
+  function attachRowDrag(li, grip) {
+    grip.addEventListener("pointerdown", (e) => {
+      if (!homeRowsList) return;
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      // A drag whose release never arrived (the app sent to the background
+      // with a finger down, and no pointercancel) must not lock every grip
+      // for the rest of the session: a new press finishes it first.
+      if (rowDrag) rowDrag.finish();
+      e.preventDefault();
+      const r = li.getBoundingClientRect();
+      const d = rowDrag = {
+        li, id: e.pointerId, y: e.clientY,
+        grabDY: e.clientY - r.top,          // where on the row the finger is
+        scroller: rowScroller(homeRowsList),
+        timer: null,
+      };
+      li.classList.add("is-dragging");
+
+      // Lay the row under the finger: drop the transform, reorder against the
+      // neighbours' middles, then offset the row from wherever it now sits to
+      // where the finger says it is.
+      const place = () => {
+        li.style.transform = "";
+        const items = [...homeRowsList.querySelectorAll(".home-row-item")];
+        const y = d.y;
+        const mine = items.indexOf(li);
+        let to = mine;
+        for (let i = 0; i < items.length; i++) {
+          if (items[i] === li) continue;
+          const o = items[i].getBoundingClientRect();
+          const mid = o.top + o.height / 2;
+          if (i < mine && y - d.grabDY < mid && to > i) to = i;
+          if (i > mine && y - d.grabDY + li.offsetHeight > mid) to = i;
+        }
+        // The NEIGHBOURS move, never the dragged row: taking the row out of
+        // the document, even for the instant insertBefore needs, ends the
+        // touch's implicit capture on iOS.
+        if (to < mine) {
+          const anchor = li.nextSibling;
+          for (let k = to; k < mine; k++) homeRowsList.insertBefore(items[k], anchor);
+        } else if (to > mine) {
+          for (let k = mine + 1; k <= to; k++) homeRowsList.insertBefore(items[k], li);
+        }
+        const top = li.getBoundingClientRect().top;
+        li.style.transform = "translateY(" + (y - d.grabDY - top) + "px)";
+      };
+
+      // Near an edge of the scroller, keep scrolling for as long as the finger
+      // stays there — the drag goes on until it is let go, however long the list.
+      const EDGE = 56;
+      const autoScroll = () => {
+        d.timer = null;
+        if (rowDrag !== d || !d.scroller) return;
+        const box = d.scroller.getBoundingClientRect();
+        let step = 0;
+        if (d.y < box.top + EDGE) step = -Math.ceil((box.top + EDGE - d.y) / 4);
+        else if (d.y > box.bottom - EDGE) step = Math.ceil((d.y - (box.bottom - EDGE)) / 4);
+        if (!step) return;
+        const before = d.scroller.scrollTop;
+        d.scroller.scrollTop = before + step;
+        if (d.scroller.scrollTop !== before) place();
+        d.timer = setTimeout(autoScroll, 16);
+      };
+
+      const move = (ev) => {
+        if (ev.pointerId !== d.id) return;
+        ev.preventDefault();
+        // Settings closed mid-drag (Escape): every rect now reads 0, and
+        // placing against them would shove the row to the end. Stop here.
+        if (homeRowsList.offsetParent === null) { finish(); return; }
+        d.y = ev.clientY;
+        place();
+        if (!d.timer) autoScroll();
+      };
+      const end = (ev) => { if (ev.pointerId === d.id) finish(); };
+      const finish = d.finish = () => {
+        if (rowDrag !== d) return;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", end);
+        window.removeEventListener("pointercancel", end);
+        window.removeEventListener("blur", finish);
+        document.removeEventListener("visibilitychange", finish);
+        if (d.timer) clearTimeout(d.timer);
+        rowDrag = null;
+        li.style.transform = "";
+        li.classList.remove("is-dragging");
         const order = [...homeRowsList.querySelectorAll(".home-row-item")].map(x => x.dataset.row);
         homeRowsDraft.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-      }
-      saveHomeRows();
-    }
+        saveHomeRows();
+      };
+      window.addEventListener("pointermove", move, { passive: false });
+      window.addEventListener("pointerup", end);
+      window.addEventListener("pointercancel", end);
+      // Losing the window ends the drag where it stands, as letting go would.
+      window.addEventListener("blur", finish);
+      document.addEventListener("visibilitychange", finish);
+    });
   }
 
   async function saveHomeRows() {
@@ -9761,14 +13962,46 @@
     renderHomeRowsList();
   }
 
-  const open = () => { showView("home"); pendingThemeId = null; renderThemeList(); loadRadio(); loadVersion(); loadDiscogsToken(); loadFanartKey(); loadLabelFolderDepth(); loadSmartPicksSettings(); loadLabelsEnabled(); loadHomeRowsSettings(); loadLanSettings(); overlay.classList.remove("hidden"); };
+  // ----- UI Settings (v1.8.77) -----
+  // The selects read and write window.__uiSettings, which owns the stored
+  // values and paints them; this sheet holds no copy of its own to drift.
+  const uiSelects = {
+    text:   document.getElementById("ui-text-select"),
+    title:  document.getElementById("ui-title-select"),
+    layout: document.getElementById("ui-layout-select"),
+    tile:   document.getElementById("ui-tile-select"),
+  };
+  function loadUiSettings() {
+    const ui = window.__uiSettings;
+    if (!ui) return;
+    if (uiSelects.text)   uiSelects.text.value   = ui.get("text");
+    if (uiSelects.title)  uiSelects.title.value  = ui.get("title");
+    if (uiSelects.layout) uiSelects.layout.value = ui.layout();
+    if (uiSelects.tile)   uiSelects.tile.value   = ui.get("tile");
+  }
+  for (const k of ["text", "title", "tile"]) {
+    if (uiSelects[k]) uiSelects[k].addEventListener("change", () => {
+      if (window.__uiSettings) window.__uiSettings.set(k, uiSelects[k].value);
+    });
+  }
+  if (uiSelects.layout) uiSelects.layout.addEventListener("change", () => {
+    if (window.__uiSettings) window.__uiSettings.setLayout(uiSelects.layout.value);
+  });
+
+  // The loaders here are exactly the panes this build has: no wall display,
+  // no Qobuz or TIDAL account, no waveform — each of those panes is gone, and a
+  // loader left behind for one is how 0.1.13 shipped a Settings that would not
+  // open. The Network pane (LAN access) is this build's own.
+  const open = () => { showView("home"); loadUiSettings(); pendingThemeId = null; renderThemeList(); loadRadio(); loadVersion(); loadDiscogsToken(); loadFanartKey(); loadLabelFolderDepth(); loadSmartPicksSettings(); loadDiscoverSettings(); loadLabelsEnabled(); loadHomeRowsSettings(); loadLanSettings(); overlay.classList.remove("hidden"); };
   const close = () => {
     overlay.classList.add("hidden");
   };
 
   openBtn.addEventListener("click", open);
+  // closest(), not the target itself: the close button (v1.8.69) holds an
+  // icon, and a tap lands on the icon's path rather than on the button.
   overlay.addEventListener("click", (e) => {
-    if (e.target.hasAttribute("data-settings-close")) close();
+    if (e.target.closest("[data-settings-close]")) close();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || overlay.classList.contains("hidden")) return;
@@ -10326,8 +14559,16 @@
         btn.textContent = s.isDowngrade
           ? "Roll back to v" + s.latest
           : "Update to v" + s.latest;
-        if (notesDiv && s.notes) {
-          notesDiv.textContent = s.notes;
+        // The published image can also be pulled (v1.8.71): the server sends
+        // the command only when this release exists as an image, and it sits
+        // under the notes as the alternative to the button above, never
+        // instead of it.
+        const notes = [s.notes, s.pull && ((s.isDowngrade ? "Or go back by pulling the image:\n"
+                                                           : "Or pull the image itself:\n") + s.pull +
+          "\nthen recreate the container from it (with Compose: docker compose pull && docker compose up -d).")]
+          .filter(Boolean).join("\n\n");
+        if (notesDiv && notes) {
+          notesDiv.textContent = notes;
           notesDiv.classList.remove("hidden");
         }
       } else {
@@ -10341,6 +14582,75 @@
   });
 })();
 
+/* ------------------------------------------------------------------ */
+/*  Play Unheard — topbar compass button with 2-second spin           */
+/* ------------------------------------------------------------------ */
+(function initPlayUnheard() {
+  const btn        = document.getElementById("play-unheard-topbar");
+  const zoneSelect = document.getElementById("zone-select");
+  if (!btn) return;
+
+  // `spinEl` is whichever control the user actually pressed — the top-bar
+  // compass or the Home tile. Forwarding a click from one to the other would
+  // have left the pressed control inert for the two seconds it takes.
+  async function playUnheard(spinEl) {
+    const el = spinEl || btn;
+    const zone = zoneSelect && zoneSelect.value;
+    if (!zone) { if (window.__showToast) window.__showToast("Select a zone first"); return; }
+    if (el.classList.contains("spinning")) return;
+
+    // Spin the compass for 2 seconds, then fetch. The Home tile's disc is
+    // always turning; it is sped up rather than restarted (rampDisc).
+    el.classList.add("spinning");
+    const disc = el.querySelector && el.querySelector(".unheard-disc");
+    rampDisc(disc, 10);
+    await new Promise(r => setTimeout(r, 2000));
+
+    try {
+      const r = await fetch("/api/play-unheard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zone })
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        if (window.__showToast) window.__showToast(j.error || "Could not start playback", "error");
+      } else {
+        if (window.__showToast) window.__showToast("Playing: " + (j.album || "random album"));
+      }
+    } catch (e) {
+      if (window.__showToast) window.__showToast("Request failed", "error");
+    } finally {
+      el.classList.remove("spinning");
+      rampDisc(disc, 1);
+    }
+  }
+  // Ease the disc's running animation to `rate` times its resting speed over
+  // ~600ms. playbackRate keeps the current angle, so there is no jump; with
+  // reduced motion there is no animation and nothing to do.
+  function rampDisc(disc, rate) {
+    if (!disc || typeof disc.getAnimations !== "function") return;
+    const anim = disc.getAnimations()[0];
+    if (!anim) return;
+    clearTimeout(disc.__rampTimer);
+    const from = anim.playbackRate || 1;
+    const t0 = Date.now();
+    // Timed steps (~60 a second) rather than requestAnimationFrame: the same
+    // smoothness on screen, and a ramp that still finishes if no frame is
+    // drawn meanwhile (a backgrounded tab), so the disc never stays fast.
+    const step = () => {
+      const k = Math.min(1, (Date.now() - t0) / 600);
+      // Set directly: like updatePlaybackRate() it keeps the current angle,
+      // and it is in effect at once rather than at the animation's next
+      // "ready", which a ramp of quick steps would outrun.
+      anim.playbackRate = from + (rate - from) * (1 - Math.pow(1 - k, 3));
+      if (k < 1) disc.__rampTimer = setTimeout(step, 16);
+    };
+    step();
+  }
+  btn.addEventListener("click", () => playUnheard(btn));
+  window.__playUnheard = playUnheard;
+})();
 
 /* ------------------------------------------------------------------ */
 /*  Artist albums view                                                 */
@@ -10348,6 +14658,7 @@
 (() => {
   const grid         = document.getElementById("album-grid");
   const countBar     = document.getElementById("content-count");
+  const albumCountTitleEl = document.getElementById("album-count");
   const homeView     = document.getElementById("home-view");
   const homeSections = document.getElementById("home-sections");
   const topbarBack    = document.getElementById("topbar-back");
@@ -10356,6 +14667,80 @@
 
   let artistViewActive = false;
   let saved            = null;   // snapshot of the screen we came from
+  // The artist on screen, and the library revision its albums were read at
+  // (v1.8.65): an album of theirs added to Roon, or one whose badge changed,
+  // reaches the page while it is open — see refreshArtistView.
+  let artistViewName  = null;
+  let artistViewStamp = null;
+  let artistReadSeq   = 0;
+  const ARTIST_VIEW_DEPS = ["library"];
+  const liveApi = () => window.__live || null;
+  // The page's children, keyed so a re-read can reuse every one that did not
+  // change: the section headings by their text, the tiles by what they show.
+  // (The bio block keys itself when it arrives.)
+  function artistViewEntries(j) {
+    const L = liveApi();
+    const tileKey = (a) => "artist|" + (L ? L.tileKey(a) : JSON.stringify(a));
+    const heading = (text) => ({ key: "hdr:" + text, build: () => {
+      const hdr = document.createElement("div");
+      hdr.className = "artist-section-header";
+      hdr.textContent = text;
+      return hdr;
+    } });
+    const out = [];
+    if (j.primary.length) {
+      if (j.featured.length) out.push(heading("Albums"));
+      for (const a of j.primary) out.push({ key: tileKey(a), build: () => window.__buildAlbumTile(a) });
+    }
+    if (j.featured.length) {
+      out.push(heading("Also appears on"));
+      for (const a of j.featured) out.push({ key: tileKey(a), build: () => window.__buildAlbumTile(a) });
+    }
+    return out;
+  }
+  // "2 albums · The BeauBowBelles" — in the TOP BAR beside the brass <, where
+  // every other screen names itself (v1.8.77, at the user's word). It was a
+  // line of its own above the grid, while the bar beside Back kept the title
+  // of the screen the artist was opened from.
+  function artistCountBar(total, artistName) {
+    if (countBar) countBar.classList.add("hidden");
+    if (!albumCountTitleEl) return;
+    albumCountTitleEl.textContent = `${total} album${total !== 1 ? "s" : ""} · ${artistName}`;
+    albumCountTitleEl.classList.remove("hidden");
+  }
+  async function refreshArtistView() {
+    const L = liveApi();
+    if (!L || !artistViewActive || !artistViewName) return;
+    const name = artistViewName;
+    const seq = ++artistReadSeq;
+    const stamp = L.stamp(ARTIST_VIEW_DEPS);
+    try {
+      const r = await fetch("/api/artist-albums?artist=" + encodeURIComponent(name));
+      if (!r.ok) return;   // what is on screen stays; the next change retries
+      const j = await r.json();
+      if (!artistViewActive || artistViewName !== name || seq !== artistReadSeq) return;
+      artistViewStamp = stamp;
+      const total = j.primary.length + j.featured.length;
+      if (!total) return;  // an artist whose albums all left: keep the page rather than blank it mid-read
+      const entries = artistViewEntries(j);
+      const head = Array.prototype.find.call(grid.children, el => el.__tileKey === "artist-bio");
+      if (head) entries.unshift({ key: "artist-bio", build: () => head });
+      const mainEl = document.querySelector("main");
+      const top = mainEl ? mainEl.scrollTop : 0;
+      L.paintRow(grid, entries);
+      if (mainEl && mainEl.scrollTop !== top) mainEl.scrollTop = top;
+      artistCountBar(total, name);
+    } catch (e) {
+      // Offline, or the server restarting: the page stays as it is.
+    }
+  }
+  if (window.__live) {
+    window.__live.on(() => {
+      if (!artistViewActive || !artistViewName) return;
+      if (artistViewStamp === window.__live.stamp(ARTIST_VIEW_DEPS)) return;
+      window.__live.whenIdle("artist-view", refreshArtistView);
+    });
+  }
 
   // opts.restore === false: the caller is building its OWN screen (Home, a
   // fresh wall) and has already reset the view flags — putting the captured
@@ -10366,6 +14751,10 @@
     artistViewActive = false;
     bioSeq++;   // any in-flight bio must not prepend into the restored screen
     if (saved && opts && opts.restore === false) {
+      if (topbarBack) {
+        if (saved.topbarBackLabel) topbarBack.setAttribute("aria-label", saved.topbarBackLabel);
+        topbarBack.title = saved.topbarBackTitle || "";
+      }
       saved = null;
       grid.innerHTML = "";
       // The artist view owns this bar; without clearing it, its "← Back"
@@ -10393,11 +14782,19 @@
         countBar.appendChild(saved.countNodes);
         countBar.classList.toggle("hidden", saved.countHidden);
       }
-      if (topbarBack)    topbarBack.classList.toggle("hidden", saved.topbarBackHidden);
+      if (topbarBack) {
+        topbarBack.classList.toggle("hidden", saved.topbarBackHidden);
+        if (saved.topbarBackLabel) topbarBack.setAttribute("aria-label", saved.topbarBackLabel);
+        topbarBack.title = saved.topbarBackTitle || "";
+      }
       if (topbarRefresh) topbarRefresh.classList.toggle("hidden", saved.topbarRefreshHidden);
       if (topbarSearch)  topbarSearch.classList.toggle("hidden", saved.topbarSearchHidden);
       { const b = document.getElementById("topbar-sort");
         if (b) b.classList.toggle("hidden", saved.sortSlotHidden); }
+      if (albumCountTitleEl) {
+        albumCountTitleEl.textContent = saved.titleText || "";
+        albumCountTitleEl.classList.toggle("hidden", saved.titleHidden);
+      }
       // Re-arm the screens whose behaviour lives OUTSIDE the restored nodes:
       // the library wall's infinite scroll (parked on the way in, else it never
       // pages again) and the labels browser's chrome/mode.
@@ -10415,11 +14812,28 @@
       // Land back where the user was, not at the top of the wall.
       const mainEl = document.querySelector("main");
       if (mainEl && typeof saved.scrollTop === "number") mainEl.scrollTop = saved.scrollTop;
+      // The screen just put back heard nothing while it was away: bring it up
+      // to date where it stands (v1.8.65 — see liveCatchUp).
+      if (window.__liveCatchUp) window.__liveCatchUp();
     }
+    const back = saved && saved.fromAlbum;
     saved = null;
+    // Opened from an album: back to that album, over the screen it was on.
+    if (back && !(opts && opts.reopen === false) && window.__openAlbum) {
+      window.__openAlbum(back.album, back.opts);
+    }
   }
+  // The shared Back beside the menu: while the artist view is up it steps out
+  // of it (to the album it came from), ahead of its usual "go Home". Capture
+  // phase, so it runs before — and stops — the Home listener.
+  if (topbarBack) topbarBack.addEventListener("click", (e) => {
+    if (!artistViewActive) return;
+    e.stopImmediatePropagation();
+    exitArtistView();
+  }, true);
 
-  async function showArtistAlbums(artistName) {
+  async function showArtistAlbums(artistName, how) {
+    const fromAlbum = (how && how.fromAlbum) || null;
     if (window.__leavePlaylistScreens) window.__leavePlaylistScreens();
     if (!artistName) return;
     // Drop any active/pending search (incl. the delayed external-sources fetch)
@@ -10430,7 +14844,7 @@
     // Artist → album → artist chaining: put the FIRST screen back before
     // capturing, so what we snapshot below is the real originating screen (and
     // its live view flags), not a half-torn-down artist view.
-    if (artistViewActive) exitArtistView();
+    if (artistViewActive) exitArtistView({ reopen: false });
     // The artist view takes over the shared grid (and snapshot-restores it on
     // Back) — park the library wall's infinite scroll so it can't append into
     // this view, remembering whether it was live so Back can re-arm it.
@@ -10454,11 +14868,18 @@
     // "← Back" button restores it exactly.
     // Move the live nodes out into fragments rather than copying markup — see
     // exitArtistView for why (tile listeners + album identity live on the nodes).
+    // Read the scroll position BEFORE the grid is drained. Moving every tile
+    // out collapses <main> to a couple of hundred pixels, and a scroller that
+    // no longer has the range CLAMPS its scrollTop to 0 there and then — so
+    // reading it after the drain stored 0 every time, and the restore below
+    // faithfully put 0 back. The comment at the bottom of exitArtistView has
+    // always said "land back where the user was"; it never could.
+    const mainEl = document.querySelector("main");
+    const savedScrollTop = mainEl ? mainEl.scrollTop : 0;
     const gridNodes = document.createDocumentFragment();
     while (grid.firstChild) gridNodes.appendChild(grid.firstChild);
     const countNodes = document.createDocumentFragment();
     if (countBar) while (countBar.firstChild) countNodes.appendChild(countBar.firstChild);
-    const mainEl = document.querySelector("main");
     saved = {
       gridNodes,
       countNodes,
@@ -10467,7 +14888,7 @@
       artistsWallWasActive,
       artistsWallSeq,
       labels,
-      scrollTop:          mainEl ? mainEl.scrollTop : 0,
+      scrollTop:          savedScrollTop,
       gridHidden:         grid.classList.contains("hidden"),
       homeViewHidden:     homeView     ? homeView.classList.contains("hidden")     : true,
       homeSectionsHidden: homeSections ? homeSections.classList.contains("hidden") : true,
@@ -10482,6 +14903,13 @@
       // wall's unpark, which the restore below runs.
       sortSlotHidden:      (() => { const b = document.getElementById("topbar-sort");
                                     return b ? b.classList.contains("hidden") : true; })(),
+      // The grid screen's title. The artist view replaces it with the artist's
+      // name while it is up, and the screen it came from gets its own back.
+      titleText:   albumCountTitleEl ? albumCountTitleEl.textContent : "",
+      titleHidden: albumCountTitleEl ? albumCountTitleEl.classList.contains("hidden") : true,
+      topbarBackLabel:     topbarBack ? topbarBack.getAttribute("aria-label") : null,
+      topbarBackTitle:     topbarBack ? topbarBack.title : "",
+      fromAlbum,
     };
     artistViewActive = true;
     // Reveal the shared album grid and leave the Home landing / search results.
@@ -10491,61 +14919,65 @@
     if (homeView)     homeView.classList.add("hidden");
     if (homeSections) homeSections.classList.add("hidden");
     grid.classList.remove("hidden");
-    // The shared chevron IS this view's back button — same glyph, same corner,
-    // same behaviour as every other screen. Refresh and Search belong to the
-    // screens that set them and are not this one's.
-    if (topbarBack)    topbarBack.classList.remove("hidden");
+    // The shared Back — the < beside the menu, as on every other screen —
+    // takes this view back (see the capture listener above); Refresh and
+    // Search don't belong here.
+    if (topbarBack) {
+      topbarBack.classList.remove("hidden");
+      topbarBack.setAttribute("aria-label", fromAlbum ? "Back to the album" : "Back");
+      topbarBack.title = fromAlbum ? "Back to the album" : "Back";
+    }
     if (topbarRefresh) topbarRefresh.classList.add("hidden");
     if (topbarSearch)  topbarSearch.classList.add("hidden");
     if (window.__parkTopbarSort) window.__parkTopbarSort();
 
-    // Show loading state
-    if (countBar) {
-      countBar.classList.remove("hidden");
-      countBar.innerHTML = '<span class="count-text">Loading…</span>';
+    // The artist's name beside Back, as every other screen names itself there
+    // — not the title of the screen this was opened from. On a desktop that
+    // was the genre still sitting behind the album popup, so the bar said
+    // "Rock" over Radiohead's albums (reported). Back puts the old title back.
+    if (albumCountTitleEl) {
+      albumCountTitleEl.textContent = artistName;
+      albumCountTitleEl.classList.remove("hidden");
     }
+
+    // Loading: the name is in the bar already (above); the count joins it
+    // when the albums arrive. The line above the grid stays out of the way —
+    // it is only used again to say a read failed.
+    if (countBar) countBar.classList.add("hidden");
     grid.innerHTML = "";
 
+    // This artist is the one on screen now: a read still in flight for the
+    // previous one — this page's first load or a live re-read — must not paint.
+    artistViewName = artistName;
+    const mySeq = ++artistReadSeq;
+    const L = liveApi();
+    const stamp = L ? L.stamp(ARTIST_VIEW_DEPS) : null;
     try {
       const r = await fetch("/api/artist-albums?artist=" + encodeURIComponent(artistName));
       if (!r.ok) throw new Error("HTTP " + r.status);
       const j = await r.json();
+      if (!artistViewActive || mySeq !== artistReadSeq) return;
+      artistViewStamp = stamp;
       const total = j.primary.length + j.featured.length;
 
-      if (countBar) {
-        countBar.innerHTML =
-          `<span class="count-text">${total} album${total !== 1 ? "s" : ""} · ${artistName}</span>`;
-      }
+      artistCountBar(total, artistName);
 
       if (!total) {
-        grid.innerHTML = `<div class="artist-view-empty">No albums found for "${artistName}"</div>`;
+        const empty = document.createElement("div");
+        empty.className = "artist-view-empty";
+        empty.textContent = `No albums found for "${artistName}"`;
+        grid.appendChild(empty);
         return;
       }
 
+      // Keyed as they are built (artistViewEntries), so the first live re-read
+      // can reuse them rather than rebuild the page.
       const frag = document.createDocumentFragment();
-
-      if (j.primary.length) {
-        if (j.featured.length) {
-          const hdr = document.createElement("div");
-          hdr.className = "artist-section-header";
-          hdr.textContent = "Albums";
-          frag.appendChild(hdr);
-        }
-        for (const a of j.primary) {
-          frag.appendChild(window.__buildAlbumTile(a));
-        }
+      for (const e of artistViewEntries(j)) {
+        const el = e.build();
+        el.__tileKey = e.key;
+        frag.appendChild(el);
       }
-
-      if (j.featured.length) {
-        const hdr = document.createElement("div");
-        hdr.className = "artist-section-header";
-        hdr.textContent = "Also appears on";
-        frag.appendChild(hdr);
-        for (const a of j.featured) {
-          frag.appendChild(window.__buildAlbumTile(a));
-        }
-      }
-
       grid.appendChild(frag);
 
       // Artist header (avatar + validated bio) loads after the albums so the
@@ -10555,9 +14987,11 @@
                        (j.featured[0] && j.featured[0].title) || "";
       renderArtistBioHead(artistName, bioAlbum);
     } catch (e) {
+      if (!artistViewActive || mySeq !== artistReadSeq) return;   // another page owns the bar now
       if (countBar) {
-        countBar.innerHTML =
-          `<span class="count-text" style="color:var(--danger)">Error: ${e.message}</span>`;
+        countBar.classList.remove("hidden");
+        countBar.innerHTML = `<span class="count-text" style="color:var(--danger)"></span>`;
+        countBar.querySelector(".count-text").textContent = "Error: " + e.message;
       }
     }
   }
@@ -10608,6 +15042,7 @@
       foot.appendChild(toggle); foot.appendChild(src);
       body.appendChild(text); body.appendChild(foot);
       head.appendChild(body);
+      head.__tileKey = "artist-bio";   // a live re-read of the albums keeps it where it is
       grid.prepend(head);
       if (window.__setupBioToggle) window.__setupBioToggle(text, toggle);
     } catch (e) { /* bio is decorative — the album grid stands alone */ }
@@ -10712,8 +15147,11 @@
         el.textContent = albums + " · Roon was importing at the last check — refresh paused";
       } else if (j.library_recheck_pending) {
         el.textContent = albums + " · the library moved, checking again shortly";
-      } else if (j.index_built_at) {
-        el.textContent = albums + " · checked " + libraryAgeText(j.index_built_at);
+      } else if (j.library_checked_at || j.index_built_at) {
+        // When the library watch last LOOKED (v1.8.68), not when the snapshot
+        // last changed: an untouched library confirmed a minute ago is not
+        // "checked 3 days ago".
+        el.textContent = albums + " · checked " + libraryAgeText(j.library_checked_at || j.index_built_at);
       } else {
         el.textContent = "No snapshot yet";
       }
@@ -10756,8 +15194,20 @@
         rescanLibrary();
         return;
       }
+      if (action === "wall-display") {
+        if (window.__openWallDisplay) window.__openWallDisplay();
+        return;
+      }
+      if (action === "listen-later") {
+        if (window.__showListenLater) window.__showListenLater();
+        return;
+      }
       if (action === "smart-picks") {
         if (window.__showSmartPicks) window.__showSmartPicks();
+        return;
+      }
+      if (action === "discover") {
+        if (window.__showDiscover) window.__showDiscover();
         return;
       }
       if (action === "smart-playlists") {

@@ -49,4 +49,13 @@ export default [
     files: ["**/app.js"],
     languageOptions: { globals: { ShareCard: "readonly" } },
   },
+  {
+    // Rouen's sharecard.js ends `if (typeof module !== 'undefined' &&
+    // module.exports) module.exports = ShareCard;`, so Node can load it —
+    // which tools/check-sharecard.js does, to run the card's own measure().
+    // Guarded, and inert in the WebView. Allowed for this one file only, so a
+    // stray `module` anywhere else is still an error.
+    files: ["**/sharecard.js"],
+    languageOptions: { globals: { module: "readonly" } },
+  },
 ];
