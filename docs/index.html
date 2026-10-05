@@ -145,11 +145,23 @@
     background: var(--panel-2); border: 1px solid var(--copper-dim);
   }
   .card .how b:first-child { display: block; color: var(--copper-hi); margin-bottom: 4px; }
+  /* An intent name is one long word; let it break rather than leave the card. */
+  .card .how code { overflow-wrap: anywhere; }
   .card .how pre {
     margin: 10px 0; padding: 10px 12px; border-radius: 8px; overflow-x: auto;
     font: 12px/1.5 var(--mono); background: var(--bg-deep); border: 1px solid var(--line);
   }
   .card p { font-size: 13.5px; color: var(--muted); }
+  /* A tag on a card's heading — Rouen's "New" marker, used here for "Soon". */
+  .card h3 .new {
+    margin-left: 8px; vertical-align: 1px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 7px; border-radius: 999px;
+    border: 1px solid var(--copper-dim); color: var(--copper-hi);
+    background: rgba(201,164,92,.10);
+  }
+  .card.is-new { border-color: var(--copper-dim); }
 
   /* ---------- not in Lite ---------- */
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
@@ -193,6 +205,7 @@
     <a class="brand" href="#top" aria-label="Rouen Lite — back to the top"><img src="rouen-lite-logo.png" width="26" height="29" alt=""></a>
     <a href="#download">Download</a>
     <a href="#features">Features</a>
+    <a href="#soon">Coming soon</a>
     <a href="#firstrun">First run</a>
     <a href="#lite">Not in Lite</a>
     <a class="gh" href="https://github.com/meltface-80/Rouen-Lite">GitHub&nbsp;→</a>
@@ -336,6 +349,21 @@
   </div>
 </section>
 
+<section id="soon">
+  <div class="wrap">
+    <h2>Coming soon</h2>
+    <p class="lead">Their menu items are already in the app; until they arrive, their screens are empty.</p>
+    <div class="grid">
+      <div class="card is-new"><h3>Dynamic Playlists<span class="new">Soon</span></h3>
+        <p>Save a Library filter (genre, decade, listening history) and play it as a playlist.</p></div>
+      <div class="card is-new"><h3>Import a playlist<span class="new">Soon</span></h3>
+        <p>Paste a playlist someone shared from Rouen and match it to your library.</p></div>
+      <div class="card is-new"><h3>Roon's own playlists<span class="new">Soon</span></h3>
+        <p>Listed and playable beside your own.</p></div>
+    </div>
+  </div>
+</section>
+
 <section id="firstrun">
   <div class="wrap">
     <h2>First run</h2>
@@ -370,7 +398,6 @@
           <tr><td><b>Waveform</b> seek bar</td><td>Rouen decodes the audio itself. The plain seek bar is used instead.</td></tr>
           <tr><td><b>Qobuz and TIDAL accounts</b> — browsing, favourites, catalogue search</td><td>Unofficial APIs those services' terms forbid. Roon still streams both through its own account.</td></tr>
           <tr><td><b>Wall display</b> and screensaver</td><td>A phone serving a TV around the clock is a poor fit. Use Rouen for that.</td></tr>
-          <tr><td><b>Roon's playlists, Dynamic Playlists, Import a playlist</b></td><td>Their menu items remain and their screens are empty. Your own playlists work — see above.</td></tr>
           <tr><td><b>Sample-rate and source badges</b></td><td>Read from file tags, like labels.</td></tr>
           <tr><td><b>Queue editing</b> — remove, reorder, clear</td><td>Not a Lite limit: Roon's extension API has no such command. Play from here works.</td></tr>
         </tbody>

@@ -387,6 +387,16 @@ The app also answers `android.media.action.MEDIA_PLAY_FROM_SEARCH`.
 
 ---
 
+## Coming soon
+
+* **Dynamic Playlists** — save a Library filter (genre, decade, listening history) and play it as a playlist
+* **Import a playlist** — paste a playlist someone shared from Rouen and match it to your library
+* **Roon's own playlists** — listed and playable beside your own
+
+Their menu items are already in the app; until they arrive, their screens are empty.
+
+---
+
 ## Install
 
 1. Download the APK above and open it. Allow your browser to install unknown apps if Android asks.
@@ -413,7 +423,6 @@ python3 tools/apk-cert.py dist/musicd-remote-lite-*.apk --expect-file tools/rele
 | **Waveform** seek bar | Rouen decodes the audio itself. The plain seek bar is used instead. |
 | **Qobuz and TIDAL accounts** — browsing, favourites, catalogue search | Unofficial APIs those services' terms forbid. Roon still streams both through its own account. |
 | **Wall display** and screensaver | A phone serving a TV around the clock is a poor fit. Use Rouen for that. |
-| **Roon's playlists, Dynamic Playlists, Import a playlist** | Their menu items remain and their screens are empty. Your own playlists work — see above. |
 | **Sample-rate and source badges** | Read from file tags, like labels. |
 | **Queue editing** — remove, reorder, clear | Not a Lite limit: Roon's extension API has no such command. Play from here works. |
 
