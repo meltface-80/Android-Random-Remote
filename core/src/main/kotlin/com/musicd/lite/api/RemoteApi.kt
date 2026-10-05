@@ -2,6 +2,9 @@ package com.musicd.lite.api
 
 import com.musicd.lite.str
 import com.musicd.lite.strOrNull
+import com.musicd.lite.Discover
+import com.musicd.lite.LiveState
+import com.musicd.lite.QueueHistory
 import com.musicd.lite.Log
 import com.musicd.lite.MusicdLite
 import com.musicd.lite.http.HttpServer
@@ -14,10 +17,12 @@ import com.musicd.lite.library.Artists
 import com.musicd.lite.library.Albums
 import com.musicd.lite.library.UserPlaylists
 import com.musicd.lite.library.LibraryView
+import com.musicd.lite.library.ListenLater
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
 import com.musicd.lite.meta.Metadata
 import com.musicd.lite.meta.Pitchfork
+import com.musicd.lite.meta.ShareLinks
 import com.musicd.lite.roon.AlbumFilter
 import com.musicd.lite.roon.BrowseException
 import com.musicd.lite.roon.MooSocket
@@ -65,6 +70,9 @@ class RemoteApi(
          * round trips.
          */
         const val ADD_ALBUMS_MAX = 20
+
+        /** How many of the day's picks "Send to Listen later" puts on the list. Rouen's five. */
+        const val PICKS_TO_LATER = 5
 
         /** Distinguishes a blocked ARTIST from the album keys once stored. */
         const val BLOCKED_ARTIST_PREFIX = "artist:"
@@ -179,10 +187,13 @@ class RemoteApi(
 
         return when (path) {
             "/api/status" -> status()
+            "/api/live" -> live(request)
             "/api/zones" -> zones()
             "/api/outputs" -> outputs()
             "/api/zone-state" -> zoneState(request)
             "/api/queue" -> queue(request)
+            "/api/queue/play-history-next" -> requirePost(post) { playHistoryNext(request) }
+            "/api/queue/history-multi" -> requirePost(post) { historyMulti(request) }
             "/api/control" -> control(request)
             "/api/seek" -> seek(request)
             "/api/volume" -> volume(request)
@@ -206,6 +217,7 @@ class RemoteApi(
 
             "/api/album" -> album(request)
             "/api/album/extras" -> albumExtras(request)
+            "/api/album/release-date" -> releaseDate(request)
             "/api/album/now-playing" -> nowPlayingAlbum(request)
             "/api/play" -> playAlbum(request, "play_now")
             "/api/play-track" -> playTrack(request)
@@ -241,9 +253,16 @@ class RemoteApi(
             "/api/home/genre-groups" -> genreGroups()
 
             "/api/radio" -> radio(request)
+            "/api/listen-later" -> if (post) setListenLater(request) else listenLaterList()
             "/api/smart-picks" -> smartPicks(request)
             "/api/smart-picks/block" -> smartPickBlock(request)
             "/api/smart-picks/rebuild" -> requirePost(post) { Json.ok() }
+
+            // Deezer-backed: "If you like this" under the share card, and
+            // Discover. Neither touches the Core.
+            "/api/similar" -> similar(request)
+            "/api/discover" -> discoverList(request)
+            "/api/discover/rebuild" -> requirePost(post) { discoverRebuild() }
 
             "/api/settings/home-rows" -> if (post) saveHomeRows(request) else homeRows()
             "/api/settings/lan" -> if (post) saveLan(request) else lanStatus(request)
@@ -256,6 +275,8 @@ class RemoteApi(
             "/api/user-playlists/add-albums" ->
                 requirePost(post) { addAlbumsToPlaylist(request) }
             "/api/settings/smart-picks" -> if (post) saveSmartPicks(request) else smartPickSettings()
+            "/api/settings/share-links" -> if (post) saveShareLinks(request) else shareLinksSettings()
+            "/api/settings/discover" -> if (post) saveDiscover(request) else discoverSettings()
             "/api/settings/labels" -> labelsSetting(post)
             "/api/settings/discogs-token" ->
                 secret(request, post, Settings.KEY_DISCOGS_TOKEN, "token")
@@ -271,7 +292,27 @@ class RemoteApi(
             "/api/shortcut/zones" -> zones()
             "/api/shortcut/play-random" -> shortcutPlay(request)
 
-            else -> notInLite(path)
+            // Random Album — the disc under the greeting. Rouen's route plays
+            // something unheard in a year; see playRandomAlbum for why this one
+            // draws from the whole library.
+            "/api/play-unheard" -> requirePost(post) { playRandomFromHome(request) }
+
+            // The share card's Qobuz chip, upgraded to open the app on the
+            // record. The same lookup the Pitchfork screen has always used;
+            // answered here, ahead of the /api/qobuz prefix that is otherwise
+            // not in this build (an account-free page read, not the account API).
+            "/api/qobuz-link" -> pitchforkQobuz(request)
+
+            // Features this build does not have, in the "off" shape their
+            // screens already understand. A 404 left each one asking again.
+            "/api/settings/display" ->
+                if (post) Json.error(501, "The wall display isn't in this build.")
+                else Json.obj(JSONObject().put("enabled", false).put("seconds", 10))
+            "/api/settings/waveform" ->
+                if (post) Json.error(501, "Waveforms aren't in this build — they need the audio files or a streaming account.")
+                else Json.obj(JSONObject().put("enabled", false))
+
+            else -> notInLite(path, post)
         }
     }
 
@@ -305,6 +346,9 @@ class RemoteApi(
                 .put("library_importing", false)
                 .put("library_recheck_pending", index.isBuilding)
                 .put("index_built_at", index.builtAt)
+                // The side menu's "checked just now"; 0 until the first probe,
+                // and the page falls back to index_built_at then.
+                .put("library_checked_at", app.libraryCheckedAt)
                 .put("index_count", index.count)
                 // Not in MusicD-Remote's shape, and additive on purpose: the
                 // pairing screen needs to say WHY it is waiting, and on a phone
@@ -315,6 +359,26 @@ class RemoteApi(
                 .put("version", app.version)
                 .put("lite", true)
         )
+    }
+
+    /**
+     * The live-state revisions, as a long poll.
+     *
+     * Rouen's page asks for these every three seconds. This build's page sends
+     * back the `token` it was last given as `wait_for`, and the request is held
+     * until a revision moves or [LiveState.MAX_WAIT_MS] passes — so a screen
+     * hears about a play, a setting changed on another device or a rebuilt
+     * library within a moment, and an idle app makes one request every
+     * twenty-five seconds rather than twenty a minute. No `wait_for` answers
+     * at once: the page's first ask has nothing to compare against.
+     *
+     * One held request per open page, on the server's worker pool, alongside
+     * the zone-state wait that already works this way.
+     */
+    private fun live(request: Request): Response {
+        val timeout = (request.int("timeout")?.toLong() ?: LiveState.MAX_WAIT_MS)
+        val rev = app.live.await(request.str("wait_for"), timeout)
+        return Json.obj(app.live.toJson(rev))
     }
 
     // --------------------------------------------------------------- zones
@@ -415,6 +479,7 @@ class RemoteApi(
                     .put("is_previous_allowed", zone.isPreviousAllowed)
                     .put("is_seek_allowed", zone.isSeekAllowed)
                     .put("settings", zone.settings.toJson())
+                    .put("queue_items_remaining", zone.queueItemsRemaining ?: JSONObject.NULL)
                     .put("outputs", Json.arrayOf(outputs))
                     .put("now_playing", nowPlaying)
             )
@@ -462,8 +527,123 @@ class RemoteApi(
     private fun queue(request: Request): Response {
         val zoneId = request.str("zone") ?: return Json.error(400, "zone is required")
         val items = roon.queue(zoneId)
-        return Json.obj(JSONObject().put("items", Json.arrayOf(items.map { it.toJson() })))
+        return Json.obj(
+            JSONObject()
+                .put("items", Json.arrayOf(items.map { it.toJson() }))
+                // What already played, newest first — the "played earlier"
+                // fold-out above the Now playing divider.
+                .put("history", Json.arrayOf(app.queueHistory.recent(zoneId).map { it.toJson() }))
+        )
     }
+
+    /**
+     * The library album a departed track came from, or null.
+     *
+     * By NAME, because that is all a departed track leaves behind: the album
+     * title it played under (the zone's line3) resolved against the snapshot,
+     * with the credit to tell two same-titled albums apart. A stream, a radio
+     * track Roon added from outside the library, or an album since removed
+     * resolves to nothing — an outcome the page explains, not a failure.
+     *
+     * Rouen also tries a track-title index when the album does not resolve;
+     * that needs a reverse index of every album's tracks this build does not
+     * keep, so a track whose album title Roon reported differently from the
+     * library's is unresolved here.
+     */
+    private fun resolvePlayedTrack(album: String, artist: String): AlbumRecord? {
+        if (album.isBlank()) return null
+        return index.relocate(album, artist)
+            ?: Normalize.splitArtists(artist).firstNotNullOfOrNull { index.relocate(album, it.name) }
+            ?: index.relocate(album, null)?.takeIf { artist.isBlank() }
+    }
+
+    /**
+     * Play a track from the zone's played-earlier list, NEXT. Not "play from
+     * here": a played track is gone from Roon's queue, its queue_item_id is
+     * spent, and rebuilding the queue around it would be hundreds of Core
+     * calls behind a play_now that destroys the live queue first. Inserting
+     * the one track after the current one is a single browse navigation, and
+     * honest about being a different thing.
+     */
+    private fun playHistoryNext(request: Request): Response {
+        val body = Json.body(request)
+        val zone = body.strOrNull("zone_or_output_id") ?: return Json.error(400, "zone_or_output_id required")
+        val title = body.str("track").trim()
+        if (title.isEmpty()) return Json.error(400, "track required")
+        val hit = resolvePlayedTrack(body.str("album").trim(), body.str("artist"))
+            ?: return Json.obj(
+                JSONObject().put("error", "Couldn't find that track in your library to play it again")
+                    .put("unresolved", true),
+                404
+            )
+        val (invoked, track) = app.albums.invokeTrack(
+            hit.offset, 0, title, zone, "play_next", null, Albums.Expect(hit.title, hit.subtitle)
+        )
+        return Json.ok(JSONObject().put("action", invoked).put("track", track).put("album", hit.title))
+    }
+
+    /**
+     * Several played tracks at once, in the order they were picked. Every track
+     * is resolved BEFORE the Core is touched, so a selection with an
+     * unplayable track in it says so instead of leaving the queue holding an
+     * arbitrary prefix of what was asked for. One refusal does not abandon the
+     * rest. One run per zone at a time: two interleaved runs would shuffle
+     * each other's inserts.
+     */
+    private fun historyMulti(request: Request): Response {
+        val body = Json.body(request)
+        val zone = body.strOrNull("zone_or_output_id") ?: return Json.error(400, "zone_or_output_id required")
+        val kind = body.str("kind")
+        if (kind != "play_next" && kind != "queue") return Json.error(400, "kind must be play_next or queue")
+        val tracks = body.optJSONArray("tracks")
+        if (tracks == null || tracks.length() == 0) return Json.error(400, "tracks required")
+        if (tracks.length() > QueueHistory.MULTI_MAX) {
+            return Json.error(400, "at most ${QueueHistory.MULTI_MAX} tracks at a time")
+        }
+        val resolved = ArrayList<Pair<String, AlbumRecord>>()
+        val unresolved = ArrayList<String>()
+        for (i in 0 until tracks.length()) {
+            val t = tracks.optJSONObject(i) ?: continue
+            val title = t.str("track").trim()
+            if (title.isEmpty()) continue
+            val hit = resolvePlayedTrack(t.str("album").trim(), t.str("artist"))
+            if (hit != null) resolved += title to hit else unresolved += title
+        }
+        if (resolved.isEmpty()) {
+            return Json.obj(
+                JSONObject().put("error", "None of those are in your library to play again")
+                    .put("unresolved", Json.strings(unresolved)).put("queued", 0),
+                404
+            )
+        }
+        if (!historyZones.add(zone)) return Json.error(409, "Still adding the last selection to this zone")
+        var queued = 0
+        var firstError: String? = null
+        val failed = ArrayList<String>()
+        try {
+            for ((title, hit) in QueueHistory.sendOrderFor(kind, resolved)) {
+                try {
+                    app.albums.invokeTrack(hit.offset, 0, title, zone, kind, null, Albums.Expect(hit.title, hit.subtitle))
+                    queued++
+                } catch (e: Exception) {
+                    failed += title
+                    if (firstError == null) firstError = e.message
+                }
+            }
+        } finally {
+            historyZones.remove(zone)
+        }
+        val out = JSONObject().put("kind", kind).put("queued", queued)
+            .put("failed", Json.strings(failed)).put("unresolved", Json.strings(unresolved))
+        if (queued == 0) return Json.obj(out.put("error", firstError ?: "Roon refused those tracks"), 500)
+        firstError?.let { out.put("error", it) }
+        return Json.ok(out)
+    }
+
+    /** Zones with a played-earlier run in flight — see historyMulti. */
+    private val historyZones = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    )
 
     // ------------------------------------------------------------ transport
 
@@ -518,9 +698,23 @@ class RemoteApi(
             return Json.ok()
         }
 
+        // An output whose volume is incremental has no scale to step through,
+        // so the page's − and + send {"relative": ±1} rather than a value.
+        // This route demanded a value and answered 400, so on those
+        // amplifiers the buttons did nothing.
+        if (!body.has("value") && body.has("relative")) {
+            val step = body.optDouble("relative", Double.NaN)
+            if (step.isNaN() || step == 0.0) return Json.error(400, "relative must be a non-zero number")
+            for (out in targets) {
+                if (out.volume == null) continue
+                roon.changeVolume(out.outputId, "relative", step)
+            }
+            return Json.ok()
+        }
+
         val how = body.str("how").ifEmpty { "absolute" }
         val value = body.optDouble("value", Double.NaN)
-        if (value.isNaN()) return Json.error(400, "value is required")
+        if (value.isNaN()) return Json.error(400, "value, relative or mute is required")
 
         for (out in targets) {
             val vol = out.volume ?: continue
@@ -562,7 +756,25 @@ class RemoteApi(
             app.radio.setEnabled(id, false)
             stoodDown = true
         }
-        return Json.ok(JSONObject().put("random_album_radio_stands_down", stoodDown))
+        return Json.ok(
+            JSONObject().put("random_album_radio_stands_down", stoodDown)
+                .put(
+                    "radios",
+                    radiosJson(id, roonOverride = if (patch.has("auto_radio")) patch.optBoolean("auto_radio") else null)
+                )
+        )
+    }
+
+    /**
+     * Both radios for a zone: ours and Roon's. Roon's is read off the zone feed,
+     * which only catches up some time after change_settings calls back — so a
+     * route that has just changed it passes what it asked for, rather than the
+     * value from before the change.
+     */
+    private fun radiosJson(zoneId: String, roonOverride: Boolean? = null): JSONObject {
+        val roonOn = roonOverride
+            ?: (roon.zones().firstOrNull { it.zoneId == zoneId }?.settings?.autoRadio == true)
+        return JSONObject().put("own", app.radio.isEnabled(zoneId)).put("roon", roonOn)
     }
 
     private fun muteAll(request: Request): Response {
@@ -586,12 +798,19 @@ class RemoteApi(
         return Json.ok()
     }
 
+    /**
+     * Move playback to another zone. from_zone and to_zone are the page's
+     * names — this read `from` and `to`, which nothing sends, so every transfer
+     * was refused with 400 and the music stayed in the room it was in.
+     */
     private fun transferZone(request: Request): Response {
         val body = Json.body(request)
-        val from = body.str("from").takeIf { it.isNotEmpty() }
-            ?: return Json.error(400, "from is required")
-        val to = body.str("to").takeIf { it.isNotEmpty() }
-            ?: return Json.error(400, "to is required")
+        val from = body.strOrNull("from_zone")
+            ?: return Json.error(400, "from_zone and to_zone are required")
+        val to = body.strOrNull("to_zone")
+            ?: return Json.error(400, "from_zone and to_zone are required")
+        // Rouen's answer too: moving a zone onto itself is nothing to ask Roon.
+        if (from == to) return Json.ok(JSONObject().put("noop", true))
         roon.transferZone(from, to)
         return Json.ok()
     }
@@ -778,6 +997,8 @@ class RemoteApi(
         )
         .put("offset", r.offset)
         .put("artists", artistNames(r.subtitle))
+        // The ⋯ menu's "Listen later / Remove from Listen later".
+        .put("listen_later", app.listenLater.has(r.title, r.subtitle))
         .put("library_moved", r.libraryMoved)
         .put("partial", r.partial)
         .put("declared_tracks", r.declaredTracks ?: JSONObject.NULL)
@@ -806,9 +1027,10 @@ class RemoteApi(
         // A year learned here is worth keeping: it feeds the Decade filter and
         // the year sort, which otherwise only fill in as albums are played.
         val record = index.relocate(title, artist)
-        if (record != null && extras?.year != null) {
+        if (record != null && extras?.year != null && store.albumYear(record.key) != extras.year) {
             runCatching {
                 store.putAlbumYear(record.key, extras.year, YearSource.MUSICBRAINZ)
+                app.yearLearned()
             }
         }
         // The store is the fast path's real source: every album whose card has
@@ -832,6 +1054,11 @@ class RemoteApi(
             val o = JSONObject()
                 .put("description", b?.description ?: "")
                 .put("source", b?.source ?: JSONObject.NULL)
+                // WHOSE words the description is, which is a different fact
+                // from where `source`/`url` link to: Pitchfork takes the link
+                // below when it reviewed the record, and without this the
+                // share card credited Wikipedia's prose to Pitchfork.
+                .put("description_source", b?.takeIf { it.description.isNotBlank() }?.source ?: JSONObject.NULL)
                 .put("url", b?.url ?: JSONObject.NULL)
                 // The lite build has no label chain, and the album card reads
                 // this field. Null keeps the row hidden rather than blank.
@@ -847,12 +1074,58 @@ class RemoteApi(
                 .put("url", review.url)
         }
 
+        // Where to hear it and where to read about it, under the share card.
+        // Pure string building, so it rides along on the answer the card
+        // already waits for. The article and review found above are handed
+        // over, so those chips land on the actual page rather than a search.
+        val links = JSONObject()
+            .put(
+                "services",
+                Json.arrayOf(
+                    ShareLinks.serviceLinks(
+                        artist, title,
+                        locale = ShareLinks.localeFromAcceptLanguage(request.headers["accept-language"]),
+                        enabled = settings.shareServices()
+                    ).map { it.toJson() }
+                )
+            )
+            .put(
+                "reviews",
+                Json.arrayOf(
+                    ShareLinks.reviewLinks(
+                        artist, title,
+                        enabled = settings.shareReviews(),
+                        wikipediaUrl = extras?.album?.takeIf { it.source == "Wikipedia" }?.url,
+                        pitchforkUrl = review?.url,
+                        wikipediaArtistUrl = extras?.artist?.takeIf { it.source == "Wikipedia" }?.url
+                    ).map { it.toJson() }
+                )
+            )
+
         return Json.obj(
             JSONObject()
+                .put("links", links)
                 .put("year", year ?: JSONObject.NULL)
+                // To the day where MusicBrainz knows it (Rouen v1.8.62); the
+                // album view prints it in the device's own date format.
+                .put("release_date", extras?.releaseDate ?: year?.toString() ?: JSONObject.NULL)
                 .put("album", bio(extras?.album, withReview = true))
                 .put("artist", bio(extras?.artist))
         )
+    }
+
+    /**
+     * The release date the album view shows, re-read when the live `dates`
+     * revision moves — from what is already known, never a lookup: the full
+     * lookup is /api/album/extras, which the view has already started.
+     */
+    private fun releaseDate(request: Request): Response {
+        val title = request.str("title") ?: return Json.error(400, "title is required")
+        val artist = request.str("artist") ?: ""
+        val known = app.metadata.cachedExtras(title, artist)
+        val stored = index.relocate(title, artist)?.let { view.albumYearOf(it) }
+        val date = known?.releaseDate ?: known?.year?.toString() ?: stored?.toString()
+        return Json.obj(JSONObject().put("release_date", date ?: JSONObject.NULL))
     }
 
     /** Match what a zone is playing back to a library tile, so it can be opened. */
@@ -892,28 +1165,43 @@ class RemoteApi(
         )
     }
 
+    /**
+     * Play, queue or play-next one track of an album.
+     *
+     * The field names are the page's, as every caller in app.js sends them:
+     * `track` is the track's INDEX, `title` is the TRACK's title, and the album
+     * it is expected to be in is album_title / album_subtitle. This read
+     * track_index and track_title, with the album as title/subtitle — the
+     * playlist route's vocabulary — so every tap on a track was answered 400
+     * "track_index is required", and the test written from the same reading
+     * passed throughout.
+     */
     private fun playTrack(request: Request): Response {
         val body = Json.body(request)
         val offset = body.optInt("offset", -1)
         if (offset < 0) return Json.error(400, "offset is required")
         val zone = body.str("zone_or_output_id").takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "zone_or_output_id is required")
-        val trackIndex = body.optInt("track_index", -1)
-        if (trackIndex < 0) return Json.error(400, "track_index is required")
+        val trackIndex = body.optInt("track", -1)
+        if (trackIndex < 0) return Json.error(400, "track index is required")
         val kind = body.str("kind").takeIf { it.isNotEmpty() } ?: "play_now"
         val (invoked, track) = app.albums.invokeTrack(
-            offset, trackIndex, body.str("track_title").takeIf { it.isNotEmpty() },
+            offset, trackIndex, body.str("title").takeIf { it.isNotEmpty() },
             zone, kind,
             AlbumFilter.parse(
                 body.str("filter_type"), body.str("filter_value"),
                 body.str("filter_parent")
             ),
             Albums.Expect(
-                body.str("title").takeIf { it.isNotEmpty() },
-                body.str("subtitle").takeIf { it.isNotEmpty() }
+                body.str("album_title").takeIf { it.isNotEmpty() },
+                body.str("album_subtitle").takeIf { it.isNotEmpty() }
             )
         )
-        return Json.ok(JSONObject().put("invoked", invoked).put("track", track))
+        // `action` is what the page toasts; `invoked` is kept for anything
+        // that already reads it.
+        return Json.ok(
+            JSONObject().put("action", invoked).put("invoked", invoked).put("track", track)
+        )
     }
 
     /**
@@ -1019,6 +1307,18 @@ class RemoteApi(
      * One tap, one album. Shared with the widget and the Quick Settings tile,
      * which reach the same action without going through HTTP at all.
      */
+    /**
+     * Random Album, from the Home strip: `{zone}` in, `{ok, album, artist}` out,
+     * which is what the page toasts ("Playing: <album>").
+     */
+    private fun playRandomFromHome(request: Request): Response {
+        val zone = Json.body(request).strOrNull("zone") ?: return Json.error(400, "zone required")
+        return app.playRandomAlbum(zone).fold(
+            onSuccess = { Json.ok(JSONObject().put("album", it.title).put("artist", it.subtitle)) },
+            onFailure = { Json.error(503, it.message ?: "Could not start an album") }
+        )
+    }
+
     private fun shortcutPlay(request: Request): Response =
         app.playRandomAlbum(request.str("zone")).fold(
             onSuccess = { Json.ok(JSONObject().put("album", Json.album(it))) },
@@ -1241,14 +1541,20 @@ class RemoteApi(
         )
     }
 
+    /**
+     * `day` is Album of the day's day (00:01 to 00:01). The page keeps a copy
+     * of the strip for an instant cold open and paints it only on the day it
+     * was chosen for — without this it could never tell, and never painted it.
+     */
     private fun albumOfTheDay(): Response {
+        val day = view.aotdDay()
         val album = view.albumOfTheDay()
-            ?: return Json.obj(JSONObject().put("album", JSONObject.NULL))
+            ?: return Json.obj(JSONObject().put("album", JSONObject.NULL).put("day", day))
         // A suggestion you have already taken is not a suggestion.
         if (view.playedToday(album)) {
-            return Json.obj(JSONObject().put("album", JSONObject.NULL).put("played", true))
+            return Json.obj(JSONObject().put("album", JSONObject.NULL).put("played", true).put("day", day))
         }
-        return Json.obj(JSONObject().put("album", Json.album(album)))
+        return Json.obj(JSONObject().put("album", Json.album(album)).put("played", false).put("day", day))
     }
 
     /**
@@ -1303,6 +1609,9 @@ class RemoteApi(
             }
             return Json.ok(
                 JSONObject().put("enabled", enabled).put("roon_radio_off", roonRadioOff)
+                    // Both switches, as they now stand — the page paints them
+                    // from this and treats an answer without it as a failure.
+                    .put("radios", radiosJson(zone, roonOverride = if (roonRadioOff) false else null))
             )
         }
         val zone = request.str("zone")
@@ -1335,7 +1644,8 @@ class RemoteApi(
         val day = java.time.LocalDate.now().toString()
         val base = JSONObject()
             .put("day", day)
-            .put("auto_add", settings.smartPicksAutoAdd())
+            .put("auto_add", false)
+            .put("dest", settings.smartPicksDest())
             .put("hour", settings.smartPicksHour())
             // No streaming account to favourite a pick into — see the note on
             // the settings endpoint.
@@ -1355,21 +1665,9 @@ class RemoteApi(
         }
 
         val count = (request.int("count") ?: 12).coerceIn(1, 48)
-        val blocked = store.blockedPicks()
-        // Both shapes are honoured: artist blocks (what "Not for me" writes) and
-        // the album keys an earlier build stored, so nothing a user already
-        // rejected comes back.
-        // The whole library, minus anything rejected. It used to be albums not
-        // played in six months, which the plays table cannot actually answer.
-        val pool = index.albums.filter { album ->
-            album.key !in blocked &&
-                (BLOCKED_ARTIST_PREFIX + Normalize.text(album.subtitle)) !in blocked
-        }
-        // Seeded by the day so the row does not reshuffle on every Home visit.
-        // Through view.sample because that IS this draw — the same seededRank
-        // order over the same pool — and having it in one place means it is
-        // ranked once per album rather than once per comparison.
-        val picks = view.sample(pool, count, LibraryView.fnv1a(day))
+        val pool = smartPickPool()
+        val picks = smartPicksFor(day, pool, count)
+        sendPicksToLaterIfDue(day, pool)
         return Json.obj(
             base
                 .put("enabled", true)
@@ -1401,10 +1699,151 @@ class RemoteApi(
                                 .put("library_title", album.title)
                                 .put("library_subtitle", album.subtitle)
                                 .put("image_key", album.imageKey ?: JSONObject.NULL)
+                                // The pick's "＋ Listen later" button reads it.
+                                .put("later", app.listenLater.has(album.title, album.subtitle))
                         }
                     )
                 )
         )
+    }
+
+    /**
+     * Everything a pick may be drawn from: the whole library, minus anything
+     * rejected. Both shapes are honoured — artist blocks (what "Not for me"
+     * writes) and the album keys an earlier build stored — so nothing a user
+     * already turned down comes back. It used to be albums not played in six
+     * months, which the plays table cannot actually answer.
+     */
+    private fun smartPickPool(): List<AlbumRecord> {
+        val blocked = store.blockedPicks()
+        return index.albums.filter { album ->
+            album.key !in blocked &&
+                (BLOCKED_ARTIST_PREFIX + Normalize.text(album.subtitle)) !in blocked
+        }
+    }
+
+    /**
+     * The day's picks. Seeded by the day so the row does not reshuffle on every
+     * Home visit. Through view.sample because that IS this draw — the same
+     * seededRank order over the same pool — and having it in one place means
+     * it is ranked once per album rather than once per comparison. A smaller
+     * count is the head of a larger one, so the five sent to Listen later are
+     * the first five on the screen.
+     */
+    private fun smartPicksFor(day: String, pool: List<AlbumRecord>, count: Int): List<AlbumRecord> =
+        view.sample(pool, count, LibraryView.fnv1a(day))
+
+    /**
+     * Settings → Smart Picks → "Send each day's picks to: Listen later" — the
+     * day's first few go on the list, once a day. Done when the picks are
+     * next asked for (the Home row, the screen, or the Listen later list
+     * itself), which on any day the app is opened is the first screenful.
+     */
+    private fun sendPicksToLaterIfDue(day: String, pool: List<AlbumRecord>? = null) {
+        if (!settings.smartPicksEnabled() || settings.smartPicksDest() != "later") return
+        if (!index.isBuilt || settings.smartPicksSentDay() == day) return
+        val picks = smartPicksFor(day, pool ?: smartPickPool(), PICKS_TO_LATER)
+        for (album in picks) app.listenLater.add(album.title, album.subtitle, source = "picks")
+        settings.markSmartPicksSent(day)
+    }
+
+    // ------------------------------------------------------ share-card links
+
+    /** Settings → Share Card: what CAN be linked to, and what is switched on. */
+    private fun shareLinksSettings(): Response = Json.obj(
+        JSONObject()
+            .put(
+                "services",
+                JSONObject()
+                    .put("all", Json.arrayOf(ShareLinks.SERVICES.map { JSONObject().put("id", it.id).put("name", it.name) }))
+                    .put("enabled", Json.strings(settings.shareServices()))
+            )
+            .put(
+                "reviews",
+                JSONObject()
+                    .put(
+                        "all",
+                        Json.arrayOf(
+                            ShareLinks.REVIEWS.map {
+                                JSONObject().put("id", it.id).put("name", it.name).put("kind", it.kind)
+                                    .put("chip", it.chip).put("onByDefault", it.onByDefault)
+                            }
+                        )
+                    )
+                    .put("enabled", Json.strings(settings.shareReviews()))
+            )
+    )
+
+    private fun saveShareLinks(request: Request): Response {
+        val body = Json.body(request)
+        fun ids(field: String): List<String>? =
+            body.optJSONArray(field)?.let { arr -> (0 until arr.length()).map { arr.str(it) } }
+        val services = ids("services")
+        val reviews = ids("reviews")
+        // An absent field is "not being changed"; an empty array is "all off".
+        if (services == null && reviews == null) return Json.error(400, "services and/or reviews array required")
+        settings.saveShareLinks(services, reviews)
+        return Json.ok(
+            JSONObject()
+                .put("services", Json.strings(settings.shareServices()))
+                .put("reviews", Json.strings(settings.shareReviews()))
+        )
+    }
+
+    // --------------------------------------------------------- listen later
+
+    /**
+     * The Listen later list, newest first, each entry resolved against the
+     * library as it stands NOW — so it is playable wherever Roon has it, under
+     * Roon's own strings. The streaming fields Rouen fills (a service album an
+     * entry could be added from) are always empty here: every entry this
+     * build can hold was put aside from the library.
+     */
+    private fun listenLaterList(): Response {
+        sendPicksToLaterIfDue(java.time.LocalDate.now().toString())
+        val list = app.listenLater.entries().map { e ->
+            val rec = app.listenLater.record(e)
+            JSONObject()
+                .put("key", e.key)
+                .put("title", e.title)
+                .put("artist", e.artist)
+                .put("service", "")
+                .put("album_id", "")
+                .put("image", "")
+                .put("source", e.source)
+                .put("added_at", e.addedAt)
+                .put("added", JSONObject.NULL)
+                .put("service_url", JSONObject.NULL)
+                .put("offset", rec?.offset ?: JSONObject.NULL)
+                .put("library_title", rec?.title ?: "")
+                .put("library_subtitle", rec?.subtitle ?: "")
+                .put("image_key", rec?.imageKey ?: JSONObject.NULL)
+                .put("album", rec?.let { Json.album(it) } ?: JSONObject.NULL)
+        }
+        return Json.obj(JSONObject().put("albums", Json.arrayOf(list)))
+    }
+
+    /**
+     * Put an album aside, or take it off. `on` is the state ASKED FOR, not a
+     * toggle: two devices tapping at once must both end where they meant to,
+     * which a toggle cannot promise.
+     */
+    private fun setListenLater(request: Request): Response {
+        val body = Json.body(request)
+        val title = body.str("title").trim()
+        val artist = body.str("artist").trim()
+        if (title.isEmpty()) return Json.error(400, "title required")
+        val on = body.opt("on") as? Boolean ?: return Json.error(400, "on must be true or false")
+        if (ListenLater.keyOf(title, artist).isBlank()) return Json.error(400, "unrecognisable album title")
+        if (on) {
+            val source = body.str("source").takeIf { it in ListenLater.SOURCES } ?: "album"
+            if (!app.listenLater.add(title, artist, source)) {
+                return Json.error(500, "Couldn't save that — the list holds ${ListenLater.MAX_ENTRIES} albums")
+            }
+            return Json.ok(JSONObject().put("on", true))
+        }
+        app.listenLater.remove(title, artist)
+        return Json.ok(JSONObject().put("on", false))
     }
 
     /**
@@ -1425,6 +1864,10 @@ class RemoteApi(
         val canon = Normalize.text(artist).takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "unrecognisable artist name")
         store.blockPick(BLOCKED_ARTIST_PREFIX + canon)
+        // The artist, everywhere: their picks leave Listen later too (an album
+        // put aside from the album view stays — that was the user's own find).
+        app.listenLater.forgetPickArtist(artist)
+        app.live.bump("picks")
         return Json.ok(JSONObject().put("artist", artist))
     }
 
@@ -1498,7 +1941,10 @@ class RemoteApi(
         JSONObject()
             .put("enabled", settings.smartPicksEnabled())
             .put("hour", settings.smartPicksHour())
-            .put("auto_add", settings.smartPicksAutoAdd())
+            // No streaming library to add picks to, so never "on".
+            .put("auto_add", false)
+            .put("dest", settings.smartPicksDest())
+            .put("dests", Json.strings(Settings.SMART_PICK_DESTS))
             // False, and not because the index is missing. `service_ready`
             // means "there is a streaming account to add a pick TO", and this
             // build has none — so the settings note and the picks banner both
@@ -1507,22 +1953,162 @@ class RemoteApi(
             .put("service_ready", false)
     )
 
+    // --------------------------------------------- similar acts and Discover
+
+    /**
+     * Where a record the library may or may not hold should GO: in the library
+     * -> its offset plus the library's own title and artist (what /api/play
+     * checks identity against, since Deezer's punctuation differs from Roon's);
+     * otherwise a link per enabled service, the page choosing which.
+     *
+     * Resolved per request, never cached with the suggestion: whether Roon has
+     * a record changes with the library.
+     */
+    private fun placeOf(o: JSONObject, title: String?, artist: String, request: Request): AlbumRecord? {
+        val inLib = if (title.isNullOrBlank()) null else app.discover.resolve(title, artist)
+        o.put("in_library", inLib != null)
+            .put("offset", inLib?.offset ?: JSONObject.NULL)
+            .put("library_title", inLib?.title ?: JSONObject.NULL)
+            .put("library_subtitle", inLib?.subtitle ?: JSONObject.NULL)
+        val services = if (inLib != null) emptyList() else ShareLinks.serviceLinks(
+            artist, title ?: "",
+            locale = ShareLinks.localeFromAcceptLanguage(request.headers["accept-language"]),
+            enabled = settings.shareServices()
+        )
+        o.put("services", Json.arrayOf(services.map { it.toJson() }))
+        return inLib
+    }
+
+    /**
+     * "If you like this" — three acts like the one on the card, each with
+     * their earliest album (Rouen v1.8.34). Up to five Deezer calls, cached a
+     * day per artist. Never an error: a suggestion row is not worth one.
+     */
+    private fun similar(request: Request): Response {
+        val artist = request.str("artist")?.trim().orEmpty()
+        if (artist.isEmpty()) return Json.error(400, "artist query parameter required")
+        val acts = try {
+            // The FIRST credited act: a four-act credit searched whole finds nobody.
+            app.deezer.similarActs(ShareLinks.primaryArtist(artist))
+        } catch (e: Exception) {
+            Log.d(TAG, "similar: ${e.message}")
+            emptyList()
+        }
+        return Json.obj(
+            JSONObject().put(
+                "acts",
+                Json.arrayOf(
+                    acts.map { a ->
+                        JSONObject()
+                            .put("name", a.name).put("id", a.id)
+                            .put("album", a.album ?: JSONObject.NULL)
+                            .put("year", a.year ?: JSONObject.NULL)
+                            .put("cover", a.cover ?: JSONObject.NULL)
+                            .also { placeOf(it, a.album, a.name, request) }
+                    }
+                )
+            )
+        )
+    }
+
+    /**
+     * Discover's list: today's, or the most recent day that found something.
+     * Opening the screen is also one of the two things that ask whether the
+     * day's build is due — this build has no timer of its own (see Discover).
+     */
+    private fun discoverList(request: Request): Response {
+        if (!roon.isPaired) return Json.error(503, "Not paired with a Roon Core")
+        val discover = app.discover
+        discover.kick("screen opened")
+        val (day, rows) = discover.latest()
+        val releases = rows.map { r ->
+            val o = JSONObject()
+                .put("artist", r.artist).put("album", r.album)
+                .put("cover", r.cover ?: JSONObject.NULL)
+                .put("release_date", r.releaseDate ?: JSONObject.NULL)
+                .put("year", r.releaseDate?.take(4)?.toIntOrNull() ?: JSONObject.NULL)
+            val inLib = placeOf(o, r.album, r.artist, request)
+            // Roon's own art for a record the library holds.
+            o.put("image_key", inLib?.imageKey ?: JSONObject.NULL)
+        }
+        return Json.obj(
+            JSONObject()
+                .put("enabled", settings.discoverEnabled())
+                .put("day", day)
+                .put("releases", Json.arrayOf(releases))
+                .put("window_days", Discover.WINDOW_DAYS)
+                .put("building", discover.building)
+                .put("rules", Discover.RULES)
+                .put("rules_current", discover.stampCurrent(day))
+        )
+    }
+
+    private fun discoverRebuild(): Response {
+        if (!settings.discoverEnabled()) return Json.error(400, "Discover is switched off")
+        if (app.discover.building) return Json.ok(JSONObject().put("building", true))
+        // A refusal is reported, not swallowed: "Refreshing…" for a build that
+        // never started is the worst of both answers.
+        if (!app.discover.kick("manual rebuild", force = true)) {
+            return Json.error(
+                503,
+                if (roon.isPaired) "Still reading your library — try again in a minute"
+                else "Not paired with a Roon Core"
+            )
+        }
+        return Json.ok(JSONObject().put("building", true))
+    }
+
+    private fun discoverSettings(): Response = Json.obj(
+        JSONObject()
+            .put("enabled", settings.discoverEnabled())
+            .put("hour", settings.discoverHour())
+            .put("window_days", Discover.WINDOW_DAYS)
+            .put("seed_count", Discover.SEED_ARTISTS)
+    )
+
+    private fun saveDiscover(request: Request): Response {
+        val body = Json.body(request)
+        if (body.has("hour")) {
+            val h = body.optInt("hour", -1)
+            if (h !in 0..23) return Json.error(400, "hour must be 0-23")
+        }
+        settings.saveDiscover(
+            if (body.has("enabled")) body.optBoolean("enabled") else null,
+            if (body.has("hour")) body.optInt("hour") else null
+        )
+        // Switched on after the hour: today's list starts now rather than at
+        // the next library check.
+        if (settings.discoverEnabled()) app.discover.kick("switched on")
+        return Json.ok(
+            JSONObject().put("enabled", settings.discoverEnabled()).put("hour", settings.discoverHour())
+        )
+    }
+
     private fun saveSmartPicks(request: Request): Response {
         val body = Json.body(request)
         if (body.has("hour")) {
             val h = body.optInt("hour", -1)
             if (h !in 0..23) return Json.error(400, "hour must be 0-23")
         }
+        // Every field is checked before any is applied, so a refused request
+        // changes nothing. "library" is Rouen's third destination — a Qobuz or
+        // TIDAL favourite — and is refused rather than stored as a choice
+        // nothing here could act on.
+        val dest = body.strOrNull("dest")
+        if (dest != null && dest !in Settings.SMART_PICK_DESTS) {
+            return Json.error(400, "dest must be one of ${Settings.SMART_PICK_DESTS.joinToString(", ")}")
+        }
         settings.saveSmartPicks(
             if (body.has("enabled")) body.optBoolean("enabled") else null,
             if (body.has("hour")) body.optInt("hour") else null,
-            if (body.has("auto_add")) body.optBoolean("auto_add") else null
+            dest
         )
         return Json.ok(
             JSONObject()
                 .put("enabled", settings.smartPicksEnabled())
                 .put("hour", settings.smartPicksHour())
-                .put("auto_add", settings.smartPicksAutoAdd())
+                .put("dest", settings.smartPicksDest())
+                .put("auto_add", false)
         )
     }
 
@@ -1913,7 +2499,7 @@ class RemoteApi(
      * shape gets a 501 that says what is missing and why, which is more use than
      * a bare 404.
      */
-    private fun notInLite(path: String): Response = when {
+    private fun notInLite(path: String, post: Boolean = false): Response = when {
         // Labels, and everything the label index feeds.
         path.startsWith("/api/labels") || path == "/api/label-albums" ->
             Json.error(501, Settings.LABELS_UNAVAILABLE)
@@ -1951,7 +2537,10 @@ class RemoteApi(
         // Playlists, sharing and saved lists are not in this build yet. Empty
         // collections keep their screens at "nothing here" rather than an error.
         path == "/api/playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
-        path == "/api/smart-playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
+        // GET only. Answering a SAVE with the same empty list told the page it
+        // had worked — it checks for a 2xx and toasts 'Saved "<name>"' — while
+        // nothing was kept anywhere.
+        path == "/api/smart-playlists" && !post -> Json.obj(JSONObject().put("playlists", JSONArray()))
         path.startsWith("/api/playlist") ||
             path.startsWith("/api/smart-playlist") || path.startsWith("/api/share") ->
             Json.error(501, "Playlists and sharing aren't in the lite build yet.")

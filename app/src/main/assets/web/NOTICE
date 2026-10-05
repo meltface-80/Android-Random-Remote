@@ -1,8 +1,12 @@
-The files in this directory are the front-end of MusicD Remote (for Roon),
-copied unmodified from https://github.com/meltface-80/MusicD-Remote (public/).
+The files in this directory are the front-end of Rouen (a Roon extension,
+formerly MusicD Remote), from https://github.com/meltface-80/Rouen (public/),
+merged with this app's own changes.
 
   Copyright (c) 2026 Lewis Menzies (Music Duck / MusicD)
   Released under the MIT License.
+
+  fonts/ — Manrope and Young Serif, under the SIL Open Font License 1.1;
+  see fonts/LICENSE.txt.
 
 They are bundled here so the app presents the same interface. Every /api/...
 request they make is answered by the Kotlin implementation in :core rather than
@@ -10,5 +14,21 @@ by the Node server they were written against. Endpoints this build does not
 implement answer in the UI's own "feature is off" shape, so no screen is left
 in an error state.
 
-Keeping these files byte-identical to upstream is deliberate: it is what makes
-pulling in a newer MusicD-Remote UI a copy rather than a merge.
+THEY ARE NOT A VERBATIM COPY, and have not been since 0.1.x. This build removes
+what a phone cannot serve (labels, Qobuz and TIDAL accounts, the wall display,
+waveforms), adds what only it has (playlists you make yourself, the artists
+wall, the Network pane, grouped Pitchfork, the dial), and keeps a few rules
+Rouen does not (it never polls, the Home draws are the same all day). So a newer
+Rouen is a THREE-WAY MERGE, not a copy:
+
+  UPSTREAM BASE: meltface-80/Rouen a1daa61 (v1.8.77, 2026-10-04)
+
+  base   = git show a1daa61:public/<file>        (in a Rouen clone)
+  ours   = this directory
+  theirs = the newer Rouen public/<file>
+  git merge-file -p --diff3 ours base theirs
+
+Then update the commit above. The previous base was MusicD-Remote 40f02f1
+(v1.7.70), and sharecard.js separately bdc1a0c (v1.7.89).
+
+dial.html and dial.js are this app's own, a page version of the dial.

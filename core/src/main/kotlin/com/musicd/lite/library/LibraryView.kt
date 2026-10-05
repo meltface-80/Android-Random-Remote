@@ -1,7 +1,7 @@
 package com.musicd.lite.library
 
+import com.musicd.lite.str
 import com.musicd.lite.store.Store
-import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.ThreadLocalRandom
 
@@ -17,6 +17,9 @@ import java.util.concurrent.ThreadLocalRandom
 class LibraryView(private val index: AlbumIndex, private val store: Store) {
 
     companion object {
+        /** Where the day's album is kept — see albumOfTheDay. */
+        const val KEY_AOTD = "album_of_the_day"
+
         val SORTS = listOf("album", "artist", "year", "added", "plays", "lastplayed", "random")
         // "6" and "12" ("not in the last N months") are gone: the plays table
         // only holds what this app watched happen, and it starts empty, so a
@@ -267,27 +270,66 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
     }
 
     /**
-     * The same album for everyone, all day, changing at local midnight — and
-     * withdrawn once it has actually been played today, because a suggestion
-     * you have already taken is not a suggestion.
+     * The day's album, the same for every device from 00:01 until it is
+     * played. Chosen ONCE, at the first ask of the day, and kept as an album
+     * IDENTITY (Rouen v1.8.74). It used to be worked out afresh on every ask as
+     * hash(date) % library size, so a scan that added or removed one album put
+     * a different album there mid-day — and one already played came back as a
+     * "new" one. Now only a new day, or the album leaving the library, chooses
+     * again. The choice is made over the library ordered by identity, so it
+     * does not depend on the order Roon listed it in.
+     *
+     * Kept in the store directly rather than through Settings: it is
+     * bookkeeping, and must not move the live `settings` revision.
      */
     fun albumOfTheDay(now: Long = System.currentTimeMillis()): AlbumRecord? {
         val albums = index.albums
         if (albums.isEmpty()) return null
-        val cal = Calendar.getInstance().apply { timeInMillis = now }
-        val stamp = "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.MONTH) + 1}-${cal.get(Calendar.DAY_OF_MONTH)}"
-        val idx = Math.floorMod(fnv1a(stamp), albums.size)
-        return albums[idx]
+        val day = aotdDay(now)
+        synchronized(aotdLock) {
+            aotdMemo?.let { (gen, d, al) -> if (gen == index.generation && d == day) return al }
+            val kept = store.setting(KEY_AOTD)?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+            val keptAlbum = if (kept != null && kept.str("day") == day) {
+                val key = kept.str("key")
+                albums.firstOrNull { it.key == key }
+            } else null
+            val pick = keptAlbum ?: albums.sortedBy { it.key }.let { byKey ->
+                byKey[Math.floorMod(fnv1a(day), byKey.size)]
+            }.also { chosen ->
+                runCatching {
+                    store.putSetting(
+                        KEY_AOTD,
+                        org.json.JSONObject().put("day", day).put("key", chosen.key)
+                            .put("title", chosen.title).put("subtitle", chosen.subtitle).toString()
+                    )
+                }
+            }
+            aotdMemo = Triple(index.generation, day, pick)
+            return pick
+        }
     }
 
-    fun playedToday(al: AlbumRecord, now: Long = System.currentTimeMillis()): Boolean {
-        val midnight = Calendar.getInstance().apply {
-            timeInMillis = now
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-        return playKey(al) in playedTitlesSince(midnight)
-    }
+    private val aotdLock = Any()
+
+    /** The resolved pick for this snapshot and day, so a Home visit does not re-sort the library. */
+    private var aotdMemo: Triple<Long, String, AlbumRecord>? = null
+
+    /**
+     * Album of the day's day: the local date a minute ago, so the pick turns
+     * at 00:01 rather than midnight (Rouen's rule, and LiveState's `aotd`).
+     */
+    fun aotdDay(now: Long = System.currentTimeMillis()): String =
+        java.time.LocalDate.ofInstant(java.time.Instant.ofEpochMilli(now - 60_000L), java.time.ZoneId.systemDefault())
+            .toString()
+
+    /** When that day began: 00:01 of it. */
+    fun aotdDayStart(now: Long = System.currentTimeMillis()): Long =
+        java.time.LocalDate.parse(aotdDay(now)).atTime(0, 1)
+            .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+    /** Played since today's 00:01, on any zone — then it is gone until the next one. */
+    fun playedToday(al: AlbumRecord, now: Long = System.currentTimeMillis()): Boolean =
+        playKey(al) in playedTitlesSince(aotdDayStart(now))
 
     /**
      * Recently played albums, newest first, mapped back onto library records so

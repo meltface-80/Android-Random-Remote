@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MusicD Remote Lite for Android — download &amp; install</title>
-<meta name="description" content="MusicD Remote Lite — a native Android APK that pairs with your Roon Core directly. No Docker, no Node, no server. Download and sideload.">
+<title>Rouen Lite for Android — download &amp; install</title>
+<meta name="description" content="Rouen Lite — a native Android APK that pairs with your Roon Core directly. No Docker, no Node, no server. Download and sideload.">
 <link rel="icon" href="favicon.ico">
 <style>
   :root {
@@ -178,7 +178,7 @@
     <a href="#features">Features</a>
     <a href="#lite">What's different</a>
     <a href="#updates">Updates</a>
-    <a class="gh" href="https://github.com/meltface-80/Android-Random-Remote">GitHub&nbsp;&rarr;</a>
+    <a class="gh" href="https://github.com/meltface-80/Rouen-Lite">GitHub&nbsp;&rarr;</a>
   </div>
 </nav>
 
@@ -189,14 +189,14 @@
        somebody else's hosting. -->
   <img class="logo" src="musicd-logo.jpg"
        alt="MusicD logo" onerror="this.closest('.hero').classList.add('noimg')">
-  <div class="wordmark">Music<span>D</span></div>
-  <h1>MusicD Remote Lite <span style="color:var(--copper)">for Android</span></h1>
-  <p class="tag"><a href="https://github.com/meltface-80/MusicD-Remote">MusicD Remote</a> as a
-     native Android app. It pairs with your Roon Core directly over the network — there is no
+  <div class="wordmark">Rouen<span> Lite</span></div>
+  <h1>Rouen Lite <span style="color:var(--copper)">for Android</span></h1>
+  <p class="tag"><a href="https://github.com/meltface-80/Rouen">Rouen</a> (formerly MusicD
+     Remote) as a native Android app. It pairs with your Roon Core directly over the network — there is no
      Docker container, no Node process and no server to keep running. Install the APK and it is
      the whole thing.</p>
   <div class="badges">
-    <span class="badge" id="ver-badge">v0.4.40</span>
+    <span class="badge" id="ver-badge">v0.5.0</span>
     <span class="badge plain">Android 8.0+</span>
     <span class="badge plain">MIT licence</span>
     <span class="badge plain">Pairs with your Roon Core over the network</span>
@@ -208,8 +208,8 @@
     <h2>Download</h2>
     <div class="dl">
       <a class="get" id="dl-link"
-         href="https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.4.40.apk">Download the APK</a>
-      <div class="filename" id="dl-name">musicd-remote-lite-0.4.40.apk</div>
+         href="https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.5.0.apk">Download the APK</a>
+      <div class="filename" id="dl-name">musicd-remote-lite-0.5.0.apk</div>
       <p class="sub">Android 8.0 (API 26) or newer. Your browser will warn you about downloading an
          APK, and Android will ask permission to install from this source — both are normal for an
          app that does not come from the Play Store.</p>
@@ -232,8 +232,9 @@
         <li><b>Open the app</b> on the same Wi-Fi as your Roon Core. It finds the Core itself;
             there is no address to type in.</li>
         <li><b>Approve it in Roon:</b> <b>Settings &rarr; Extensions</b> &rarr; Enable
-            <em>MusicD Remote Lite (Android)</em>. The pairing token is stored per Core, so this
-            happens only the first time.</li>
+            <em>Rouen Lite (Android)</em>. The pairing token is stored per Core, so this
+            happens only the first time. (Before 0.5.0 it was listed as <em>MusicD Remote Lite
+            (Android)</em> &mdash; the same extension, renamed; an approval carries over.)</li>
         <li><b>Optional &mdash; open it on your other devices.</b> In the app, go to
             <b>Settings &rarr; Network</b> and switch on <em>Open on other devices</em>. It shows
             an address like <code>http://192.168.0.42:3450</code> and an eight-character code.
@@ -276,7 +277,8 @@
            on a phone.</p></div>
       <div class="card"><h3><span class="em">📤</span>Share cards</h3>
         <p>Turn what is playing into a card you can send to anyone, straight from the Android
-           share sheet.</p></div>
+           share sheet &mdash; with links to hear the record and read about it, on the services
+           you choose.</p></div>
       <div class="card"><h3><span class="em">🔒</span>Lock screen &amp; media keys</h3>
         <p>Artwork and transport on the lock screen, and the buttons on your headphones, car or
            Bluetooth speaker control the zone.</p></div>
@@ -302,8 +304,8 @@
            “surprise me”. Android listens, your own library answers — nothing is sent to a music
            service.</p></div>
       <div class="card"><h3><span class="em">🏡</span>A Home screen you arrange</h3>
-        <p>Album of the day, Recently played, Smart Picks, Random albums, Artists, Library and
-           Browse by genre. Reorder them or switch them off — a row that is off is not loaded at
+        <p>Album of the day and a Random Album button under the greeting; then Recently played,
+           Listen later, Smart Picks, Random albums, Artists, Library and Browse by genre. Reorder them or switch them off — a row that is off is not loaded at
            all, not merely hidden.</p></div>
       <div class="card"><h3><span class="em">📚</span>The whole library, sorted</h3>
         <p>Every album in a paged grid: by title, artist, year, added, play count, last played or a
@@ -315,8 +317,20 @@
         <p>Roon's extension API cannot write a playlist, so the app keeps its own — build them from
            albums or single tracks and play them straight back.</p></div>
       <div class="card"><h3><span class="em">📅</span>Album of the day</h3>
-        <p>The same record for everyone until local midnight, and quietly withdrawn once you have
-           actually played it — a suggestion you have taken is not a suggestion.</p></div>
+        <p>One record for the whole day, and quietly withdrawn once you have actually played it
+           — a suggestion you have taken is not a suggestion.</p></div>
+      <div class="card"><h3><span class="em">🔖</span>Listen later</h3>
+        <p>Put an album aside from its page or from Smart Picks. It waits on Home, and leaves the
+           list by itself once you have played every track.</p></div>
+      <div class="card"><h3><span class="em">🧭</span>Discover</h3>
+        <p>New records from the last two months by the artists you actually play, found once a
+           day from your own listening. Off until you switch it on.</p></div>
+      <div class="card"><h3><span class="em">👂</span>If you like this</h3>
+        <p>Under the share card: three acts like the one playing, each with a record to start on
+           &mdash; queued from your library if you own it, a link out if you do not.</p></div>
+      <div class="card"><h3><span class="em">⏮️</span>What already played</h3>
+        <p>The queue keeps what each zone played before, and puts any of it back &mdash; one
+           track or a whole selection, next or at the end.</p></div>
       <div class="card"><h3><span class="em">⬇️</span>Updates from inside the app</h3>
         <p>Settings notices a newer build and offers it. Android's installer still asks; this only
            saves you finding the download.</p></div>
@@ -348,7 +362,7 @@
         <tr><td>Wall display</td>
             <td>The <code>/display</code> page is not ported. Serving pages to other devices IS
                 possible now — Settings &rarr; Network, behind a code — but a wall display also
-                means a phone staying awake rendering for a TV. Use MusicD Remote proper for that;
+                means a phone staying awake rendering for a TV. Use Rouen proper for that;
                 it runs on a machine that is already on.</td></tr>
         <tr><td>Queue editing</td>
             <td>Not a lite limitation: Roon's extension API exposes no way to remove, reorder or
@@ -378,9 +392,9 @@
 </section>
 
 <footer>
-  <p>MusicD Remote Lite for Android · MIT licence · © 2026 Lewis Menzies (Music Duck / MusicD) ·
-     <a href="https://github.com/meltface-80/Android-Random-Remote">github.com/meltface-80/Android-Random-Remote</a><br>
-     Built from <a href="https://github.com/meltface-80/MusicD-Remote">MusicD Remote</a>.
+  <p>Rouen Lite for Android · MIT licence · © 2026 Lewis Menzies (Music Duck / MusicD) ·
+     <a href="https://github.com/meltface-80/Rouen-Lite">github.com/meltface-80/Rouen-Lite</a><br>
+     Built from <a href="https://github.com/meltface-80/Rouen">Rouen</a>.
      Roon is a trademark of Roon Labs LLC. This is an independent extension, not affiliated with
      Roon Labs.</p>
 </footer>
@@ -392,7 +406,7 @@
   // this page cannot drift from what is actually downloadable. On any failure
   // the values baked in at build time stand — a stale-but-real link beats a
   // broken one.
-  var RAW = "https://raw.githubusercontent.com/meltface-80/Android-Random-Remote/main/dist/latest.json";
+  var RAW = "https://raw.githubusercontent.com/meltface-80/Rouen-Lite/main/dist/latest.json";
   fetch(RAW, { cache: "no-store" })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (j) {

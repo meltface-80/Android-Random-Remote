@@ -24,8 +24,12 @@
       speech model, and it can just be the product's name again. The rule that
       used to guard it (VoiceName) went with the feature; this comment is what
       is left, so the history is not rediscovered the hard way.
+
+      0.5.0: "Rouen Lite", the owner's choice, when the page was brought up to
+      Rouen (MusicD Remote's new name). The package id did not change, so it
+      installs over every earlier build.
     -->
-    <string name="app_name">MusicD Remote</string>
+    <string name="app_name">Rouen Lite</string>
     <string name="dial_name">Dial for Roon</string>
 
     <string name="tile_random_album">Random album</string>

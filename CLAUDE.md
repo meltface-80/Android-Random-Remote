@@ -35,6 +35,7 @@ node tools/verify-wire.js     # needs tools/node_modules; CI has it
 node tools/check-sharecard.js
 node tools/check-css.js
 python3 tools/check-api-contract.py
+python3 tools/check-request-fields.py
 ```
 
 **A new test must fail before the fix and pass after it.** Prove it: break the
@@ -139,7 +140,11 @@ are different claims.
 
 - **The bundled page is the authority on every API field name**, not the
   original server. Eleven wire-contract bugs came from porting the server's
-  names. `tools/check-api-contract.py` catches the class; run it.
+  names. `tools/check-api-contract.py` catches the class in RESPONSES; run it.
+  `tools/check-request-fields.py` is the same check for REQUEST bodies, added
+  after three more shipped there: play-track, transfer-zone and incremental
+  volume each read a name the page never sends, and each answered 400 on every
+  tap while its test — written from the handler's own reading — passed.
 - **Roon's transport API has exactly 22 verbs**, and `play_from_here` is the
   only queue mutation. There is no remove, reorder or clear.
   `tools/verify-wire.js` checks request bodies against RoonLabs' own code.

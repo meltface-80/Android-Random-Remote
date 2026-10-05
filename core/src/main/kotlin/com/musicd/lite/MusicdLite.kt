@@ -14,9 +14,11 @@ import com.musicd.lite.library.AlbumIndex
 import com.musicd.lite.library.AlbumRecord
 import com.musicd.lite.library.Albums
 import com.musicd.lite.library.LibraryView
+import com.musicd.lite.library.ListenLater
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
 import com.musicd.lite.library.UserPlaylists
+import com.musicd.lite.meta.Deezer
 import com.musicd.lite.meta.ImageCache
 import com.musicd.lite.meta.Metadata
 import com.musicd.lite.meta.Pitchfork
@@ -34,6 +36,14 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.OkHttpClient
+
+/**
+ * What Roon lists under Settings → Extensions, and what the page tells the
+ * user to click Enable on — ExtensionNameTest holds the two together. Only the
+ * NAME: the extension id is what Roon keys its authorisation on, and that is
+ * unchanged since the first build.
+ */
+const val EXTENSION_NAME = "Rouen Lite (Android)"
 
 /**
  * The whole app, minus the Android shell.
@@ -126,7 +136,7 @@ class MusicdLite(
 
         /** Published by CI next to the APK it describes. */
         const val UPDATE_MANIFEST_URL =
-            "https://raw.githubusercontent.com/meltface-80/Android-Random-Remote/main/dist/latest.json"
+            "https://raw.githubusercontent.com/meltface-80/Rouen-Lite/main/dist/latest.json"
     }
 
     /** What an Android host supplies so [updater] can finish the job. */
@@ -134,24 +144,45 @@ class MusicdLite(
 
     val extension = RoonCore.ExtensionInfo(
         id = "com.musicd.lite.android",
-        displayName = "MusicD Remote Lite (Android)",
+        displayName = EXTENSION_NAME,
         version = version,
-        publisher = "Android-Random-Remote",
+        publisher = "Rouen Lite",
         email = "noreply@example.com",
-        website = "https://github.com/meltface-80/Android-Random-Remote"
+        website = "https://github.com/meltface-80/Rouen-Lite"
     )
 
     private val http = httpClient
 
     val roon: RoonApi = roonFactory(store, extension, multicastLock)
     val index = AlbumIndex()
-    val settings = Settings(store)
+
+    /**
+     * One revision per kind of data a screen can show, served to the page as a
+     * long poll (/api/live) so a screen re-reads itself when — and only when —
+     * something it shows has moved. Fed from here: the index (below), every
+     * settings write, plays, years learned, and the feature stores.
+     */
+    val live = LiveState({ index.builtAt }).also { l -> index.onChanged = { l.snapshotChanged() } }
+
+    val settings = Settings(store) { live.bump("settings") }
+
+    /** What each zone has played, for the Queue's "played earlier" — see QueueHistory. */
+    val queueHistory = QueueHistory()
+
+    /** Albums put aside to play another time — see ListenLater. */
+    val listenLater = ListenLater(store, index) { live.bump("later") }
     val view = LibraryView(index, store)
     val albums = Albums(roon.tree, index, store)
     val metadata = Metadata(http, "MusicDRemoteLite/$version ( ${extension.website} )")
     val art = ImageCache(http, artDir)
     val pitchfork = Pitchfork(http, "MusicDRemoteLite/$version ( ${extension.website} )")
     val qobuz = QobuzAlbum(http, "MusicDRemoteLite/$version ( ${extension.website} )")
+
+    /** Deezer's keyless catalogue: "If you like this" and Discover. */
+    val deezer = Deezer(http, "MusicDRemoteLite/$version ( ${extension.website} )")
+
+    /** New records by the acts you play — off until switched on. See Discover. */
+    val discover = Discover(store, index, settings, deezer, { live.bump("discover") })
 
     /**
      * The published manifest CI writes beside the APK. Read from the default
@@ -363,6 +394,7 @@ class MusicdLite(
     fun stop() {
         if (!started.compareAndSet(true, false)) return
         jobs.shutdownNow()
+        discover.close()
         server.stop()
         roon.stop()
     }
@@ -471,6 +503,7 @@ class MusicdLite(
     fun rescan(force: Boolean): RescanResult {
         if (!roon.isPaired) return RescanResult("unpaired")
         if (!rebuilding.compareAndSet(false, true)) return RescanResult("busy")
+        libraryCheckedAt = System.currentTimeMillis()
         try {
             val changed = try {
                 force || libraryChangedSince()
@@ -505,8 +538,24 @@ class MusicdLite(
 
     data class RescanResult(val status: String, val count: Int? = null)
 
+    /**
+     * When Roon was last asked whether the library moved — the side menu's
+     * "checked just now". Zero until the first probe, and the page falls back
+     * to the index's build time then.
+     */
+    @Volatile
+    var libraryCheckedAt: Long = 0L
+        private set
+
+    /** A release year arrived: the year sort and the album views move with it. */
+    fun yearLearned() {
+        live.bump("library")
+        live.bump("dates")
+    }
+
     private fun libraryMaintenance() {
         if (!roon.isPaired) return
+        libraryCheckedAt = System.currentTimeMillis()
         try {
             if (!index.isBuilt) {
                 rebuildIndex("index is empty")
@@ -516,6 +565,10 @@ class MusicdLite(
         } catch (e: Exception) {
             Log.d(TAG, "library probe failed: ${e.message}")
         }
+        // Discover has no timer of its own: this check is one of the two
+        // things that ask whether today's list is due (opening the screen is
+        // the other). Off, or already built today, this returns at once.
+        discover.kick("library check")
     }
 
     // ------------------------------------------------------- play history
@@ -534,12 +587,14 @@ class MusicdLite(
         }
 
         override fun onZonesChanged(zones: List<Zone>) {
+            runCatching { queueHistory.observe(zones) }
             for (zone in zones) recordIfChanged(zone)
             runCatching { radio.onZones(zones) }
         }
 
         override fun onDisconnected() {
             synchronized(lastRecorded) { lastRecorded.clear() }
+            queueHistory.clear()
         }
     }
 
@@ -557,6 +612,12 @@ class MusicdLite(
         }
         val key = AlbumRecord(0, album, artist, null).key
         runCatching { store.recordPlay(key, album, artist, track, System.currentTimeMillis()) }
+            .onSuccess { live.bump("plays") }
+        // An album on the Listen later list leaves it once every track has
+        // played. Logged and swallowed: this runs in the zone feed, and a
+        // failure here must cost the list its tidy-up, never play tracking.
+        runCatching { listenLater.noticePlay(album, artist) }
+            .onFailure { Log.w(TAG, "listen later play check failed: ${it.message}") }
         // A year learned once is worth keeping, but never at the cost of a
         // better source: file tags and MusicBrainz both outrank a guess.
         runCatching {
@@ -565,6 +626,7 @@ class MusicdLite(
                     jobs.execute {
                         metadata.extras(hit.title, hit.subtitle).year?.let { y ->
                             store.putAlbumYear(hit.key, y, YearSource.MUSICBRAINZ)
+                            yearLearned()
                         }
                     }
                 }

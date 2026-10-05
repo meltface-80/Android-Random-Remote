@@ -627,14 +627,40 @@ class RemoteApiTest {
 
     @Test
     fun aTrackIsPlayedByIndexAndVerifiedByTitle() {
+        // The page's own names, exactly as app.js sends them from the album
+        // view's track list: `track` is the INDEX, `title` is the TRACK's
+        // title, and the album it is expected to be in travels as
+        // album_title / album_subtitle. This test used to send track_index,
+        // track_title and the album as title/subtitle — the server's own
+        // reading — so it passed while every tap on a track in the app was
+        // answered 400 "track_index is required".
         val (code, text) = post(
             "/api/play-track",
-            """{"offset":1,"zone_or_output_id":"z1","track_index":2,"track_title":"Closer",
-                "kind":"queue","title":"Dummy","subtitle":"Portishead"}"""
+            """{"offset":1,"zone_or_output_id":"z1","track":2,"title":"Closer",
+                "kind":"queue","album_title":"Dummy","album_subtitle":"Portishead"}"""
         )
         assertEquals(text, 200, code)
-        assertEquals("Closer", JSONObject(text).getString("track"))
+        val body = JSONObject(text)
+        assertEquals("Closer", body.getString("track"))
+        // What the page toasts: `j.action || "Playing"`.
+        assertEquals("Queue", body.getString("action"))
         assertEquals(listOf("queue:track:1:2@z1"), core.invoked)
+    }
+
+    /**
+     * The album a track is expected in is album_title, not title — `title` is
+     * the track's own. Read the wrong way round, the stale-offset check would
+     * compare the album against a track name and refuse every play.
+     */
+    @Test
+    fun aTrackInAnAlbumThatMovedIsRefusedNotPlayedFromTheWrongAlbum() {
+        val (code, text) = post(
+            "/api/play-track",
+            """{"offset":1,"zone_or_output_id":"z1","track":0,"title":"Opening",
+                "kind":"play_now","album_title":"Not This Album","album_subtitle":"Nobody"}"""
+        )
+        assertEquals(text, 409, code)
+        assertEquals(emptyList<String>(), core.invoked)
     }
 
     /**
@@ -698,6 +724,39 @@ class RemoteApiTest {
         )
     }
 
+    /**
+     * Moving playback to another room, with exactly the body the zone picker
+     * sends. The route read `from` and `to`; the page has always sent
+     * from_zone and to_zone, so every transfer was answered 400 "from is
+     * required" and the music stayed where it was.
+     */
+    @Test
+    fun aTransferUsesThePagesFieldNames() {
+        val (code, text) = post("/api/transfer-zone", """{"from_zone":"z1","to_zone":"z2"}""")
+        assertEquals(text, 200, code)
+        assertEquals(listOf("transfer:z1:z2"), core.calls)
+    }
+
+    @Test
+    fun aTransferToTheSameZoneIsANoOpNotACoreCall() {
+        val (code, _) = post("/api/transfer-zone", """{"from_zone":"z1","to_zone":"z1"}""")
+        assertEquals(200, code)
+        assertEquals(emptyList<String>(), core.calls)
+    }
+
+    /**
+     * The − and + buttons on an output whose volume is incremental — up/down
+     * only, no scale — send {"relative": ±1}, because there is no value to
+     * step from. The route demanded `value` and answered 400, so on those
+     * amplifiers the buttons did nothing.
+     */
+    @Test
+    fun anIncrementalStepIsSentAsRelative() {
+        val (code, text) = post("/api/volume", """{"zone_or_output_id":"z1","relative":-1}""")
+        assertEquals(text, 200, code)
+        assertEquals(listOf("volume:o1:relative:-1.0"), core.calls)
+    }
+
     @Test
     fun transportCommandsReachRoon() {
         assertEquals(200, post("/api/control", """{"zone_or_output_id":"z1","command":"playpause"}""").first)
@@ -724,12 +783,12 @@ class RemoteApiTest {
         assertEquals(listOf("mute:o1:mute", "mute:o1:unmute"), core.calls)
     }
 
-    /** A request that is neither a mute nor a value is still a bad request. */
+    /** A request that is neither a mute, a value nor a relative step is still a bad request. */
     @Test
     fun aVolumeRequestWithNothingToDoIsRefused() {
         val (code, text) = post("/api/volume", """{"zone_or_output_id":"z1"}""")
         assertEquals(400, code)
-        assertTrue(JSONObject(text).getString("error").contains("value is required"))
+        assertTrue(JSONObject(text).getString("error").contains("value, relative or mute is required"))
         assertTrue(core.calls.isEmpty())
     }
 
@@ -1000,7 +1059,7 @@ class RemoteApiTest {
         val rows = json("/api/settings/home-rows").getJSONArray("rows")
         val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }
         assertEquals(
-            listOf("aotd", "history", "picks", "random", "artists", "library", "genres"),
+            listOf("history", "later", "picks", "random", "artists", "library", "genres"),
             ids
         )
         // The settings screen renders its list from this response, so a row
@@ -1021,6 +1080,26 @@ class RemoteApiTest {
      * A stored layout from an older build still names "lotw". It must be
      * dropped on the way back out, not carried through into the settings list.
      */
+    /**
+     * Album of the day had a row of its own ("aotd") until it moved into the
+     * strip under the greeting, which is always there and is not a row. A
+     * layout saved by the older build must lose it rather than offer a switch
+     * that controls nothing.
+     */
+    @Test
+    fun theOldAlbumOfTheDayRowIsDroppedFromAStoredLayout() {
+        post(
+            "/api/settings/home-rows",
+            """{"rows":[{"id":"aotd","on":true},{"id":"genres","on":false}]}"""
+        )
+        val ids = json("/api/settings/home-rows").getJSONArray("rows").let { rows ->
+            (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }
+        }
+        assertFalse("aotd" in ids)
+        assertEquals("genres", ids.first())
+        assertTrue("later" in ids)
+    }
+
     @Test
     fun aStoredLayoutNamingARetiredRowLosesIt() {
         post(
@@ -1131,12 +1210,18 @@ class RemoteApiTest {
      * to loopback — so nothing off the phone could ever reach it. Opening that
      * up would put an API that controls playback on the LAN with no
      * authentication in front of it.
+     *
+     * Rouen's page asks /api/settings/display at boot (it decides whether to
+     * show a "Wall display" menu entry and a screensaver), so that one route
+     * answers — OFF, which is what keeps both hidden — and still refuses to be
+     * turned on. Nothing that serves the display itself exists.
      */
     @Test
     fun theWallDisplayRoutesAreGone() {
         assertEquals(404, get("/api/display/content").first)
-        assertEquals(404, get("/api/settings/display").first)
-        assertEquals(404, post("/api/settings/display", """{"enabled":true}""").first)
+        assertFalse(json("/api/settings/display").getBoolean("enabled"))
+        assertEquals(501, post("/api/settings/display", """{"enabled":true}""").first)
+        assertFalse(json("/api/settings/display").getBoolean("enabled"))
     }
 
     @Test

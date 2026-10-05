@@ -15,6 +15,9 @@ object Json {
 
     fun obj(body: JSONObject): Response = Response.json(200, body.toString())
 
+    /** A non-2xx answer that carries more than a message — fields the page reads off the failure. */
+    fun obj(body: JSONObject, status: Int): Response = Response.json(status, body.toString())
+
     fun error(status: Int, message: String): Response =
         Response.json(status, JSONObject().put("error", message).toString())
 

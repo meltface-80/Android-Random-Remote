@@ -1,14 +1,26 @@
 <!doctype html>
 <!--
-  MusicD Remote (for Roon) — Copyright (c) 2026 Lewis Menzies (Music Duck / MusicD)
+  Rouen (a Roon extension) — Copyright (c) 2026 Lewis Menzies (Music Duck / MusicD)
   Released under the MIT License. See the LICENSE file for details.
 -->
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-palette="graphite">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-  <meta name="theme-color" content="#0e1012">
-  <title>MusicD</title>
+  <!-- THE SCALE LIMITS ARE GONE (v1.8.42), and viewport-fit=cover is untouched.
+       `user-scalable=no` has been ignored by iOS Safari since iOS 10 on
+       accessibility grounds, so it never did anything here. `maximum-scale=1`
+       is the one that did: pinning the scale is the documented cause of iOS
+       leaving a page at the WRONG scale after an orientation change — the
+       layout viewport keeps one orientation's width while the visual viewport
+       has the other, so the page re-flows and looks right while every tap
+       lands somewhere else. Reported as "rotate to landscape and back and no
+       button works".
+       Nothing is lost by removing them: double-tap-to-zoom is already off the
+       correct way, with `touch-action: manipulation` on html/body. These were
+       belt-and-braces over a rule that was already doing the job. -->
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#17191c">
+  <title>Rouen Lite</title>
 
   <!-- Installable app. Before this there was no manifest and no icons at all,
        so "Add to Home Screen" saved a screenshot of the page instead of an
@@ -35,9 +47,13 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
   <!-- iOS reads only this one, ignores the manifest's icons, and composites
        any transparency onto white — so it is pre-flattened onto the logo's
-       own black. -->
-  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-  <meta name="apple-mobile-web-app-title" content="MusicD">
+       own black.
+       Named rouen-touch-icon, not apple-touch-icon (v1.8.76): iOS keeps the
+       picture it fetched under a URL long after the file changes, so the
+       new logo showed in the share sheet while Add to Home Screen still
+       offered the old duck. A changed icon needs a new filename. -->
+  <link rel="apple-touch-icon" href="/icons/rouen-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Rouen Lite">
 
   <!-- DELIBERATELY ABSENT: apple-mobile-web-app-capable,
        mobile-web-app-capable, apple-mobile-web-app-status-bar-style.
@@ -53,23 +69,10 @@
        The icon does not need any of them: iOS reads rel="apple-touch-icon",
        and the manifest covers Android and desktop. -->
 
-
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <!-- Phone landscape blocker: hidden on portrait / tablet / desktop via CSS -->
-  <div id="landscape-block" class="landscape-block" aria-hidden="true">
-    <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <!-- Phone rotated to portrait -->
-      <rect x="7" y="2" width="10" height="20" rx="2" ry="2"/>
-      <line x1="12" y1="18" x2="12" y2="18.01"/>
-      <!-- Rotation arrow -->
-      <path d="M3 12a9 9 0 0 1 9-9" opacity=".5"/>
-      <polyline points="1 12 3 10 5 12" opacity=".5"/>
-    </svg>
-    <p>Please rotate your device<br>to portrait mode</p>
-  </div>
   <div class="app">
   <header class="topbar">
     <div class="topbar-row">
@@ -119,6 +122,13 @@
           </svg>
         </button>
 
+        <button id="play-unheard-topbar" class="icon-btn" aria-label="Random Album" title="Random Album">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/>
+            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
+          </svg>
+        </button>
 
         <button id="refresh-btn" class="primary-btn" aria-label="Refresh">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -147,8 +157,11 @@
         <button id="select-menu-btn" class="icon-btn" type="button"
                 aria-haspopup="true" aria-expanded="false" aria-label="Actions for selected items">
           <span id="select-count" class="sel-count">0</span>
-          <!-- The same three-dots-in-a-circle the playlist screens use (see
-               OVERFLOW_SVG in app.js). This was already an overflow menu — it
+          <!-- The same three-dots-in-a-circle the playlist screens use. There,
+               since v1.8.60, the circle is the button's own border
+               (.overflow-btn); this top-bar button is an .icon-btn with an
+               outline of its own and keeps the ring drawn in its icon, as it
+               always has. This was already an overflow menu — it
                just wore a chevron, which reads as "expand" rather than "more
                actions". The count badge stays: it is the only indication of how
                many items are selected. -->
@@ -165,11 +178,12 @@
           <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="play_now">Play now</button>
           <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="queue">Add to end of queue</button>
           <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="add">Add to playlist…</button>
+          <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="later">Listen later</button>
           <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="clear">Clear selection</button>
         </div>
       </div>
-      <!--  The right-hand end of the bar: reshuffle, the wall's Sort, the
-           search glass, in that order out from the edge. They used to be
+      <!--  The right-hand end of the bar: reshuffle, grid/list, the wall's
+           Sort, the search glass, in that order out from the edge. They used to be
            two independent `margin-left: auto` controls that were never
            shown together; the Sort control moving up out of its own row
            (and Random's reshuffle becoming a button beside it) means the
@@ -184,6 +198,26 @@
             <path d="M21 3v5h-5"/>
             <path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/>
             <path d="M3 21v-5h5"/>
+          </svg>
+        </button>
+        <!-- Grid ⇄ list for the album walls (Rouen v1.8.66). One control, one
+             stored choice: the walls are the same shelf seen from different
+             screens, and a per-screen setting would mean finding it again on
+             each of them. -->
+        <button id="topbar-view" class="icon-btn hidden" type="button"
+                aria-label="Show as list" title="Show as list" aria-pressed="false">
+          <svg id="topbar-view-grid" width="20" height="20" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+            <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
+            <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+          <svg id="topbar-view-list" width="20" height="20" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true" class="hidden">
+            <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+            <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
           </svg>
         </button>
         <!-- The library and artists walls render their Sort control here.
@@ -236,81 +270,14 @@
     </div>
   </header>
 
-  <!-- Side menu (hamburger). Items with data-target trigger the hidden top-bar
-       button of that id; data-action items switch the main view. -->
-  <div id="menu-overlay" class="menu-overlay hidden" role="dialog" aria-modal="true" aria-label="Menu">
-    <div class="menu-backdrop" data-menu-close></div>
-    <nav class="menu-drawer">
-      <div class="menu-head">
-        <span class="menu-brand">MusicD Remote</span>
-        <button class="icon-btn" type="button" aria-label="Close menu" data-menu-close>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M18 6 6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="menu-list">
-        <button class="menu-item" type="button" data-action="home">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
-          <span>Home</span>
-        </button>
-        <button class="menu-item" type="button" data-action="shuffle">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
-          <span>Random albums</span>
-        </button>
-        <div class="menu-sep"></div>
-        <button class="menu-item hidden" type="button" data-target="labels-toggle" id="menu-item-labels">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-          <span>Labels</span>
-        </button>
-        <button class="menu-item" type="button" data-target="pitchfork-toggle">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5h7a3 3 0 0 1 3 3v11a2.5 2.5 0 0 0-2.5-2.5H2z"/><path d="M22 5h-7a3 3 0 0 0-3 3v11a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>
-          <span>Pitchfork</span>
-        </button>
-        <button class="menu-item" type="button" data-action="smart-picks" id="menu-item-picks">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.5-4.5"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
-          <span>Smart Picks</span>
-        </button>
-        <button class="menu-item" type="button" data-action="smart-playlists">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.1 4.6 5 .6-3.7 3.4 1 4.9L12 14.1 7.6 16.5l1-4.9L4.9 8.2l5-.6z"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
-          <span>Dynamic Playlists</span>
-        </button>
-        <button class="menu-item" type="button" data-action="playlists">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="14" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="10" y2="18"/><circle cx="17.5" cy="16.5" r="2.5"/><path d="M20 16.5V8l-3 1"/></svg>
-          <span>Playlists</span>
-        </button>
-        <button class="menu-item" type="button" data-action="import-playlist">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-          <span>Import a playlist</span>
-        </button>
-        <div class="menu-sep"></div>
-        <button class="menu-item" type="button" data-action="rescan-library">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
-          <!-- Two lines: the action, and what the snapshot currently is. The
-               automatic rescan is invisible by design — it runs in the
-               background with no toast — so without this there was no way to
-               tell a library that had refreshed itself from one that had
-               quietly stopped refreshing. -->
-          <span class="menu-item-lines">
-            <span>Rescan library</span>
-            <span class="menu-sub" id="rescan-sub"></span>
-          </span>
-        </button>
-        <div class="menu-sep"></div>
-        <button class="menu-item" type="button" data-target="settings-toggle">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          <span>Settings</span>
-        </button>
-      </div>
-    </nav>
-  </div>
+  <!-- The side menu lives after <main> (Rouen v1.8.59), outside the shell's
+       stacking context, so it opens above the floating player. -->
 
+  <main>
   <!-- The Docker migration banner is not in this build. It told a
        self-hosted install to move to Docker, and its own gate was
        `!status.is_docker` — an APK is neither, so on a fresh install it showed
        shell commands for a machine the user does not have. -->
-
   <div id="update-toast" class="update-toast" role="status" aria-live="polite">
     <div class="update-toast-top">
       <svg class="update-ico" width="18" height="18" viewBox="0 0 24 24" fill="none"
@@ -327,8 +294,6 @@
     </div>
     <div id="update-notes" class="update-notes hidden"></div>
   </div>
-
-  <main>
     <div id="labels-bar" class="labels-bar hidden">
       <button id="labels-back" class="labels-back" type="button" aria-label="Back to all labels">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -368,20 +333,26 @@
     <!-- Home landing: sections of the library. The album wall (#album-grid)
          is one destination, reached from here or the side menu. -->
     <section id="home-view" class="home-view hidden" aria-label="Home">
+      <!-- Good morning / afternoon / evening, and the date (app.js keeps it current). -->
+      <div class="home-greeting" id="home-greeting" aria-live="off">
+        <div class="home-greeting-date" id="home-greeting-date"></div>
+        <h1 class="home-greeting-text" id="home-greeting-text"></h1>
+      </div>
       <div id="home-sections">
+        <!-- Random Album and Album of the day, under the greeting with no heading
+             (Rouen v1.8.75). Not a Home row: always there, and not in the
+             reorderable list. (This build had Album of the day as a row of its
+             own, "aotd"; it lives here now, and a stored order that names the
+             old row simply drops it.) Inside #home-sections so search hides it
+             with the rows and it takes the rows' gutter; applyHomeLayout
+             APPENDS the rows, so this stays first. -->
+        <div id="home-today" class="home-carousel home-carousel-1row home-today" aria-label="Random album and album of the day"></div>
+
         <!-- data-row is the row's identity. The Home Screen settings page and
              the loader both read it from the HOME_ROWS table in app.js, so the
              list you reorder and the rows that render cannot drift apart.
              Reordering MOVES these nodes; it never rebuilds them from markup
              (CLAUDE.md pre-flight step 4). -->
-        <!-- Album of the day. It used to be the first tile of a "Not played in
-             6 months" row; that row is gone, because the plays table only holds
-             what this app watched happen, so it could not answer the question
-             its title asked. The daily pick did not depend on any of that. -->
-        <div class="home-section home-section-aotd" data-row="aotd">
-          <h2 class="home-section-title" id="home-aotd-title">Album of the day</h2>
-          <div id="home-aotd" class="home-carousel"></div>
-        </div>
         <!-- Recently played, newest first, one tile per album over 30 days.
              Hidden until there is a play to show, so a fresh install does not
              open on an empty shelf. -->
@@ -389,7 +360,15 @@
           <h2 class="home-section-title" id="home-history-title">Recently played</h2>
           <div id="home-history" class="home-carousel"></div>
         </div>
-        <!-- Smart Picks: five albums a day by artists NOT in the library. Hidden
+        <!-- Listen later (v1.8.67): albums put aside to play another time,
+             newest first. Hidden until something is on the list. Tapping the
+             header opens the full list, where entries are played, added or
+             removed. -->
+        <div class="home-section home-section-later hidden" data-row="later">
+          <h2 class="home-section-title home-section-link" id="home-later-title" role="button" tabindex="0">Listen later</h2>
+          <div id="home-later" class="home-carousel home-carousel-1row"></div>
+        </div>
+        <!-- Smart Picks: a few albums a day from your own library. Hidden
              until the first set builds, so a fresh install never shows an empty
              row. Tapping the header opens the full screen with the reasons. -->
         <div class="home-section home-section-picks hidden" data-row="picks">
@@ -426,6 +405,92 @@
   </main>
 
   </div><!-- /.app -->
+
+  <!-- Side menu (hamburger). Items with data-target trigger the hidden top-bar
+       button of that id; data-action items switch the main view.
+       OUTSIDE .app, and that is load-bearing: .app is position:fixed with
+       z-index:0, a stacking context of its own, so anything inside it ranks
+       only among the shell's children. The menu's z-index lived there until
+       v1.8.59 and the whole shell sat under the transport pill (70) — so did
+       the menu, whatever number it carried. At the root its 95 is compared
+       with the pill directly. -->
+  <div id="menu-overlay" class="menu-overlay hidden" role="dialog" aria-modal="true" aria-label="Menu">
+    <div class="menu-backdrop" data-menu-close></div>
+    <nav class="menu-drawer">
+      <div class="menu-head">
+        <span class="menu-brand">Rouen Lite</span>
+        <button class="icon-btn" type="button" aria-label="Close menu" data-menu-close>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="menu-list">
+        <button class="menu-item" type="button" data-action="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+          <span>Home</span>
+        </button>
+        <button class="menu-item" type="button" data-action="listen-later" id="menu-item-later">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <span>Listen later</span>
+        </button>
+        <button class="menu-item" type="button" data-action="shuffle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
+          <span>Random albums</span>
+        </button>
+        <div class="menu-sep"></div>
+        <!-- Labels need tags read off a mounted music folder, which a phone does
+             not have: hidden rather than deleted, so lookups by id still work. -->
+        <button class="menu-item hidden" type="button" data-target="labels-toggle" id="menu-item-labels">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          <span>Labels</span>
+        </button>
+        <button class="menu-item" type="button" data-target="pitchfork-toggle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5h7a3 3 0 0 1 3 3v11a2.5 2.5 0 0 0-2.5-2.5H2z"/><path d="M22 5h-7a3 3 0 0 0-3 3v11a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>
+          <span>Pitchfork</span>
+        </button>
+        <button class="menu-item hidden" type="button" data-action="discover" id="menu-item-discover">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>
+          <span>Discover</span>
+        </button>
+        <button class="menu-item" type="button" data-action="smart-picks" id="menu-item-picks">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.5-4.5"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+          <span>Smart Picks</span>
+        </button>
+        <button class="menu-item" type="button" data-action="smart-playlists">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.1 4.6 5 .6-3.7 3.4 1 4.9L12 14.1 7.6 16.5l1-4.9L4.9 8.2l5-.6z"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
+          <span>Dynamic Playlists</span>
+        </button>
+        <button class="menu-item" type="button" data-action="playlists">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="14" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="10" y2="18"/><circle cx="17.5" cy="16.5" r="2.5"/><path d="M20 16.5V8l-3 1"/></svg>
+          <span>Playlists</span>
+        </button>
+        <button class="menu-item" type="button" data-action="import-playlist">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          <span>Import a playlist</span>
+        </button>
+        <div class="menu-sep"></div>
+        <button class="menu-item" type="button" data-action="rescan-library">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
+          <!-- Two lines: the action, and what the snapshot currently is. The
+               automatic rescan is invisible by design — it runs in the
+               background with no toast — so without this there was no way to
+               tell a library that had refreshed itself from one that had
+               quietly stopped refreshing. -->
+          <span class="menu-item-lines">
+            <span>Rescan library</span>
+            <span class="menu-sub" id="rescan-sub"></span>
+          </span>
+        </button>
+        <div class="menu-sep"></div>
+        <button class="menu-item" type="button" data-target="settings-toggle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Settings</span>
+        </button>
+      </div>
+    </nav>
+  </div>
 
   <!-- Label merge action bar: appears in select mode -->
   <div id="label-merge-bar" class="label-merge-bar hidden" role="toolbar" aria-label="Label merge">
@@ -476,22 +541,51 @@
            top of the panel so each album tints its own detail view (decorative
            only — hidden from AT, never intercepts taps). -->
       <img id="modal-ambient" class="modal-ambient hidden" alt="" aria-hidden="true">
-      <!-- A back chevron rather than an ×: this panel is somewhere you came
-           FROM the grid, so leaving it goes back rather than dismissing
-           something. It still closes the modal — data-close is unchanged. -->
-      <button class="modal-close icon-btn" data-close aria-label="Back" title="Back">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      <!-- Full screen (a phone held upright) this is a back chevron: the panel
+           is somewhere you came FROM the grid. From 720px up the album view is
+           a card hovering over the page, and a card closes with an × (v1.8.75).
+           Same button, same data-close — only the glyph (CSS) and the label
+           (app.js) follow the layout. -->
+      <button class="modal-close icon-btn" id="modal-close-btn" data-close aria-label="Back" title="Back">
+        <svg class="ico-back" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="15 18 9 12 15 6"/>
         </svg>
-      </button>
-      <!-- Now-playing mode only (CSS-gated): top-left Home button — the ×
-           is hidden there and Share takes its top-right spot. -->
-      <button class="modal-home icon-btn" id="modal-home-btn" aria-label="Go to Home screen" title="Home">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        <svg class="ico-close" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M3 10.5 12 3l9 7.5"/>
-          <path d="M5 9.5V21h5v-6h4v6h5V9.5"/>
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+      <!-- Now-playing mode only (CSS-gated): top-left Back (v1.8.75 — it was a
+           Home button, which was the only way out and always went Home). It
+           returns to the screen before the mini player was tapped: the album
+           that was open, or the screen underneath. -->
+      <button class="modal-home icon-btn" id="modal-home-btn" aria-label="Back" title="Back">
+        <svg class="ico-back" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+        <!-- A desktop (a mouse, a large screen) CLOSES Now playing; a phone or
+             tablet goes back. Same action — only the glyph and label differ. -->
+        <svg class="ico-close" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+      <!-- Now-playing mode, large screens only (CSS-gated): shrink the screen to
+           the album view's card size and back. The card can then be dragged by
+           its top strip. -->
+      <button class="modal-np-size icon-btn" id="modal-np-size-btn" type="button"
+              aria-label="Reduce size" title="Reduce size" aria-pressed="false">
+        <svg class="ico-shrink" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+          <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+        <svg class="ico-grow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+          <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
         </svg>
       </button>
       <button class="modal-share icon-btn" id="modal-share-btn" aria-label="Share card">
@@ -508,10 +602,31 @@
           <button class="modal-tab is-active" type="button" data-tab="album">Now playing</button>
           <button class="modal-tab"           type="button" data-tab="queue">Queue</button>
         </div>
+        <!-- No source badge on this artwork (v1.8.60). The album view and Now
+             playing share it, and its top-right corner is where the Share
+             button sits: the local / Qobuz / TIDAL mark showed through under
+             the button. The tiles on every grid keep theirs. -->
         <div class="modal-art">
           <img id="modal-img" alt="">
-          <span id="modal-source" class="album-source local hidden" title="Local albums" aria-label="Local albums"></span>
           <span id="modal-quality" class="album-quality hidden"></span>
+          <!-- Previous / next album in the list this one was opened from
+               (v1.8.66). A quiet hint on the cover's edges for what a swipe
+               on the card does; shown only when there IS a neighbour that
+               way, and never on Now playing. -->
+          <button class="modal-step modal-step-prev hidden" id="modal-prev" type="button"
+                  aria-label="Previous album" title="Previous album">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+          </button>
+          <button class="modal-step modal-step-next hidden" id="modal-next" type="button"
+                  aria-label="Next album" title="Next album">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
         </div>
         <div class="modal-info">
           <h2 id="modal-title">—</h2>
@@ -525,6 +640,11 @@
             <button class="np-album" id="np-album" type="button" aria-label="Open album detail"></button>
 
             <div class="np-progress">
+              <!-- Behind the seek input, not instead of it: the range is what
+                   makes the bar draggable and accessible, and it keeps every
+                   one of its behaviours. The canvas is decoration under it,
+                   hidden whenever there is no waveform for the track. -->
+              <canvas id="np-wave" class="np-wave hidden" aria-hidden="true"></canvas>
               <input type="range" id="np-seek" class="np-seek" min="0" max="100" step="1" value="0"
                      aria-label="Seek" disabled>
               <div class="np-times">
@@ -597,11 +717,6 @@
                 <button class="np-popover-action" type="button" id="np-unmute-all">Unmute all zones</button>
               </div>
 
-              <!-- Roon Radio moved to Settings -> Playback, under Random album
-                   radio: the two decide the same thing (what plays when the
-                   queue runs out) and are mutually exclusive, which is far
-                   clearer sitting together than one screen apart. -->
-
               <!-- Volume: tap the speaker to reveal the slider (hidden when fixed) -->
               <div class="np-vol">
                 <button class="np-mini-btn" id="np-volbtn" aria-label="Volume" aria-expanded="false">
@@ -628,8 +743,8 @@
                              aria-label="Volume">
                       <div class="vol-scale" aria-hidden="true"><span id="np-vol-min">0</span><span id="np-vol-max">100</span></div>
                     </div>
-                    <button class="vol-step" id="np-vol-minus" aria-label="Volume down">−</button>
-                    <button class="vol-step" id="np-vol-plus" aria-label="Volume up">+</button>
+                    <button class="vol-step" id="np-vol-minus" aria-label="Volume down"><svg class="vol-step-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                    <button class="vol-step" id="np-vol-plus" aria-label="Volume up"><svg class="vol-step-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
                   </div>
                   <div class="np-vol-fixed hidden" id="np-vol-fixed">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -655,6 +770,10 @@
             <h3 class="section-label">About this album</h3>
             <div class="bio-meta" id="album-meta"></div>
             <div class="bio-text" id="album-bio-text" data-clipped="true"></div>
+            <!-- Whose words those are, shown only when it is NOT the same place
+                 the link below goes — which is the Pitchfork case, where the
+                 text is Wikipedia's and the link is the review. -->
+            <div class="bio-text-source hidden" id="album-bio-text-source"></div>
             <div class="bio-footer">
               <button class="bio-toggle hidden" type="button" id="album-bio-toggle">Show more</button>
               <a class="bio-source hidden" id="album-bio-source" target="_blank" rel="noopener noreferrer"></a>
@@ -693,7 +812,12 @@
     </button>
 
     <div class="mt-info">
+      <!-- Inside .mt-info, which is the region that opens Now playing: tapping
+           the cover of the thing you are listening to should get you to it. -->
+      <img id="mt-art" class="mt-art" alt="" aria-hidden="true">
       <div class="mt-text">
+        <!-- The zone it is playing in, in small brass capitals above the track. -->
+        <div id="mt-kicker" class="mt-kicker"></div>
         <div id="mt-title"  class="mt-title">—</div>
         <div id="mt-artist" class="mt-artist">—</div>
       </div>
@@ -742,8 +866,8 @@
         <input type="range" id="mt-vol-slider" class="vol-range" min="0" max="100" step="1" value="50" aria-label="Volume level">
         <div class="vol-scale" aria-hidden="true"><span id="mt-vol-min">0</span><span id="mt-vol-max">100</span></div>
       </div>
-      <button class="vol-step" id="mt-vol-minus" aria-label="Volume down">−</button>
-      <button class="vol-step" id="mt-vol-plus" aria-label="Volume up">+</button>
+      <button class="vol-step" id="mt-vol-minus" aria-label="Volume down"><svg class="vol-step-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+      <button class="vol-step" id="mt-vol-plus" aria-label="Volume up"><svg class="vol-step-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
     </div>
   </div>
 
@@ -764,6 +888,17 @@
         </div>
       </div>
       <div class="share-actions" id="share-actions"></div>
+      <!-- Where to hear it, and where to read about it. Built from
+           /api/album/extras' links block (lib/share-links.js) — the same round
+           trip the card already makes, so the chips arrive with it. -->
+      <nav class="share-links hidden" id="share-links" aria-label="Find this album"></nav>
+      <!-- Acts worth hearing next. Asked for separately and AFTER the card is
+           on screen, because it costs up to five Deezer calls and the card
+           must not wait on it. -->
+      <section class="share-similar hidden" id="share-similar" aria-label="If you like this">
+        <h3 class="share-similar-title">If you like this</h3>
+        <div class="share-similar-list" id="share-similar-list"></div>
+      </section>
       <p class="share-hint" id="share-hint"></p>
       <p class="share-err"  id="share-err"></p>
     </div>
@@ -801,15 +936,20 @@
     </div>
   </div>
 
+  <!-- Settings fills the screen (v1.8.69): no backdrop to tap and no grip to
+       drag. It closes from the list's own button below, and Escape. -->
   <div id="settings-overlay" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-label="Settings">
-    <div class="settings-backdrop" data-settings-close></div>
     <div class="settings-sheet">
-      <div class="settings-grip"></div>
 
       <!-- Settings home: category list. Each row opens a pane below. -->
       <div class="settings-view" data-view="home">
         <div class="settings-head">
           <h2>Settings</h2>
+          <!-- The way out of Settings (v1.8.69); a pane's Back returns here.
+               The update button closes Settings by clicking this too. -->
+          <button class="settings-app-close" type="button" data-settings-close aria-label="Close settings">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
         </div>
 
         <nav class="settings-nav" aria-label="Settings categories">
@@ -819,9 +959,7 @@
             </span>
             <span class="settings-nav-txt">
               <span class="settings-nav-title">Playback</span>
-              <span class="settings-nav-desc">Output zone &amp; random album radio</span>
             </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
 
           <!-- Not in the lite build. Record labels are read from file tags on a
@@ -834,9 +972,7 @@
             </span>
             <span class="settings-nav-txt">
               <span class="settings-nav-title">Labels</span>
-              <span class="settings-nav-desc">Ordering, thresholds &amp; rescan</span>
             </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
 
           <button class="settings-nav-item" type="button" data-pane="metadata">
@@ -845,9 +981,7 @@
             </span>
             <span class="settings-nav-txt">
               <span class="settings-nav-title">Artwork &amp; metadata</span>
-              <span class="settings-nav-desc">Discogs &amp; FanArt.tv keys</span>
             </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
 
           <button class="settings-nav-item" type="button" data-pane="homescreen">
@@ -856,9 +990,16 @@
             </span>
             <span class="settings-nav-txt">
               <span class="settings-nav-title">Home Screen</span>
-              <span class="settings-nav-desc">Which rows show, and in what order</span>
             </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+          <button class="settings-nav-item" type="button" data-pane="discover">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">Discover</span>
+            </span>
           </button>
 
           <button class="settings-nav-item" type="button" data-pane="smartpicks">
@@ -867,9 +1008,16 @@
             </span>
             <span class="settings-nav-txt">
               <span class="settings-nav-title">Smart Picks</span>
-              <span class="settings-nav-desc">Daily discoveries &amp; schedule</span>
             </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+          <button class="settings-nav-item" type="button" data-pane="sharecard">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">Share Card</span>
+            </span>
           </button>
 
           <!-- The wall display is still not in this build. Serving the page
@@ -883,9 +1031,7 @@
             </span>
             <span class="settings-nav-txt">
               <span class="settings-nav-title">Network</span>
-              <span class="settings-nav-desc">Open this page on another device</span>
             </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
 
           <button class="settings-nav-item" type="button" data-pane="appearance">
@@ -894,9 +1040,16 @@
             </span>
             <span class="settings-nav-txt">
               <span class="settings-nav-title">Appearance</span>
-              <span class="settings-nav-desc">Theme &amp; colours</span>
             </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+          <button class="settings-nav-item" type="button" data-pane="ui">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 15h7M14 19h5"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">UI Settings</span>
+            </span>
           </button>
 
           <button class="settings-nav-item" type="button" data-pane="system">
@@ -905,16 +1058,14 @@
             </span>
             <span class="settings-nav-txt">
               <span class="settings-nav-title">System</span>
-              <span class="settings-nav-desc">Updates &amp; version</span>
             </span>
-            <svg class="settings-nav-caret" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </nav>
 
         <div class="settings-foot">
-          <span class="settings-version" id="settings-version">MusicD Remote</span>
+          <span class="settings-version" id="settings-version">Rouen Lite</span>
           <a class="settings-repo" id="settings-repo"
-             href="https://github.com/meltface-80/Android-Random-Remote"
+             href="https://github.com/meltface-80/Rouen-Lite"
              target="_blank" rel="noopener noreferrer">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.36 9.36 0 0 1 2.5-.35c.85 0 1.71.12 2.5.35 1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/>
@@ -932,10 +1083,11 @@
           </button>
           <h2>Playback</h2>
         </div>
+        <p class="settings-pane-desc">Zone &amp; radio</p>
 
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Zone / output <button class="settings-info-btn" data-info="Choose which Roon zone the Play, Queue and transport controls target." aria-label="Info">ⓘ</button></span>
+            <span class="settings-label">Zone / output <button class="settings-info-btn" data-info="Which Roon zone Play, Queue, the transport and both radios act on. Chosen per device." aria-label="Info">ⓘ</button></span>
             <div class="settings-select-wrap">
               <select id="zone-select" class="settings-select" aria-label="Output zone"></select>
               <svg class="settings-caret" width="16" height="16" viewBox="0 0 24 24" fill="none"
@@ -976,10 +1128,11 @@
           </button>
           <h2>Labels</h2>
         </div>
+        <p class="settings-pane-desc">Label scan, ordering &amp; folders</p>
 
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Record labels <button class="settings-info-btn" data-info="Off by default. When on, the extension works out each album's record label — from your file tags first, then iTunes, Qobuz, TheAudioDB, MusicBrainz and Discogs — and fetches label logos. That is the only part of the app that talks to those services, and when this is off none of it runs. Your /music tags are still read either way: the Decade, Format, Sample rate, Bit depth and Channels filters and the local-files badge all come from that same pass." aria-label="Info">ⓘ</button></span>
+            <span class="settings-label">Record labels <button class="settings-info-btn" data-info="Off by default. When on, works out each album&#x27;s record label — file tags first, then Bandcamp, iTunes, TheAudioDB, MusicBrainz and Discogs (Qobuz for a streaming-only library) — fetches label logos, and turns on the Labels screen and the Label of the week row. When off, none of that runs. Your /music tags are still read either way, for the Format and sample-rate filters, release dates, waveforms and the local-files badge." aria-label="Info">ⓘ</button></span>
             <label class="switch">
               <input type="checkbox" id="labels-enabled" aria-label="Record labels">
               <span class="switch-track"><span class="switch-thumb"></span></span>
@@ -1026,7 +1179,7 @@
 
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Label data <button class="settings-info-btn" data-info="Force a complete rescan of all label sources (iTunes, MusicBrainz, Discogs, file tags). Use this after importing new music or if label data looks wrong. This clears the label name cache — logos and MBIDs are kept." aria-label="Info">ⓘ</button></span>
+            <span class="settings-label">Label data <button class="settings-info-btn" data-info="Forgets every album&#x27;s label and looks them all up again from every source. Use it if label data looks wrong — new albums are picked up by the normal scan. Logos, MusicBrainz IDs and merges are kept." aria-label="Info">ⓘ</button></span>
             <button id="force-rescan-btn" class="settings-update-btn" type="button">Force rescan</button>
           </div>
           <div id="force-rescan-status" class="settings-release-notes hidden"></div>
@@ -1054,13 +1207,17 @@
           </button>
           <h2>Artwork &amp; metadata</h2>
         </div>
+        <p class="settings-pane-desc">Discogs &amp; FanArt.tv keys</p>
 
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Discogs token <button class="settings-info-btn" data-info="A personal access token from discogs.com/settings/developers. Enables logo fetching and searching for labels that the automatic scan can't find by name. Not required, but recommended." aria-label="Info">ⓘ</button></span>
+            <span class="settings-label">Discogs token <button class="settings-info-btn" data-info="A personal access token from discogs.com → Settings → Developers. Used for the Discogs label lookup, automatic label logos and the manual logo picker. Optional. A ✓ in the box means Discogs accepted it." aria-label="Info">ⓘ</button></span>
           </div>
           <div class="settings-token-row">
-            <input id="discogs-token-input" type="text" class="settings-token-input" placeholder="Paste personal access token…" autocomplete="off" spellcheck="false">
+            <span class="token-field">
+              <input id="discogs-token-input" type="text" class="settings-token-input" placeholder="Paste personal access token…" autocomplete="off" spellcheck="false">
+              <span id="discogs-token-check" class="token-check hidden" role="img"></span>
+            </span>
             <button id="discogs-token-save" class="settings-update-btn" type="button">Save</button>
           </div>
           <div id="discogs-token-status" class="settings-token-status"></div>
@@ -1070,10 +1227,13 @@
 
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">FanArt.tv key <button class="settings-info-btn" data-info="A free API key from fanart.tv. Used to fetch label logo images. Get one at fanart.tv/get-an-api-key — free registration required." aria-label="Info">ⓘ</button></span>
+            <span class="settings-label">FanArt.tv key <button class="settings-info-btn" data-info="A free personal API key from fanart.tv/get-an-api-key. Used for label logos and the wall display&#x27;s artist photos. Optional. A ✓ in the box means FanArt.tv accepted it." aria-label="Info">ⓘ</button></span>
           </div>
           <div class="settings-token-row">
-            <input id="fanart-key-input" type="text" class="settings-token-input" placeholder="Paste FanArt.tv API key…" autocomplete="off" spellcheck="false">
+            <span class="token-field">
+              <input id="fanart-key-input" type="text" class="settings-token-input" placeholder="Paste FanArt.tv API key…" autocomplete="off" spellcheck="false">
+              <span id="fanart-key-check" class="token-check hidden" role="img"></span>
+            </span>
             <button id="fanart-key-save" class="settings-update-btn" type="button">Save</button>
           </div>
           <div id="fanart-key-status" class="settings-token-status"></div>
@@ -1081,7 +1241,125 @@
       </div>
 
       <!-- Streaming accounts -->
+      <!-- Share Card — the links under the card, grouped in one place -->
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="sharecard">
+        <div class="settings-pane-head">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <h2>Share Card</h2>
+        </div>
+        <p class="settings-pane-desc">The links under the card</p>
+
+        <div class="settings-block">
+          <h3 class="settings-block-title">Services <button class="settings-info-btn" data-info="Each link opens the album on that service — usually as a search. Qobuz links are looked up in advance so they open the album itself in the Qobuz app. A suggestion that is already in your Roon library is queued instead." aria-label="About Services">ⓘ</button></h3>
+          <!-- Filled from /api/settings/share-links: the list of what CAN be
+               linked to lives in lib/share-links.js, so this screen and the
+               chips can never disagree about which services exist. -->
+          <div id="share-services-list" class="share-toggle-list"></div>
+          <div class="settings-row settings-row-top">
+            <span class="settings-label">Default <button class="settings-info-btn" data-info="Where a suggestion goes when the record is not in your Roon library. You can also set it by holding a service button under the share card. This is per device, so a phone and a tablet can differ." aria-label="Info">&#9432;</button></span>
+            <div class="settings-select-wrap">
+              <select id="share-default-service" class="settings-select" aria-label="Default service"></select>
+              <svg class="settings-caret" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-block">
+          <h3 class="settings-block-title">Reviews <button class="settings-info-btn" data-info="Pitchfork and Wikipedia link to the actual page when it has already been found for the card, and to a search when it has not." aria-label="About Reviews">ⓘ</button></h3>
+          <div id="share-reviews-list" class="share-toggle-list"></div>
+        </div>
+      </div>
       <!-- Appearance -->
+      <!-- UI Settings (v1.8.77): text size, grid layout and tile size, per
+           device — a phone and a wall-mounted tablet want different answers. -->
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="ui">
+        <div class="settings-pane-head">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <h2>UI Settings</h2>
+        </div>
+        <p class="settings-pane-desc">Text size, layout &amp; tile size</p>
+
+        <div class="settings-block">
+          <div class="settings-row">
+            <span class="settings-label">Album &amp; artist text <button class="settings-info-btn" data-info="The size of the album name and artist name under every tile — on the Home carousels and on every grid screen." aria-label="About Album &amp; artist text">ⓘ</button></span>
+            <div class="settings-select-wrap">
+              <select id="ui-text-select" class="settings-select" aria-label="Album &amp; artist text">
+                <option value="1">Normal</option>
+                <option value="1.1">+10%</option>
+                <option value="1.25">+25%</option>
+                <option value="1.5">+50%</option>
+              </select>
+              <svg class="settings-caret" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="settings-block">
+          <div class="settings-row">
+            <span class="settings-label">Grid screen title <button class="settings-info-btn" data-info="The size of the title at the top of a grid screen, such as the one a Home carousel opens to, and of a playlist's name." aria-label="About Grid screen title">ⓘ</button></span>
+            <div class="settings-select-wrap">
+              <select id="ui-title-select" class="settings-select" aria-label="Grid screen title">
+                <option value="1">Normal</option>
+                <option value="1.1">+10%</option>
+                <option value="1.25">+25%</option>
+                <option value="1.5">+50%</option>
+              </select>
+              <svg class="settings-caret" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="settings-block">
+          <div class="settings-row">
+            <span class="settings-label">Grid layout <button class="settings-info-btn" data-info="How album, playlist and label grid screens are laid out. Auto fits as many columns as the screen suits (and follows Tile size). 3 or 2 columns fixes the count on every screen. List shows one row per album. The grid/list button at the top of a grid screen changes the same setting." aria-label="About Grid layout">ⓘ</button></span>
+            <div class="settings-select-wrap">
+              <select id="ui-layout-select" class="settings-select" aria-label="Grid layout">
+                <option value="auto">Auto</option>
+                <option value="3">3 columns</option>
+                <option value="2">2 columns</option>
+                <option value="list">List</option>
+              </select>
+              <svg class="settings-caret" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="settings-block">
+          <div class="settings-row">
+            <span class="settings-label">Tile size <button class="settings-info-btn" data-info="The size of album and label tiles on every screen. On the Home carousels it sets the tile width; on a grid screen in Auto layout it sets how many columns fit — bigger tiles, fewer columns. On a small screen a 10% step may not change the column count, only the carousels." aria-label="About Tile size">ⓘ</button></span>
+            <div class="settings-select-wrap">
+              <select id="ui-tile-select" class="settings-select" aria-label="Tile size">
+                <option value="0.5">−50%</option>
+                <option value="0.75">−25%</option>
+                <option value="0.9">−10%</option>
+                <option value="1">Normal</option>
+                <option value="1.1">+10%</option>
+                <option value="1.25">+25%</option>
+                <option value="1.5">+50%</option>
+              </select>
+              <svg class="settings-caret" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <p class="settings-note">Saved on this device only.</p>
+      </div>
+
       <div class="settings-view settings-pane hidden" data-view="pane" data-pane="appearance">
         <div class="settings-pane-head">
           <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
@@ -1089,6 +1367,7 @@
           </button>
           <h2>Appearance</h2>
         </div>
+        <p class="settings-pane-desc">Theme &amp; colours</p>
 
         <div class="settings-block">
           <span class="settings-label">Theme</span>
@@ -1127,10 +1406,49 @@
           </button>
           <h2>Home Screen</h2>
         </div>
+        <p class="settings-pane-desc">Which rows show, and in what order</p>
 
         <div class="settings-block">
-          <div class="settings-note">Hold the handle to drag a row into a new position. A row switched off is not fetched at all — it does no work in the background.</div>
+          <div class="settings-note">Hold the handle to drag a row. <button class="settings-info-btn" data-info="Hold a row's handle and drag it to a new position; the order is shared by every device. A row switched off is not fetched at all — it does no work in the background." aria-label="About Home Screen rows">ⓘ</button></div>
           <ul class="home-rows-list" id="home-rows-list"></ul>
+        </div>
+      </div>
+
+      <!-- Discover -->
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="discover">
+        <div class="settings-pane-head">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <h2>Discover</h2>
+        </div>
+        <p class="settings-pane-desc">New records by the artists you play</p>
+
+        <div class="settings-block">
+          <div class="settings-row">
+            <span class="settings-label">Discover <button class="settings-info-btn" data-info="Off by default. When on, the extension looks once a day for records released in the last two months by the artists you actually listen to — read from your own play history, not your whole library. It asks Deezer and nothing else, and never touches your Roon Core. When off it does nothing at all: no daily build, no timer, no requests to anybody." aria-label="Info">&#9432;</button></span>
+            <label class="switch">
+              <input type="checkbox" id="discover-enabled" aria-label="Discover">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </label>
+          </div>
+          <div class="settings-note">Off by default. Everything below applies only while this is on.</div>
+        </div>
+
+        <div class="settings-block">
+          <div class="settings-row">
+            <span class="settings-label">Look for new records at <button class="settings-info-btn" data-info="The hour the daily check runs, in this server&#39;s local time. If the extension is off at that hour, it runs the next time it starts." aria-label="Info">&#9432;</button></span>
+            <select id="discover-hour" class="settings-select" aria-label="Discover build hour"></select>
+          </div>
+          <div class="settings-note" id="discover-note"></div>
+        </div>
+
+        <div class="settings-block">
+          <div class="settings-row">
+            <span class="settings-label">Look again now</span>
+            <button id="discover-rebuild" class="settings-update-btn" type="button">Refresh</button>
+          </div>
+          <div class="settings-note">Discards today&#39;s list and looks again. Takes a minute or two.</div>
         </div>
       </div>
 
@@ -1180,10 +1498,11 @@
           </button>
           <h2>Smart Picks</h2>
         </div>
+        <p class="settings-pane-desc">Daily discoveries &amp; schedule</p>
 
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Smart Picks <button class="settings-info-btn" data-info="Off by default. When on, the extension analyses your library once a day and asks ListenBrainz and MusicBrainz for five albums by artists you don't own. When off it does nothing at all — no daily build, no timer, no requests to anybody." aria-label="Info">ⓘ</button></span>
+            <span class="settings-label">Smart Picks <button class="settings-info-btn" data-info="Off by default. Once a day, finds five albums by artists you don&#x27;t own but who are close to ones you play (ListenBrainz and MusicBrainz), matched on Qobuz or TIDAL. When off, nothing runs and nothing is sent anywhere." aria-label="Info">ⓘ</button></span>
             <label class="switch">
               <input type="checkbox" id="picks-enabled" aria-label="Smart Picks">
               <span class="switch-track"><span class="switch-thumb"></span></span>
@@ -1194,7 +1513,7 @@
 
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Build the day's picks at <button class="settings-info-btn" data-info="The hour the daily build runs, in this server's local time. It analyses your library, asks ListenBrainz and MusicBrainz for artists you don't own, and adds the picks to your streaming library so Roon can import them. Early morning keeps all of that away from Roon's own work and gives Roon the rest of the night to import. If the extension is off at that hour, the build runs the next time it starts." aria-label="Info">ⓘ</button></span>
+            <span class="settings-label">Build the day's picks at <button class="settings-info-btn" data-info="The hour the daily build runs, in this server's local time. It analyses your library, asks ListenBrainz and MusicBrainz for artists you don't own, and sends the picks where you choose below. Early morning keeps all of that away from Roon's own work, and when they go to your library it gives Roon the rest of the night to import them. If the extension is off at that hour, the build runs the next time it starts." aria-label="Info">ⓘ</button></span>
             <select id="picks-hour" class="settings-select" aria-label="Smart Picks build hour"></select>
           </div>
           <div class="settings-note">Nothing here touches your Roon Core — the analysis reads the library snapshot the extension already keeps.</div>
@@ -1202,11 +1521,11 @@
 
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Add picks automatically <button class="settings-info-btn" data-info="Favourited the day&#39;s picks in a connected streaming library so Roon would import them overnight. This build has no streaming account, so nothing is added for you — picks are shown, and each one is yours to go and find." aria-label="Info">ⓘ</button></span>
-            <label class="switch">
-              <input type="checkbox" id="picks-autoadd" aria-label="Add picks automatically">
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-            </label>
+            <span class="settings-label">Send each day's picks to <button class="settings-info-btn" data-info="Listen later puts each day's picks on your Listen later list, where they wait until you play them through or take them off. Nowhere leaves every pick on the Smart Picks screen, to open or put aside one at a time. (Rouen can also add picks to a Qobuz or TIDAL library; this build has no streaming account, so that choice is not offered.)" aria-label="Info">ⓘ</button></span>
+            <select id="picks-dest" class="settings-select" aria-label="Where Smart Picks go">
+              <option value="later">Listen later</option>
+              <option value="ask">Nowhere — ask me</option>
+            </select>
           </div>
           <div class="settings-note" id="picks-service-note"></div>
         </div>
@@ -1228,6 +1547,7 @@
           </button>
           <h2>System</h2>
         </div>
+        <p class="settings-pane-desc">Updates &amp; version</p>
 
         <div class="settings-block">
           <div class="settings-row">
@@ -1312,11 +1632,6 @@
       </div>
     </div>
   </div>
-
-  <!-- Same font MusicD uses, so the rendered card matches exactly. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap">
 
   <script src="/sharecard.js"></script>
   <script src="/app.js"></script>

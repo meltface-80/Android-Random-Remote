@@ -4,6 +4,7 @@ import com.musicd.lite.str
 import com.musicd.lite.strOrNull
 import com.musicd.lite.store.Store
 import com.musicd.lite.http.LanAccess
+import com.musicd.lite.meta.ShareLinks
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -13,7 +14,16 @@ import org.json.JSONObject
  * MusicD-Remote keeps these in a settings file next to its database; there is
  * no reason for the shapes to differ, because the same front-end reads them.
  */
-class Settings(private val store: Store) {
+class Settings(
+    private val store: Store,
+    /**
+     * Told the key of every settings write, so the live-state `settings`
+     * revision moves and other devices' screens follow it. Not told about the
+     * last-zone bookmark, which moves whenever the user looks at another room
+     * and is nothing any screen draws.
+     */
+    private val onChange: (String) -> Unit = {}
+) {
 
     companion object {
         /**
@@ -33,11 +43,13 @@ class Settings(private val store: Store) {
          * information. The Home section itself is hidden in index.html, since
          * with the row gone from here nothing positions it.
          */
-        // "unplayed" was the "Not played in 6 months" row; it is gone, and the
-        // album-of-the-day tile it used to carry now has the row to itself.
-        // A stored order naming the old id is simply dropped by homeRows().
+        // "unplayed" was the "Not played in 6 months" row; it is gone. "aotd"
+        // was Album of the day's own row until 0.5.0, when it moved — with
+        // Random Album — into the strip under Rouen's greeting, which is not a
+        // row and cannot be switched off. A stored order naming either is
+        // simply dropped by homeRows(). "later" is Rouen's Listen later shelf.
         val HOME_ROW_IDS =
-            listOf("aotd", "history", "picks", "random", "artists", "library", "genres")
+            listOf("history", "later", "picks", "random", "artists", "library", "genres")
 
         const val KEY_HOME_ROWS = "home_rows"
         const val KEY_SMART_PICKS = "smart_picks"
@@ -45,6 +57,15 @@ class Settings(private val store: Store) {
         const val KEY_DISCOGS_TOKEN = "discogs_token"
         const val KEY_FANART_KEY = "fanart_key"
         const val KEY_LAST_ZONE = "last_zone"
+
+        /** Which link chips the share card shows — see shareServices. */
+        const val KEY_SHARE_LINKS = "share_links"
+
+        /** Discover's switch and hour — see discoverEnabled. */
+        const val KEY_DISCOVER = "discover"
+
+        /** Where Smart Picks can be sent in this build — see smartPicksDest. */
+        val SMART_PICK_DESTS = listOf("later", "ask")
 
         /**
          * Whether the page is served to the rest of the network, and the PIN
@@ -68,7 +89,10 @@ class Settings(private val store: Store) {
     private fun doc(key: String): JSONObject =
         store.setting(key)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
 
-    private fun save(key: String, value: JSONObject) = store.putSetting(key, value.toString())
+    private fun save(key: String, value: JSONObject) {
+        store.putSetting(key, value.toString())
+        if (key != KEY_LAST_ZONE) runCatching { onChange(key) }
+    }
 
     // ------------------------------------------------------------- home rows
 
@@ -171,14 +195,77 @@ class Settings(private val store: Store) {
 
     fun smartPicksEnabled(): Boolean = doc(KEY_SMART_PICKS).optBoolean("enabled", true)
     fun smartPicksHour(): Int = doc(KEY_SMART_PICKS).optInt("hour", 7).coerceIn(0, 23)
-    fun smartPicksAutoAdd(): Boolean = doc(KEY_SMART_PICKS).optBoolean("auto_add", false)
+    /**
+     * Where each day's picks go (Rouen v1.8.67): "later" puts them on the
+     * Listen later list, "ask" leaves them on the Smart Picks screen. Rouen's
+     * third choice, "library", favourites them in a streaming account, which
+     * this build does not have — so it is not offered, and not accepted.
+     */
+    fun smartPicksDest(): String =
+        doc(KEY_SMART_PICKS).str("dest").takeIf { it in SMART_PICK_DESTS } ?: "ask"
 
-    fun saveSmartPicks(enabled: Boolean?, hour: Int?, autoAdd: Boolean?) {
+    /** The day whose picks have already been sent to Listen later, if any. */
+    fun smartPicksSentDay(): String = doc(KEY_SMART_PICKS).str("later_day")
+
+    fun markSmartPicksSent(day: String) {
+        val d = doc(KEY_SMART_PICKS)
+        if (d.str("later_day") == day) return
+        // Bookkeeping, not a choice anybody made: written straight to the store
+        // so it does not move the live `settings` revision and wake every page.
+        store.putSetting(KEY_SMART_PICKS, d.put("later_day", day).toString())
+    }
+
+    // -------------------------------------------------------------- discover
+
+    /**
+     * Discover (Rouen v1.8.37): new records by the acts you play, looked up on
+     * Deezer once a day. OFF until switched on — it is the one feature that
+     * sends anything about this library's listening to a third party (an
+     * artist name per request), so it is opted into, as it is upstream.
+     */
+    fun discoverEnabled(): Boolean = doc(KEY_DISCOVER).optBoolean("enabled", false)
+
+    /** The hour the day's list is built at or after. Rouen's default: 05:00. */
+    fun discoverHour(): Int = doc(KEY_DISCOVER).optInt("hour", 5).coerceIn(0, 23)
+
+    fun saveDiscover(enabled: Boolean?, hour: Int?) {
+        val d = doc(KEY_DISCOVER)
+        if (enabled != null) d.put("enabled", enabled)
+        if (hour != null && hour in 0..23) d.put("hour", hour)
+        save(KEY_DISCOVER, d)
+    }
+
+    fun saveSmartPicks(enabled: Boolean?, hour: Int?, dest: String?) {
         val d = doc(KEY_SMART_PICKS)
         if (enabled != null) d.put("enabled", enabled)
         if (hour != null && hour in 0..23) d.put("hour", hour)
-        if (autoAdd != null) d.put("auto_add", autoAdd)
+        if (dest != null && dest in SMART_PICK_DESTS) d.put("dest", dest)
         save(KEY_SMART_PICKS, d)
+    }
+
+    // ------------------------------------------------------- share-card links
+
+    /**
+     * The services and review sites the share card links to (Settings → Share
+     * Card). An absent list means "never chosen", which is the defaults; an
+     * EMPTY list means the user switched them all off. Conflating the two is
+     * how an off switch quietly turns itself back on.
+     */
+    fun shareServices(): List<String> = idList("services", ShareLinks.SERVICE_IDS, ShareLinks.defaultServiceIds())
+    fun shareReviews(): List<String> = idList("reviews", ShareLinks.REVIEW_IDS, ShareLinks.defaultReviewIds())
+
+    private fun idList(field: String, known: List<String>, defaults: List<String>): List<String> {
+        val arr = doc(KEY_SHARE_LINKS).optJSONArray(field) ?: return defaults
+        val ids = (0 until arr.length()).map { arr.str(it) }
+        return ShareLinks.sanitiseIds(ids, known)
+    }
+
+    /** Null leaves a list as it is. Unknown ids are dropped, not stored. */
+    fun saveShareLinks(services: List<String>?, reviews: List<String>?) {
+        val d = doc(KEY_SHARE_LINKS)
+        if (services != null) d.put("services", JSONArray(ShareLinks.sanitiseIds(services, ShareLinks.SERVICE_IDS)))
+        if (reviews != null) d.put("reviews", JSONArray(ShareLinks.sanitiseIds(reviews, ShareLinks.REVIEW_IDS)))
+        save(KEY_SHARE_LINKS, d)
     }
 
     // ----------------------------------------------------------------- radio

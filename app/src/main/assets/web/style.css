@@ -4,42 +4,68 @@
 /*  Released under the MIT License. See the LICENSE file for details.  */
 /*  Mobile-first: stacked layout by default, side-by-side on wide.     */
 /* ------------------------------------------------------------------ */
-/* `:root` is the dark+classic palette. The second selector lets a nested
-   element opt into it explicitly — the theme picker's swatches do exactly
-   that, so each one previews its own palette rather than the applied one.
-   The other three palettes already use attribute selectors, which match
-   any element; this one needed the extra selector to behave the same. */
+/* `:root` is Graphite and Brass, the default theme (v1.8.74): a warm charcoal
+   ground, flat, one elevated tone for cards and panels, and brass as the one
+   accent. Its colours came from Mandarin's (v1.8.68) and replaced the
+   original cool grey and cyan here, which went with the Dark, Light and
+   Copper dark themes. The second selector lets a nested element opt into it
+   explicitly — the theme picker's swatches do exactly that, so each one
+   previews its own palette rather than the applied one.
+   --text-faint is the one value lifted from the source: #7a7d83 measured
+   4.27:1 on the ground, so #8d9096 is the smallest lift along the same grey
+   that clears 4.5:1 on every surface (5.50 / 4.99 / 4.51). */
 :root,
-[data-theme="dark"][data-palette="classic"] {
+[data-theme="dark"][data-palette="graphite"] {
   --font-sans: "Helvetica Neue", Helvetica, Arial, system-ui, -apple-system,
                "Segoe UI", Roboto, sans-serif;
 
-  --bg:           #0e1012;
-  --bg-elev:      #16191c;
-  --bg-elev-2:    #1d2125;
-  --border:       #262a2f;
-  --text:         #e9eaec;
-  --text-dim:     #8a8f96;
-  --text-faint:   #5d6269;
-  --accent:       #4cb7e6;
-  /* The accent used as TEXT. Identical to --accent in this palette, so nothing
-     here changes — it exists because a fill colour and a text colour have
-     different contrast requirements, and the copper palette below genuinely
-     needs two values. Declaring it in every palette keeps the CSS uniform. */
-  --accent-text:  #4cb7e6;
-  --accent-soft:  rgba(76,183,230,.15);
+  /* THE GROUND, and every screen is painted with it: the page, the top bar,
+     and the full-screen panels (album view, Now playing). It used to be
+     #0e1012, a step darker than the top bar, which is why every screen had a
+     visible seam under its header.
+     The whole ladder moved up by the same delta (+15,+17,+19) rather than the
+     ground alone — bg-elev and bg-elev-2 are what cards, sheets and popovers
+     sit on, and leaving them behind would have made every elevated surface
+     DARKER than the page it floats on. Relative steps are unchanged. */
+  --bg:           #17191c;
+  --bg-elev:      #1f2226;
+  --bg-elev-2:    #262a2f;
+  --border:       #30353b;
+  --text:         #ecebe6;
+  /* Lifted with the ground (v1.7.87). Secondary text was tuned against a
+     #0e1012 page; on the new #1d2125 it measured 3.98:1 and 2.11:1, under this
+     theme's 4.5 / 2.6 floors. The suite failed on both — moving a background
+     without moving what sits on it is exactly what those floors are for. */
+  --text-dim:     #9a9ca1;
+  --text-faint:   #8d9096;
+  --accent:       #c9a45c;
+  /* The accent used as TEXT: a lighter brass than the fill, because a fill
+     colour and a text colour have different contrast requirements. */
+  --accent-text:  #d4b06a;
+  --accent-soft:  rgba(201,164,92,.15);
   /* Text printed ON an accent fill. Was hard-coded at nine sites in three
      different literals (#0b1418, #04121a and a bare #fff), three of which had
      no light-theme override at all and shipped white-on-cyan at 2.28:1. */
-  --on-accent:    #0b1418;
-  /* --bg with alpha, for the blurred top bar. backdrop-filter needs the
-     translucency, so it cannot use var(--bg) — which is why this used to be a
-     hard-coded rgba that no new palette could reach. */
-  --bg-translucent: rgba(14,16,18,.85);
-  --danger:       #e06464;
-  --panel-hairline: rgba(255,255,255,.07);  /* row separators on tinted panels */
-  --shadow-card:  0 2px 6px rgba(0,0,0,.45), 0 10px 24px rgba(0,0,0,.35);
-  --shadow-modal: 0 24px 64px rgba(0,0,0,.6);
+  --on-accent:    #17191c;
+  /* The lit edge that makes a translucent surface read as a pane rather than a
+     hole. It is doing more work than it looks: as of v1.7.89 every translucent
+     surface in the app is --bg-veil, the ground with alpha, so where nothing
+     happens to be behind one it settles to exactly the page colour and this
+     border plus the drop shadow are the only things separating it from the
+     page. (--glass-bg, a lighter translucent surface, was removed with its last
+     user — two materials that were meant to look alike never quite did.) */
+  /* The top bar. It is the GROUND WITH ALPHA, not a lighter surface: over an
+     unscrolled page the backdrop IS --bg, so this composites to exactly --bg
+     and there is no seam — and once the page moves, the album art passes
+     underneath and tints it. A lighter translucent colour would show a step
+     at the top of every screen the moment nothing was behind it, which is
+     what v1.7.86 did. No backdrop-filter, same rule as the pill. */
+  --bg-veil:    rgba(23,25,28,.88);
+  --glass-edge: rgba(201,164,92,.22);
+  --danger:       #e8836b;
+  --panel-hairline: rgba(236,235,230,.08);  /* row separators on tinted panels */
+  --shadow-card:  0 2px 6px rgba(0,0,0,.45), 0 12px 28px rgba(0,0,0,.4);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,.65);
 
   /*  Control sizing. Until v1.7.50 every height, padding and min-width in this
       file was a hand-written one-off, which is how one shared .action-btn class
@@ -54,83 +80,34 @@
   --tap-min: 44px;
   --ctl-pad-x: 16px;
   --ctl-radius: 999px;
-}
 
-[data-theme="light"] {
-  --bg:           #f6f5f2;
-  --bg-elev:      #ffffff;
-  --bg-elev-2:    #fbfaf7;
-  --border:       #e3e0d9;
-  --text:         #1a1c1f;
-  --text-dim:     #5e636a;
-  --text-faint:   #8c919a;
-  --accent:       #1f8fc1;
-  --accent-text:  #1f8fc1;
-  --accent-soft:  rgba(31,143,193,.12);
-  --on-accent:    #ffffff;
-  --bg-translucent: rgba(246,245,242,.85);
-  --panel-hairline: rgba(26,39,64,.12);     /* row separators on tinted panels */
-  --danger:       #c0392b;
-  --shadow-card:  0 1px 2px rgba(0,0,0,.06), 0 6px 16px rgba(0,0,0,.08);
-  --shadow-modal: 0 24px 64px rgba(0,0,0,.18);
+  /* How much of the scroller the top bar covers. app.js measures the real bar
+     and writes this onto .app; the value here is what the layout uses for the
+     one frame before that happens, and if scripting is off entirely. */
+  --topbar-h: calc(56px + env(safe-area-inset-top));
 }
 
 /* ------------------------------------------------------------------ */
-/*  Palettes                                                           */
+/*  Themes (v1.8.74): two, expressed as two attributes.                */
 /*                                                                     */
-/*  data-theme  = dark | light    — the FAMILY. Drives the thirteen    */
-/*                                  component rules further down this  */
-/*                                  file ([data-theme="light"] .foo).  */
-/*  data-palette = classic | copper — the COLOURS. Tokens only.        */
+/*  data-theme   = dark | light      — the FAMILY. Drives the component */
+/*                                     rules further down this file    */
+/*                                     ([data-theme="light"] .foo).    */
+/*  data-palette = graphite | brass  — the COLOURS.                    */
 /*                                                                     */
-/*  Both palette blocks are qualified by family, because --on-accent   */
-/*  is family-dependent: a dark palette prints near-black on its fill, */
-/*  a light one prints near-white. A palette-only selector would give  */
-/*  the brass theme the copper theme's dark on-accent.                 */
-/*  Specificity (0,2,0) beats the family blocks above (0,1,0).         */
+/*  Graphite and Brass is :root above. Brass light is below, keyed on  */
+/*  the family alone as well, so a light page can never fall back to  */
+/*  the dark tokens. Page, top bar and every full-screen panel are one */
+/*  ground in both.                                                    */
 /* ------------------------------------------------------------------ */
 
-/* Copper dark — the MusicD site's palette. Eight of these are that site's
-   values verbatim; the rest are derived to fit tokens it has no concept of. */
-[data-theme="dark"][data-palette="copper"] {
-  --bg:           #1b1d1f;
-  --bg-elev:      #232628;
-  --bg-elev-2:    #2a2d30;
-  --border:       #35393d;
-  --text:         #e8e6e3;
-  --text-dim:     #a8a49e;
-  /* The site has only two text tiers; this third one is derived from --text-dim
-     and darkened until it clears 4.5:1 on the DEEPEST surface (4.61 on
-     --bg-elev-2). The current dark theme's equivalent fails at 2.64. */
-  --text-faint:   #9a948c;
-  /* Copper for fills, a lighter copper for text. This is not a preference:
-     #c47f4a as text on --bg-elev-2 measures 4.27:1, a real failure, while
-     #d99a66 gives 5.78. The site itself splits them the same way. */
-  --accent:       #c47f4a;
-  --accent-text:  #d99a66;
-  --accent-soft:  rgba(196,127,74,.15);
-  /* Warm near-black rather than the cool #0b1418, so a copper fill doesn't
-     read blue-shadowed. 5.74:1. */
-  --on-accent:    #17120d;
-  --bg-translucent: rgba(27,29,31,.85);
-  /* Hue 3 degrees against copper's 26, and light enough to clear 4.5:1 on
-     every surface including the deepest (4.81). */
-  --danger:       #e8776f;
-  /* Warm white rather than pure white — a neutral hairline reads faintly blue
-     against charcoal. */
-  --panel-hairline: rgba(235,228,220,.08);
-  /* --bg here is 2.4x lighter than the classic dark background, so identical
-     shadows read weaker. Alphas lifted to compensate. */
-  --shadow-card:  0 2px 6px rgba(0,0,0,.50), 0 10px 24px rgba(0,0,0,.40);
-  --shadow-modal: 0 24px 64px rgba(0,0,0,.62);
-}
-
-/* Brass light — designed, because the site has no light mode. The restraint
-   is in the CHROMA, not the hue: the neutrals sit a few points of yellow above
-   grey, which reads as paper rather than as a yellow wash, and all the colour
-   weight lives in the accent. Elevation runs the same direction as the classic
-   light theme (elev lighter than bg), so existing depth cues still work. */
-[data-theme="light"][data-palette="copper"] {
+/* Brass light. The restraint is in the CHROMA, not the hue: the neutrals sit
+   a few points of yellow above grey, which reads as paper rather than as a
+   yellow wash, and all the colour weight lives in the accent. Elevation runs
+   lighter than the ground (elev above bg), so depth cues read as in a light
+   theme should. */
+[data-theme="light"],
+[data-theme="light"][data-palette="brass"] {
   --bg:           #f7f4ed;
   --bg-elev:      #fffdf8;
   --bg-elev-2:    #fbf8f1;
@@ -138,20 +115,21 @@
   --text:         #1e1b16;
   --text-dim:     #5c554a;
   --text-faint:   #756c5e;
-  /* The site's own --copper-dim. One value serves both roles here: 5.32:1 as
-     text and 5.75:1 under --on-accent, so this palette needs no split. */
+  /* One value serves both roles here: 5.32:1 as text and 5.75:1 under
+     --on-accent, so this palette needs no split. */
   --accent:       #8a5a35;
   --accent-text:  #8a5a35;
   --accent-soft:  rgba(138,90,53,.12);
   --on-accent:    #fffdf8;
-  --bg-translucent: rgba(247,244,237,.85);
+  --bg-veil:    rgba(247,244,237,.84);
+  --glass-edge: rgba(60,45,30,.14);
   --danger:       #b3271d;
-  /* Warm brown rather than the classic light theme's cool blue-grey, which
-     would grey the parchment. */
+  /* Warm brown rather than a cool blue-grey, which would grey the parchment. */
   --panel-hairline: rgba(58,44,26,.13);
   --shadow-card:  0 1px 2px rgba(58,44,26,.07), 0 6px 16px rgba(58,44,26,.10);
   --shadow-modal: 0 24px 64px rgba(58,44,26,.20);
 }
+
 
 * { box-sizing: border-box; }
 html, body {
@@ -174,7 +152,16 @@ input, textarea, [contenteditable] {
   -webkit-user-select: text;
   user-select: text;
 }
-button { font-family: inherit; }
+/* `align-items: normal` said outright (v1.8.66). Older WebKit's own stylesheet
+   gives every <button> `align-items: flex-start`; current Chrome and Safari no
+   longer carry that rule, and every engine this app is built and tested on
+   computes `normal`. On an older iPad (reported from Kiosker) it left the text
+   under each album tile — a <button> laid out as a flex column — sized to its
+   widest line instead of to the tile: a long artist line, one line with an
+   ellipsis by design, made the block wider than the tile, the title then had
+   room not to wrap, and both ran into the next tile. A type selector, so a
+   button whose own class sets an alignment keeps it. */
+button { font-family: inherit; align-items: normal; }
 
 /* Fixed full-screen shell: header pinned top, <main> scrolls, transport pinned
    bottom (as a fixed sibling). Because the page body never scrolls, the bars
@@ -220,15 +207,36 @@ button { font-family: inherit; }
    top padding the height of the bar — content scrolls UNDER the buttons, it
    does not begin under them. */
 .topbar {
+  /* OVER the scroller, not above it in the flow. It was a flex sibling of
+     <main>, which is why it could never be see-through: nothing was ever
+     behind it to show. <main> now runs the full height of .app and reserves
+     this bar's height as padding, so the album art scrolls underneath and the
+     veil shows it. .app is position: fixed, so this anchors to it. */
   position: absolute; top: 0; left: 0; right: 0;
   z-index: 20;
   display: flex; flex-direction: column;
   gap: 10px;
   padding: 12px 14px;
   padding-top: calc(12px + env(safe-area-inset-top));
-  background: none;
-  border-bottom: 0;
-  pointer-events: none;
+  /* The same surface as the floating transport pill, and for the same reason
+     (see .mini-transport): one appearance, no backdrop-filter.
+     The filter here was never doing anything anyway. .topbar is a flex SIBLING
+     of <main>, not a layer over it — `html, body { overflow: hidden }` and the
+     .app shell mean only <main> scrolls, and it starts below this bar. So the
+     only thing behind the top bar is the flat page background, and a
+     saturate+blur of a flat colour is a compositing layer that produces the
+     colour it started with, so the bar simply IS the ground.
+     v1.7.88: it is var(--bg-veil) — the ground WITH ALPHA, so it still resolves to
+     exactly --bg over an unscrolled page (no seam) while letting album art
+     through once the page moves. v1.7.87 had it flat var(--bg). The bar and the page were two
+     tones and the seam between them showed at the top of every screen. They
+     are one colour now, which is also what makes the iOS status bar match —
+     theme-color is --bg and the bar is --bg, so there is nothing to composite
+     and nothing to drift (see applyTheme() in app.js).
+     v1.7.89: the transport pill and the volume sheets take --bg-veil too, so
+     every translucent surface in the app is one material. */
+  background: var(--bg-veil);
+  border-bottom: 1px solid var(--border);
 }
 .topbar-row > * { pointer-events: auto; }
 .topbar-row {
@@ -257,10 +265,13 @@ button { font-family: inherit; }
 /*  The wall's Sort control, in the bar. min-width so a long sort label
     ellipsises inside the button instead of pushing the glass off the edge.  */
 .topbar-sort { display: flex; align-items: center; min-width: 0; }
+/*  Rouen's grid/list switch lives in this group too, between the reshuffle and
+    Sort, and steps aside for an open search field the same way.  */
+.topbar-right.is-searching #topbar-view { display: none; }
 
 
 .album-count {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-title, 1));
   font-weight: 600;
   color: #ffffff;
   font-variant-numeric: tabular-nums;
@@ -386,17 +397,19 @@ button { font-family: inherit; }
 }
 .search-ico { color: var(--text-faint); flex: 0 0 auto; }
 .search-box:focus-within .search-ico { color: var(--accent-text); }
-#search-input {
+#search-input, #labels-search-input {
   flex: 1 1 auto; min-width: 0;
   appearance: none; background: transparent; color: var(--text);
   border: 0; outline: none;
   font-size: 16px;            /* 16px keeps iOS Safari from zooming on focus */
   line-height: 1.2; padding: 2px 0;
 }
-#search-input::placeholder { color: var(--text-faint); }
+#search-input::placeholder, #labels-search-input::placeholder { color: var(--text-faint); }
 /* Hide the native clear/decoration; we render our own button */
 #search-input::-webkit-search-decoration,
-#search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+#search-input::-webkit-search-cancel-button,
+#labels-search-input::-webkit-search-decoration,
+#labels-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .search-clear {
   flex: 0 0 auto;
   width: 30px; height: 30px; border-radius: 999px;
@@ -480,8 +493,10 @@ button { font-family: inherit; }
 /* ------------------------------------------------------------------ */
 .update-toast {
   display: none;
-  flex: 0 0 auto;
+  /* No flex:0 0 auto — it is inside <main> now (see .docker-banner), where a
+     flex-child property does nothing. */
   flex-direction: column;
+  border-radius: 12px; margin-bottom: 14px;
   padding: 10px 14px;
   padding-left: max(14px, env(safe-area-inset-left));
   padding-right: max(14px, env(safe-area-inset-right));
@@ -546,33 +561,38 @@ main {
   overflow-y: auto; -webkit-overflow-scrolling: touch;
   overscroll-behavior: none;         /* no bounce, no pull-to-refresh on any device */
   padding: 14px;
-  /* Room for the floating bar: 12 + 40 (--ctl-h) + 12, plus the notch. */
-  padding-top: calc(64px + env(safe-area-inset-top));
 }
 @media (min-width: 768px) { main { padding: 18px; } }
 @media (min-width: 1200px) { main { padding: 22px; } }
+/* The reserve for the overlaid top bar. Separate from the shorthands above so
+   it survives them — each of those resets padding-top, so this has to come
+   after all three and add the bar's height to whatever inset that breakpoint
+   chose. */
+main { padding-top: calc(var(--topbar-h) + 14px); }
+@media (min-width: 768px)  { main { padding-top: calc(var(--topbar-h) + 18px); } }
+@media (min-width: 1200px) { main { padding-top: calc(var(--topbar-h) + 22px); } }
 
 .album-grid {
   display: grid;
   /* Phone portrait default: 3×3. minmax(0,1fr) prevents long titles
      from stretching one column wider than others. */
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--grid-cols, 3), minmax(0, 1fr));
   gap: 14px 10px;
 }
 
 /* ── Tablet portrait: 5×4 ───────────────────────────────────────── */
 @media (min-width: 768px) and (orientation: portrait) {
-  .album-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px 14px; }
+  .album-grid { grid-template-columns: repeat(var(--grid-cols, 5), minmax(0, 1fr)); gap: 20px 14px; }
 }
 
 /* ── Tablet landscape: 7×3 ──────────────────────────────────────── */
 @media (min-width: 768px) and (max-width: 1199px) and (orientation: landscape) {
-  .album-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 16px 12px; }
+  .album-grid { grid-template-columns: repeat(var(--grid-cols, 7), minmax(0, 1fr)); gap: 16px 12px; }
 }
 
 /* ── Desktop: 9×5 ───────────────────────────────────────────────── */
 @media (min-width: 1200px) {
-  .album-grid { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 18px 12px; }
+  .album-grid { grid-template-columns: repeat(var(--grid-cols, 9), minmax(0, 1fr)); gap: 18px 12px; }
 }
 
 /* Title/subtitle scale — phone (≤767px) rules live AFTER the base
@@ -581,24 +601,24 @@ main {
 /* Tablet portrait (5 cols) and tablet landscape (7 cols) also need small text */
 @media (min-width: 768px) and (max-width: 1199px) {
   .album-title {
-    font-size: 12px; line-height: 1.25;
+    font-size: calc(12px * var(--ui-text, 1)); line-height: 1.25;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .album-artist { font-size: 11px; }
+  .album-artist { font-size: calc(11px * var(--ui-text, 1)); }
 }
 /* Desktop (9 cols) compact text */
 @media (min-width: 1200px) {
   .album-title {
-    font-size: 11px; line-height: 1.2;
+    font-size: calc(11px * var(--ui-text, 1)); line-height: 1.2;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .album-artist { font-size: 10px; }
+  .album-artist { font-size: calc(10px * var(--ui-text, 1)); }
 }
 
 .album {
@@ -710,13 +730,18 @@ main {
   color: var(--text); font-size: 14px; font-family: inherit;
 }
 .logo-url-input:focus { outline: none; border-color: var(--accent); }
-.album-meta { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* max-width: whatever sizes this block, it is never wider than its tile — the
+   title wraps inside it and the artist line ends in an ellipsis inside it,
+   rather than either reaching the next tile. The `button` rule near the top
+   puts the alignment back; this holds even on an engine too old to know
+   `normal`, where that declaration is dropped and old WebKit's rule stands. */
+.album-meta { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; min-width: 0; max-width: 100%; }
 .album-title {
-  font-size: 14px; font-weight: 500; color: var(--text); line-height: 1.3;
+  font-size: calc(14px * var(--ui-text, 1)); font-weight: 500; color: var(--text); line-height: 1.3;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .album-artist {
-  font-size: 13px; color: var(--text-dim); line-height: 1.3;
+  font-size: calc(13px * var(--ui-text, 1)); color: var(--text-dim); line-height: 1.3;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -730,28 +755,69 @@ main {
   .album-grid { gap: 12px 8px; }
   .album-meta { margin-top: 5px; gap: 1px; }
   .album-title {
-    font-size: 12px; line-height: 1.25;
+    font-size: calc(12px * var(--ui-text, 1)); line-height: 1.25;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .album-artist { font-size: 10.5px; }
+  .album-artist { font-size: calc(10.5px * var(--ui-text, 1)); }
 }
 
-/* Phone portrait: fill the visible wall with exactly N rows (target 4) without
-   scrolling. app.js (measurePhoneWall) sets --phone-art to the largest square
-   art size that lets the target rows fit the measured content box, and adds
-   .phone-fit. When the wall is width-limited the art is the natural third-of-
-   width (no shrink); when height-limited the art shrinks a little so the rows
-   still fit instead of overflowing. Class is added only for the album wall on
-   phones (removed in the labels browser and on tablet/desktop). */
-.album-grid.phone-fit {
-  grid-template-columns: repeat(3, var(--phone-art, 1fr));
-  justify-content: center;
-  column-gap: 8px;
-  row-gap: 10px;
+/* ── List mode ──────────────────────────────────────────────────────
+   Same tiles, same handlers, laid out as rows: a small square cover, the
+   title over the artist, and a chevron. Nothing in here rebuilds a tile —
+   the grid gets a class and the existing children reflow, so every listener
+   and closure on them survives (CLAUDE.md pre-flight step 4). */
+.album-grid.as-list {
+  display: block;
 }
+.album-grid.as-list .album {
+  display: flex;
+  /* .album is flex-direction: column for the grid, and `display: flex` alone
+     inherits it — which is why the first cut stacked the cover above the text
+     and `align-items: center` then centred the lot. A row has to say so. */
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.album-grid.as-list .album:last-child { border-bottom: 0; }
+/* The art stops being the full width of a column and becomes a fixed thumb.
+   aspect-ratio still holds it square. */
+.album-grid.as-list .album-art-wrap {
+  width: 52px;
+  flex: 0 0 52px;
+}
+.album-grid.as-list .album-meta {
+  margin-top: 0;
+  flex: 1 1 auto;
+  text-align: left;
+}
+/* One line each in a row — two-line clamping is a grid affordance and here it
+   just makes the rows different heights. */
+.album-grid.as-list .album-title {
+  display: block;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.album-grid.as-list .album-artist {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* The affordance that says a row opens something. Drawn in CSS rather than
+   added to every tile, so list mode stays a pure restyle of what is there. */
+.album-grid.as-list .album::after {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px; height: 7px;
+  margin-right: 4px;
+  border-right: 2px solid var(--text-faint);
+  border-bottom: 2px solid var(--text-faint);
+  transform: rotate(-45deg);
+}
+/* The tile hover lift is a grid gesture; in a row it just wobbles the thumb. */
+.album-grid.as-list .album:hover .album-art-wrap { transform: none; }
 
 /* Skeleton */
 .album.skeleton .album-art-wrap {
@@ -800,7 +866,10 @@ main {
      worse than everywhere else. Percentages of a fixed parent have no such
      ambiguity. */
   height: 100%; max-height: 100%;
-  background: var(--bg-elev); color: var(--text);
+  /* A SCREEN, not a card: the album view and Now playing fill the display, so
+     they take the ground like every other screen. --bg-elev made them a
+     different tone from the top bar directly above them. */
+  background: var(--bg); color: var(--text);
   border-radius: 0; border: 0;
   box-shadow: var(--shadow-modal);
   overflow: hidden;
@@ -836,7 +905,7 @@ main {
   padding: calc(64px + env(safe-area-inset-top)) 18px 40px;
   /* Leave room at the bottom so the mini transport (≈78px tall + safe area)
      stays visible / not overlapping the last bit of content. */
-  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  padding-bottom: calc(106px + env(safe-area-inset-bottom));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -854,6 +923,91 @@ main {
 }
 .modal-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
+/* Previous / next album (v1.8.66): a quiet hint on the cover's edges for what
+   a sideways swipe on the card does, and the way to do it without a touch
+   screen. A dark disc under a light chevron reads on any cover, pale or dark,
+   and at partial opacity it stays a hint rather than a control competing with
+   the artwork. Never on Now playing: that screen is the zone, not a list. */
+.modal-step {
+  position: absolute; top: 50%; z-index: 2;
+  transform: translateY(-50%);
+  width: 38px; height: 38px; padding: 0; margin: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, .32); color: #fff;
+  opacity: .6; cursor: pointer;
+  transition: opacity .15s ease;
+}
+.modal-step:hover, .modal-step:focus-visible { opacity: 1; }
+.modal-step-prev { left: 10px; }
+.modal-step-next { right: 10px; }
+.modal.np-mode .modal-step { display: none; }
+
+/* ── The album-art hero (v1.7.84) ─────────────────────────────────────
+   The album view used to lead with a 280px square floating in the middle of a
+   padded column. It now leads with the cover itself, edge to edge, fading into
+   the page ground with the title sitting in the tail of that fade.
+
+   FULL-BLEED FROM INSIDE A PADDED COLUMN. .modal-body pads 18px either side and
+   the art is one of its flex children, so the art cancels that padding with a
+   negative margin and takes the width back. The arithmetic has to stay exact:
+   .modal-body declares overflow-y: auto, and a box with one axis scrollable and
+   the other `visible` computes the visible one to `auto` — so a bleed one pixel
+   WIDER than the padding it cancels does not spill, it gives the whole album
+   view a horizontal scrollport. test/dom/album-hero.test.js measures
+   scrollWidth against clientWidth for exactly that.
+
+   Scoped to :not(.np-mode) — the Now playing tab shares this element and sizes
+   it from leftover height instead (see the np-mode block). */
+.modal:not(.np-mode) .modal-body {
+  padding-top: 0;
+  gap: 0;
+}
+.modal:not(.np-mode) .modal-art {
+  width: calc(100% + 36px);
+  max-width: none;
+  margin: 0 -18px;
+  aspect-ratio: 1 / 1;
+  border-radius: 0;
+}
+/* The fade. A mask rather than an overlaid gradient, because the ground behind
+   it is a theme token: masking to transparent lets whatever --bg-elev is for
+   the current palette come through, so this works unchanged in all four
+   (an overlay would have to hard-code a colour to fade TO). */
+.modal:not(.np-mode) .modal-art img {
+  -webkit-mask-image: linear-gradient(to bottom,
+    #000 0 58%, rgba(0,0,0,.72) 78%, transparent 100%);
+          mask-image: linear-gradient(to bottom,
+    #000 0 58%, rgba(0,0,0,.72) 78%, transparent 100%);
+}
+/* THE TEXT STAYS OFF THE ARTWORK. The reference this is modelled on can put a
+   title over the bottom of a cover because its ground is always dark and the
+   art fades into that dark; two of this app's four palettes have a near-white
+   ground and near-black text, so the same overlap puts dark text on whatever
+   the sleeve happens to be — invisible on the first cover tried. The mask
+   below finishes the art at the element's own bottom edge, and the title
+   starts under it: the same dissolve, with no unknown image behind any text.
+   The track list keeps its own alignment — centring .modal-info would centre
+   every track row too. */
+.modal:not(.np-mode) .modal-info { margin-top: 0; }
+.modal:not(.np-mode) #modal-title,
+.modal:not(.np-mode) .modal-subtitle { text-align: center; }
+.modal:not(.np-mode) .modal-actions { justify-content: center; }
+
+/* Back and Share now sit ON the artwork, which can be any colour at all. A
+   scrim under each one is what makes them legible on a white sleeve as well as
+   a black one — and it is dark in every palette on purpose: white-on-dark is
+   the pair that survives an unknown image, whereas a theme-coloured button
+   would vanish into half the covers in a library. No backdrop-filter: the art
+   scrolls underneath these, which is the same per-frame re-blur the transport
+   pill has to avoid (v1.6.15). */
+.modal:not(.np-mode) .modal-close,
+.modal:not(.np-mode) .modal-share {
+  background: rgba(0,0,0,.42);
+  border-color: rgba(255,255,255,.24);
+  color: #fff;
+}
+
 .modal-info { display: flex; flex-direction: column; min-width: 0; }
 .modal-info h2 {
   margin: 14px 0 6px;
@@ -867,14 +1021,68 @@ main {
   color: var(--text-dim); font-size: 15px;
 }
 
+/* ── Two columns, from 720px up ───────────────────────────────────────
+   The art is a 320px column on the left and the title, buttons and track list
+   are a column on the right.
+
+   EVERY CANCELLATION BELOW IS WRITTEN AT THE HERO BLOCK'S OWN SPECIFICITY, and
+   that is the whole point of this comment. The hero rules above are
+   `.modal:not(.np-mode) .modal-art` — three classes — while this block was
+   written as plain `.modal-art`, one class. A MEDIA QUERY ADDS NO SPECIFICITY,
+   so being later in the file bought nothing: `margin: 0 -18px` beat `margin: 0`
+   at every width, and the art hung 18px into the column beside it. With the
+   hero's `gap: 0` also winning over this block's 28px there was nothing to
+   absorb it, so the cover sat ON the track list — over the numbers of every row
+   inside its own height, and over the start of the TRACKS heading. Reported
+   from a desktop browser in v1.8.37 and reproduced in the harness: art right
+   edge 551, track column left 533.
+
+   The full-bleed hero is a rule about a SINGLE-COLUMN layout: the cover is
+   edge to edge and the title sits in the tail of its fade. Neither is true
+   here — the art is an inset column and the title is beside it, not under it —
+   so the bleed, the squared corners and the fade are all cancelled rather than
+   inherited. */
 @media (min-width: 720px) {
   .modal-body {
     flex-direction: row; align-items: flex-start;
     gap: 28px;
     padding: 28px;
+    /*
+     * THE SHORTHAND ABOVE WAS THROWING AWAY THE TRANSPORT'S ROOM. The base
+     * rule reserves `106px + inset` at the bottom so the last of the content
+     * can scroll clear of the floating now-playing pill; `padding: 28px` here
+     * reset that to 28 and nothing put it back.
+     *
+     * It shows up in landscape on a phone or tablet, where the panel is
+     * centred with a 24px margin and so ends within a few pixels of the
+     * screen: measured at 844x390, the panel runs to y=374 and the pill's top
+     * edge is at y=308, so its last 66px sit underneath — About this album and
+     * the service link among them, with no way to scroll them out.
+     *
+     * Restored rather than recalculated: it is the same pill, the same
+     * distance off the same bottom edge, so it is the same number.
+     */
+    padding-bottom: calc(106px + env(safe-area-inset-bottom));
   }
   .modal-art {
     flex: 0 0 320px; max-width: 320px; margin: 0;
+  }
+  .modal:not(.np-mode) .modal-body {
+    /* Both restored from the hero block: the gap IS the separation between the
+       two columns, and without the top padding the art and the title start at
+       the panel's own edge with the pinned buttons straddling the artwork. */
+    padding-top: 28px;
+    gap: 28px;
+  }
+  .modal:not(.np-mode) .modal-art {
+    width: 320px; max-width: 320px; margin: 0;
+    border-radius: 3px;          /* square and flat, as everywhere else */
+  }
+  /* No fade: there is nothing below the art for it to dissolve into here, and
+     a cover that stops halfway down its own box reads as a broken image. */
+  .modal:not(.np-mode) .modal-art img {
+    -webkit-mask-image: none;
+            mask-image: none;
   }
   .modal-info { flex: 1 1 auto; min-width: 0; }
   .modal-info h2 { font-size: 26px; }
@@ -892,7 +1100,6 @@ main {
 .action-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   flex: 1 1 0; min-width: 0;
-  border-radius: var(--ctl-radius);
   /*  ONE height for every .action-btn in the app. It used to render at 37px on
       the playlist screens, 40px in the album modal, 38px on a track row and
       38px in the label merge sheet — the same class, four heights, because
@@ -900,15 +1107,23 @@ main {
   min-height: var(--ctl-h);
   padding: 0 8px;
   font-size: 13px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* The FINISH of a pill, declared once for the pills and for the ⋯ overflow
+   button that sits in a row of them (v1.8.60, .overflow-btn below). A copy in
+   the overflow button's own rule is how the two would part on the next
+   restyle. Directly after .action-btn, at the same specificity, so for the
+   pills this cascades exactly as the one rule it was split out of. */
+.action-btn, .overflow-btn {
+  border-radius: var(--ctl-radius);
   background: var(--bg-elev-2);
   color: var(--text);
   border: 1px solid var(--border);
   cursor: pointer;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: filter .15s ease, transform .08s ease;
 }
-.action-btn:hover { filter: brightness(1.12); }
-.action-btn:active { transform: scale(.97); }
+.action-btn:hover, .overflow-btn:hover { filter: brightness(1.12); }
+.action-btn:active, .overflow-btn:active { transform: scale(.97); }
 .action-btn.primary {
   background: var(--accent);
   color: var(--on-accent);
@@ -925,12 +1140,18 @@ main {
    page background rather than filled chips, and its primary carries more
    weight than the rest. */
 .modal-actions .action-btn {
-  background: transparent;
-  border-color: var(--border);
   font-weight: 600;
   padding: 11px 8px;
 }
-.modal-actions .action-btn:hover { background: var(--bg-elev-2); filter: none; }
+/* The finish again shared with the overflow button in this row: outlined on
+   the page, like the pills beside it. */
+.modal-actions .action-btn,
+.modal-actions .overflow-btn {
+  background: transparent;
+  border-color: var(--border);
+}
+.modal-actions .action-btn:hover,
+.modal-actions .overflow-btn:hover { background: var(--bg-elev-2); filter: none; }
 .modal-actions .action-btn.primary {
   background: var(--accent);
   border-color: transparent;
@@ -1016,6 +1237,15 @@ main {
   font-size: 14px; opacity: 0;
   transition: opacity .18s ease, transform .18s ease;
   z-index: 100;
+  /* NEVER TAPPABLE, SHOWN OR NOT. `opacity: 0` hides a box; it does not stop
+     it receiving touches, and this one is fixed over the bottom of the screen
+     at z-index 100 — above the transport pill — for the whole life of the
+     page. Its width comes from `max-width: min(560px, calc(100vw - 28px))`,
+     and `100vw` is resolved against the layout viewport, so a stale one makes
+     the invisible box wider than the screen it is sitting on. Nothing about a
+     toast is meant to be pressed; the sibling settings-info toast already
+     carries this and this one did not. */
+  pointer-events: none;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.error { border-color: var(--danger); }
@@ -1071,6 +1301,12 @@ main {
   margin-top: 6px;
   flex-wrap: wrap;
 }
+/* The text's own attribution, under the paragraph it belongs to. Quieter than
+   the review link in the footer: it is a citation, not an action. */
+.bio-text-source { margin-top: 6px; font-size: 12.5px; color: var(--text-faint); }
+.bio-text-source a { color: inherit; text-decoration: underline; }
+.bio-text-source a:hover { color: var(--text); }
+
 .bio-source {
   color: var(--text-dim);
   font-size: 13px;
@@ -1112,34 +1348,100 @@ main {
 /* ------------------------------------------------------------------ */
 .mini-transport {
   position: fixed;
-  left: 0; right: 0;
-  bottom: 0;
   z-index: 70;   /* above modal (50) so it's visible even when an album sheet is open */
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
-  /* Solid, no backdrop blur: this bar floats over the scrolling <main>, and
-     iOS Safari re-samples + re-blurs the pixels beneath a backdrop-filter on
-     EVERY scroll frame — a major source of scroll jank whenever something is
-     playing. A solid elevated background reads near-identically. */
-  background: var(--bg-elev);
-  border-top: 1px solid var(--border);
-  box-shadow: 0 -6px 24px rgba(0,0,0,.22);
+  padding: 9px 12px;
+  /* A floating pill rather than a bar welded to the bottom edge.
+     The whole pill is lifted clear of the home indicator by its `bottom`,
+     which is what the full-bleed bar used a padding-bottom for — the inset is
+     still honoured, it just moves the element instead of padding it. */
+  left: 10px; right: 10px;
+  bottom: calc(8px + env(safe-area-inset-bottom));
+  border-radius: 18px;
+  border: 1px solid var(--glass-edge);
+  box-shadow: 0 8px 30px rgba(0,0,0,.34);
+
+  /* ONE APPEARANCE, ALWAYS. NO backdrop-filter — do not add one back.
+     v1.6.15 took backdrop blur off this exact bar because iOS Safari re-samples
+     and re-blurs everything beneath a backdrop-filter on every scroll frame,
+     and it was the main scroll-jank source while music was playing. v1.7.81
+     brought it back on the theory that the blur could be stripped for the
+     duration of a scroll and nobody would see the swap. Two builds of reports
+     say otherwise, and the second one shows why the "same background, only the
+     blur differs" version of that idea (v1.7.84) was still visibly two bars:
+
+       `saturate(180%)` DOES NOT ONLY SOFTEN THE BACKDROP, IT BRIGHTENS IT.
+       Whatever fraction of the page shows through the pill — a tenth, here —
+       is vivid and light while the filter is on and muted while it is off. The
+       alpha never changed; the thing being seen through it did. A wall of album
+       covers is the worst case for this and is exactly where it was reported.
+
+     There is no version of a conditional filter that is invisible, and an
+     unconditional one is the documented jank. So the pill is translucent and
+     nothing else: a fixed alpha over the page, identical at rest and in motion,
+     on every device. */
+  /* v1.7.89: --bg-veil, the SAME material as the top bar. It was --glass-bg, a
+     lighter translucent surface, and the two bars did not match.
+     The ground-with-alpha reads differently here than it does on the top bar,
+     and deliberately so: this pill floats over the wall with content behind it
+     almost all of the time, so the covers tint it. Where nothing is behind it —
+     the very bottom of a short page — it settles to exactly --bg, and the
+     border and the drop shadow are what keep it reading as a floating pane
+     rather than a hole. That is why both of those are load-bearing here and are
+     asserted in test/dom/ui-glass-grid.test.js. */
+  background: var(--bg-veil);
 }
+/* The cover of what is playing. */
+.mt-art {
+  /* The pill's height driver. It is deliberately the tallest thing in the bar
+     (see the control sizes further down), so this number IS the pill's height
+     less its padding — which is how the bar is made taller without the extra
+     room becoming empty glass. */
+  width: 54px; height: 54px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  object-fit: cover;
+  background: var(--bg-elev-2);
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+.mt-art.hidden { display: none; }
 
 /* Thin Roon-style progress line along the top edge of the bar */
 .mt-progress {
   position: absolute;
-  top: -1px; left: 0; right: 0;
-  height: 2px;
+  /* THE WHOLE PILL, not a 2px strip across the top of it.
+     A 2px-tall box cannot carry an 18px corner: CSS scales every radius down
+     until the two on a side fit that side's length, so `border-radius: 18px
+     18px 0 0` on a 2px strip became a 2px radius and the line ran straight on
+     past the glass at both ends — visible as a blue chord overhanging the
+     pill's top corners.
+     Clipping against a box the SHAPE OF THE PILL makes the line stop exactly
+     where the curve does, so it reads as following the edge.
+     Clipped here and not on .mini-transport: that element's overflow must stay
+     visible, because the zone and volume popovers open upwards out of it. They
+     are siblings of this element, so this clip never touches them. */
+  inset: 0;
   pointer-events: none;
+  /* 17px, not 18. This box is positioned against the padding box, i.e. inside
+     the pill's 1px border, and an inner corner's radius is the outer radius
+     less the border it sits inside. */
+  border-radius: 17px;
+  overflow: hidden;
 }
 .mt-progress-fill {
+  /* Full pill height, and the LINE IS ITS TOP BORDER — not a filled 2px block.
+     A border is drawn along the box's rounded outline, so the left end curves
+     down into the corner instead of ending square, and the clipper above cuts
+     the right end to the far curve as the fill approaches 100%.
+     box-sizing so the 100% height is the border box and the border does not
+     add to it. */
   height: 100%;
   width: 0%;
-  background: var(--accent);
+  box-sizing: border-box;
+  border-top: 2.5px solid var(--accent);
+  border-top-left-radius: 17px;
   /* No transition. JS paints this from the clock four times a second, and a
      400ms width transition restarted every 250ms can never finish: the fill
      chased a target it never reached and sat ~400ms behind the position just
@@ -1219,9 +1521,10 @@ main {
    .mt-vol-popover rules further down always overrode it. Removed when the
    popover became the shared Roon-style .vol-sheet.) */
 
-/* Push the main grid above the mini transport */
+/* Push the main grid above the mini transport. The pill floats clear of the
+   bottom edge, so this reserves its height plus that gap. */
 main {
-  padding-bottom: 88px;
+  padding-bottom: 94px;
 }
 
 /* On mobile, hide track info if the bar is cramped */
@@ -1244,7 +1547,7 @@ main {
 }
 .share-backdrop {
   position: absolute; top: 0; right: 0; bottom: 0; left: 0;
-  background: rgba(0,0,0,.65);
+  background: rgba(0,0,0,.55);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
 }
@@ -1254,20 +1557,35 @@ main {
   max-height: calc(100vh - 40px);
   max-height: calc(100dvh - 40px);
   overflow-y: auto;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  /* The app's own material (v1.7.89): --bg-veil and the lit edge, like the
+     transport pill and the volume sheets. The backdrop-filter below stays —
+     the rule against it is about surfaces that sit over a SCROLLER and get
+     re-blurred every frame; this is a modal, nothing moves behind it. */
+  background: var(--bg-veil);
+  border: 1px solid var(--glass-edge);
+  border-radius: 20px;
   box-shadow: var(--shadow-modal);
   padding: 24px 18px 18px;
+  /* THE RESERVE, and it is a longhand AFTER the shorthand on purpose.
+     The now-playing pill floats over this overlay (it is z-index 70 against
+     the overlay's 60), so without room reserved here the last rows of the
+     suggestions sit underneath it with no way to scroll them clear — the panel
+     has already reached the end of its own scroll. Same reserve .modal-body
+     carries, and the same trap: writing it into the shorthand above means the
+     next person to touch that line silently deletes it. */
+  padding-bottom: calc(106px + env(safe-area-inset-bottom));
   animation: modal-in .18s ease-out;
 }
 .share-close { position: absolute; top: 12px; right: 12px; }
 .share-frame {
   margin-top: 26px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 16px;
   overflow: hidden;
-  background: #000;
+  /* The card is dark in every theme (it is a standalone image, seen outside
+     the app), so the frame behind it is too — a light frame around a dark card
+     reads as a mistake in the light palettes. */
+  background: #12151a;
   display: flex; align-items: center; justify-content: center;
 }
 .share-frame img {
@@ -1307,7 +1625,7 @@ main {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-edge);
   background: var(--bg-elev-2);
   color: var(--text);
   text-decoration: none;
@@ -1323,6 +1641,124 @@ main {
 .share-actions button:active,
 .share-actions a:active { transform: scale(.97); }
 .share-actions svg { width: 18px; height: 18px; }
+
+/* The links row under the share card: services and review sites, as chips.
+   A GRID with equal columns and one shared height, not a wrap of inline
+   buttons — so the row reads as a row. Which also means no chip's label may
+   come from the record: a credit like "Stan Getz / Cal Tjader / Alan Jay
+   Lerner / Frederick Loewe" made a chip six lines deep in the app this is
+   ported from, and every chip beside it became a circle. lib/share-links.js
+   keeps the labels constant, and its test holds them there. */
+/* The Services / Reviews toggle lists. Rows are built by app.js from the
+   server's table, so this only has to space them. */
+/* A heading inside a settings pane, for a page holding more than one list.
+   Share Card carries Services and Reviews together; without a label the two
+   toggle lists read as one long one. */
+.settings-block-title {
+  margin: 0 0 10px; font-size: 13px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint);
+}
+
+/* A gap between the rows. Without one, consecutive switches touch: each row
+   is exactly its switch's height, so five that are all ON merge into a single
+   unbroken column of colour and stop reading as five controls. */
+/* A settings row that follows a list it belongs to, rather than starting a
+   block of its own. */
+.settings-row-top { margin-top: 14px; }
+
+.share-toggle-list { display: flex; flex-direction: column; gap: 14px; }
+
+/* "If you like this" — three acts and one record each, under the links.
+   A LIST, not a grid of sleeves: Deezer names the record but its cover is the
+   act's press shot as often as the sleeve, and a wrong picture under an album
+   title is worse than no picture. Text only, so there is nothing to be wrong. */
+.share-similar { width: 100%; margin-top: 16px; }
+.share-similar-title {
+  margin: 0 0 8px; font-size: 13px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint);
+}
+.share-similar-list { display: flex; flex-direction: column; gap: 6px; }
+.share-similar-act {
+  display: flex; align-items: baseline; gap: 8px;
+  width: 100%; min-height: 44px; padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg-elev-2);
+  color: var(--text); text-decoration: none; text-align: left;
+  font: inherit; cursor: pointer;
+}
+.share-similar-act:hover  { background: var(--bg-elev); border-color: var(--text-faint); }
+.share-similar-act:active { transform: scale(.995); }
+/* A plain <div> row — nothing to link to — is not a control and must not
+   pretend to be one. */
+div.share-similar-act { cursor: default; }
+div.share-similar-act:hover { background: var(--bg-elev-2); border-color: var(--border); }
+/* One line per row. The act's name keeps its whole self — it is the thing
+   being suggested — and the record beside it gives way, because a truncated
+   album title still reads as an album title while a wrapped name makes one row
+   taller than its neighbours for no gain. */
+.share-similar-name {
+  flex: 0 0 auto;
+  font-size: 14px; font-weight: 600; white-space: nowrap;
+}
+.share-similar-rec {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 12.5px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* What a tap DOES, said before it is tapped: "this adds to your queue" and
+   "this leaves the app" must not look the same. */
+.share-similar-tag {
+  margin-left: auto; flex: 0 0 auto;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px;
+  background: var(--bg-elev); color: var(--text-dim);
+}
+.share-similar-act.is-library .share-similar-tag { background: var(--accent); color: var(--on-accent, #fff); }
+
+/* The default service carries a tick. Held, not tapped — see holdToPrefer. */
+.share-link.is-default { border-color: var(--accent); }
+.share-link.is-default::after {
+  content: "\2713";
+  margin-left: 6px; font-weight: 700; color: var(--accent-text);
+}
+
+.share-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  /* Every row the same height, not just every chip within a row. Grid rows
+     size independently, so "Amazon Music" wrapping to two lines made its row
+     taller than the ones above and below it and the block read as ragged. */
+  grid-auto-rows: 1fr;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+}
+.share-link {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg-elev-2);
+  color: var(--text); text-decoration: none;
+  font-size: 13px; font-weight: 600; line-height: 1.2; text-align: center;
+  /* A long constant like "Wikipedia artist" still has to fit a quarter of a
+     phone; it wraps to two lines inside the shared height rather than widening
+     its column. */
+  overflow-wrap: anywhere;
+}
+.share-link:hover  { background: var(--bg-elev); border-color: var(--text-faint); }
+.share-link:active { transform: scale(.985); }
+/* EVERY CHIP LOOKS THE SAME. The review half was hollow for a while — same
+   text, no fill, on the theory that a place to read about a record is quieter
+   than a place to play it. On the DARK palettes that read as intended; on the
+   light ones --bg-elev-2 is barely off the panel it sits on, so the fill was
+   carrying the whole chip and removing it left five labels floating with no
+   button under them at all. Reported from a phone, and the screenshots make it
+   plain.
+   The lesson is not "transparent was too subtle" — it is that a variant
+   defined by REMOVING the thing that gives an element its edges has no floor,
+   because how visible it stays depends entirely on how far apart two theme
+   tokens happen to be. `.is-review` stays as a hook for grouping and for the
+   tests; it no longer changes how anything looks. */
 
 .share-hint { color: var(--text-faint); font-size: 13px; margin: 10px 4px 0; }
 .share-err  { color: var(--danger);     font-size: 13px; margin: 10px 4px 0; min-height: 1em; }
@@ -1423,6 +1859,130 @@ main {
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
 }
+/* Played earlier — the fold-out above the live queue.
+   Built from what the extension watched leave the zone, because Roon's queue
+   subscription reports only the current track and what is coming. Styled a
+   step back from the live rows: it is a record of what happened, not part of
+   what is about to. */
+/* The controls stay put while the played list scrolls under them.
+   Sticky only while it is OPEN — see the paint() that toggles is-open.
+
+   `top` clears the panel's floating Home/Share buttons, which are absolutely
+   positioned at 12px + the safe-area inset and are --ctl-h (40px) tall: pinning
+   at 0 parks this underneath them, which is exactly the collision it is here to
+   fix. z-index 1 lifts it over the rows scrolling beneath while staying below
+   those buttons (z-index 2 in .modal-panel's context — .modal-body is
+   positioned WITHOUT a z-index precisely so it does not open a context of its
+   own), so they keep taking their own taps.
+
+   Opaque, because rows sliding visibly through a control bar is unreadable.
+   The negative inline margin + matching padding lets the background run the
+   full bleed of the list while the contents keep the gutter. */
+/* Padding is deliberately NOT set here: `#tab-queue .queue-list li` carries an
+   id and wins anyway, and what it gives is what this wants — the gutter on the
+   contents while the background keeps the list's full bleed. */
+.queue-list li.q-history-head {
+  display: block;
+  border-bottom: none;
+}
+.queue-list li.q-history-head.is-open {
+  position: sticky;
+  top: calc(56px + env(safe-area-inset-top));
+  z-index: 1;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+.q-history-bar {
+  padding: 6px 0;
+  display: flex; align-items: center; gap: 12px;
+}
+/* Select sits at the far end of the bar, away from the disclosure — they do
+   different things and a mis-tap between them is annoying in both directions. */
+.q-history-select {
+  appearance: none;
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color .12s ease, border-color .12s ease;
+}
+.q-history-select:hover { color: var(--text); border-color: var(--text-dim); }
+.q-history-select[aria-pressed="true"] {
+  color: var(--on-accent, #fff);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.q-history-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.q-hist-actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 0 0 10px;
+}
+.q-hist-count {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-right: auto;
+  font-variant-numeric: tabular-nums;
+}
+.q-hist-act {
+  appearance: none;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.q-hist-act.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); }
+.q-hist-act:disabled { opacity: .45; cursor: default; }
+.q-hist-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The pick number. Reserved space even when empty, so ticking a row does not
+   shunt its title sideways. */
+.q-hist-num {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  display: flex; align-items: center; justify-content: center;
+}
+.queue-list li.q-hist-row.is-selecting .q-hist-num.hidden {
+  display: flex !important;
+  background: none;
+  border: 1px solid var(--border);
+}
+.queue-list li.q-hist-row.is-picked { opacity: 1; background: var(--accent-soft); }
+.q-history-toggle {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color .12s ease;
+}
+.q-history-toggle:hover { color: var(--text); }
+/* Keyboard users get the same ring the rest of the app uses. */
+.q-history-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Dimmed as a group rather than per element, so the art fades with the text
+   and the row reads as one past thing. */
+.queue-list li.q-hist-row { opacity: .62; }
+.queue-list li.q-hist-row:hover { opacity: 1; }
+.queue-list li.q-hist-row .q-len.is-skipped { color: var(--text-dim); }
+
 .queue-empty {
   color: var(--text-faint);
   font-size: 14px;
@@ -1497,17 +2057,33 @@ main {
   background: transparent; box-shadow: none;
   aspect-ratio: auto; border-radius: 0; overflow: visible;
 }
-.modal.np-mode.tab-album .modal-art img {
-  /* Height-driven: fills the leftover vertical space, capped at the usual
-     size; width follows the (square) cover's intrinsic ratio, so this needs
-     no aspect-ratio support. object-fit contain guards odd-shaped art. */
-  height: 100%;
-  max-height: min(400px, 92vw, calc(100vw - 36px));  /* never taller than the padded width — keeps shadow/radius on the art */
-  width: auto; max-width: 100%;
-  object-fit: contain;
-  border-radius: 8px;
-  box-shadow: var(--shadow-card);
+.modal.np-mode.tab-album .modal-art {
+  /* Full-bleed, like the album view's hero: cancel .modal-body's 18px. */
+  width: calc(100% + 36px);
+  margin: 0 -18px;
 }
+.modal.np-mode.tab-album .modal-art img {
+  /* Fills the leftover vertical space AND the full width, cropping rather than
+     letterboxing — the cover is the screen here, not a framed picture on it.
+     No radius and no shadow: both are how a floating card reads, and this is
+     no longer floating. The bottom fades into the ground so the title and the
+     controls sit in the tail of the image rather than under a hard edge.
+     (Landscape ≥720px puts art and controls side by side and puts all of this
+     back — see the grid block below.) */
+  height: 100%;
+  width: 100%; max-width: none; max-height: none;
+  object-fit: cover;
+  border-radius: 0;
+  box-shadow: none;
+  -webkit-mask-image: linear-gradient(to bottom,
+    #000 0 62%, rgba(0,0,0,.7) 82%, transparent 100%);
+          mask-image: linear-gradient(to bottom,
+    #000 0 62%, rgba(0,0,0,.7) 82%, transparent 100%);
+}
+/* Same rule as the album view: the live block sits UNDER the fade, never on the
+   artwork. .modal-art is flex: 1 1 0, so the art already takes every pixel the
+   controls do not — there is nothing to reclaim by overlapping them. */
+.modal.np-mode.tab-album .modal-info { margin-top: 0; }
 /* Very short viewports (small desktop windows — phone landscape is already
    blocked by the rotate overlay): let the body scroll again rather than
    clip the transport controls unreachably. */
@@ -1554,6 +2130,10 @@ main {
     min-height: 0;
     justify-self: end;
   }
+  .modal.np-mode.tab-album .modal-art {
+    /* Not full-bleed here — it is a column in a two-column grid. */
+    width: auto; margin: 0;
+  }
   .modal.np-mode.tab-album .modal-art img {
     /* Auto-size under BOTH max constraints (the grid row is definite, so the
        height cap works): the element box shrink-wraps the cover at its
@@ -1561,7 +2141,16 @@ main {
        and big screens get big art (the portrait 400px cap is dropped). */
     height: auto;
     max-height: calc(100% - 16px);
+    width: auto; max-width: 100%;
+    object-fit: contain;
+    /* The framed card comes back: nothing bleeds off a screen edge in this
+       layout, so a hard-edged crop would just look like a mistake. */
+    border-radius: 8px;
+    box-shadow: var(--shadow-card);
+    -webkit-mask-image: none;
+            mask-image: none;
   }
+  .modal.np-mode.tab-album .modal-info { margin-top: 0; }
   .modal.np-mode.tab-album .modal-info {
     grid-area: info;
     justify-self: start;
@@ -1634,10 +2223,74 @@ main {
 .np-album:hover, .np-album:focus-visible { color: var(--text); text-decoration: underline; }
 .np-album:empty { display: none; }
 
-.np-progress { width: 100%; margin-top: 18px; }
+.np-progress {
+  width: 100%; margin-top: 18px; position: relative;
+  /* Chrome's UA stylesheet puts margin:2px on input[type=range], and nothing in
+     this file used to say so. The canvas is positioned against the CONTAINER
+     while the input sits in flow below that margin, so the shape was drawn 2px
+     above the thumb that is supposed to ride along it — measured off a
+     screenshot at 638.5 against 640.5, not inferred. Declared once here and
+     used by both rules, so the two cannot drift apart again. */
+  --seek-inset: 2px;
+  /* The waveform's height, and with it the height of the bar in waveform mode.
+     Named because two rules have to agree on it: the canvas draws at this
+     height and the input is grown to match, so the whole shape is draggable
+     rather than just the 4px line the plain bar occupies.
+
+     64px rather than the 34 it shipped at, because the measurement changed
+     under it. A bar is now the RMS of its slice rather than the loudest sample
+     in it, and RMS values sit much lower against a peak-normalised ceiling — a
+     quiet verse that used to draw at 90% of full height draws at 25%. At 34px
+     that whole range is eight pixels and the difference between a verse and a
+     chorus is invisible; at 64 there is somewhere for it to show. It also
+     halves what a single screen pixel is worth, which pulls the same way as
+     drawing the bars unrounded. */
+  --wave-h: 64px;
+  /* The seek thumb's diameter, in ONE place. Both vendor thumb rules read it,
+     and so does drawWave() — which has to know, because a range input cannot
+     let its thumb hang off either end, so the shape has to be inset to the same
+     travel or the two disagree about where a moment in the track is. Three
+     copies of 14 in three languages is exactly the drift this avoids. */
+  --seek-thumb: 14px;
+}
+/* The waveform sits UNDER the seek input, which keeps every one of its own
+   behaviours (drag, keyboard, the elapsed fill painted into --seek-fill). The
+   canvas is inert decoration: pointer-events none, aria-hidden, and removed
+   from the flow entirely when the track has no waveform, so a streaming track
+   is exactly the bar it was before this feature existed. */
+.np-wave {
+  position: absolute;
+  /* Aligned to the INPUT's box, not the container's, so the thumb rides through
+     the middle of the waveform rather than sitting below it. */
+  left: 0; right: 0; top: var(--seek-inset);
+  width: 100%; height: var(--wave-h);
+  pointer-events: none;
+}
+.np-wave.hidden { display: none; }
+/* With a waveform showing, the range's own 4px track draws a line straight
+   through the middle of it. The canvas carries the progress instead — it paints
+   the played part in the accent and the rest dim — so the track goes and the
+   THUMB stays, which is what makes the bar look draggable.
+   THIS RULE IS ONLY HALF THE ANSWER, and on its own it did nothing: paintSeek()
+   writes the gradient into --seek-fill as an INLINE property, and an inline
+   custom property beats a stylesheet rule however specific it is. paintSeek
+   removes that inline value while .has-wave is set, which is what lets this
+   line apply at all. Both halves are needed; neither works alone. */
+.np-progress.has-wave .np-seek { --seek-fill: transparent; }
+/* NOT flex: .np-progress also holds .np-times, and a row would put the elapsed
+   and remaining times beside the bar instead of under it.
+   The input grows to the canvas's height instead. A range centres its track and
+   thumb vertically in its own box, so an input grown to --wave-h puts the thumb
+   exactly on the waveform's midline with no offsets to keep in step — at 34px
+   as at 64. */
+.np-progress.has-wave .np-seek { height: var(--wave-h); position: relative; z-index: 1; }
+.np-progress.has-wave .np-seek::-webkit-slider-thumb { margin-top: -5px; }
 .np-seek {
   -webkit-appearance: none; appearance: none;
   display: block;
+  /* Stated rather than inherited from the UA sheet — .np-wave is positioned
+     against this exact value. */
+  margin: var(--seek-inset) 0;
   width: 100%; height: 14px;
   background: transparent;
   cursor: pointer;
@@ -1651,7 +2304,7 @@ main {
 }
 .np-seek::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
-  width: 14px; height: 14px; border-radius: 50%;
+  width: var(--seek-thumb); height: var(--seek-thumb); border-radius: 50%;
   background: var(--text); border: 0; cursor: pointer;
   margin-top: -5px;   /* (14px thumb − 4px track) / 2 */
 }
@@ -1660,7 +2313,7 @@ main {
   background: var(--seek-fill);
 }
 .np-seek::-moz-range-thumb {
-  width: 14px; height: 14px; border-radius: 50%;
+  width: var(--seek-thumb); height: var(--seek-thumb); border-radius: 50%;
   background: var(--text); border: 0; cursor: pointer;
 }
 .np-seek:disabled::-webkit-slider-thumb { background: var(--text-faint); }
@@ -1747,28 +2400,36 @@ main {
 /*  Mini transport — Roon-style sizing                                 */
 /* ------------------------------------------------------------------ */
 .mini-transport {
-  padding: 10px 14px;
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  /* NO padding-bottom inset. The pill's `bottom` already lifts the whole thing
+     clear of the home indicator, and keeping the old full-bleed bar's inset as
+     well padded the safe area INSIDE the pill too — 34px of dead glass under
+     the text on any device that has one, which is the empty space the pill was
+     reported for. Lift or pad, never both. */
+  padding: 9px 11px;
 }
 .mt-info { gap: 13px; }
 .mt-info { cursor: pointer; }  /* tappable to open the now-playing screen */
 .mt-title  { font-size: 16px; font-weight: 700; }
 .mt-artist { font-size: 13px; }
 
-.mt-btn { width: 52px; height: 52px; }
-.mt-btn svg { width: 30px; height: 30px; }
-.mt-playpause { width: 54px; height: 54px; }
-.mt-playpause svg { width: 32px; height: 32px; }
+/* Sized so the ARTWORK sets the pill's height, not the buttons. At 54px the
+   play control was the tallest thing in it and drove a 76px bar; the cover is
+   44px, so nothing needs to be bigger than that. The width the buttons give
+   back goes to the title, which was truncating. */
+.mt-btn { width: 44px; height: 44px; }
+.mt-btn svg { width: 26px; height: 26px; }
+.mt-playpause { width: 46px; height: 46px; }
+.mt-playpause svg { width: 28px; height: 28px; }
 
-main { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+main { padding-bottom: calc(94px + env(safe-area-inset-bottom)); }
 
 @media (max-width: 480px) {
-  .mt-info { gap: 11px; }
-  .mt-controls { gap: 2px; }
-  .mt-btn { width: 44px; height: 44px; }
-  .mt-btn svg { width: 26px; height: 26px; }
-  .mt-playpause { width: 46px; height: 46px; }
-  .mt-playpause svg { width: 28px; height: 28px; }
+  .mt-info { gap: 10px; }
+  .mt-controls { gap: 0; }
+  .mt-btn { width: 40px; height: 40px; }
+  .mt-btn svg { width: 24px; height: 24px; }
+  .mt-playpause { width: 42px; height: 42px; }
+  .mt-playpause svg { width: 26px; height: 26px; }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1786,8 +2447,12 @@ main { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
      it was 12px against 18px top, which tipped the whole row upward. */
   padding: 16px 16px 30px;
   border-radius: 16px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
+  /* The transport pill's surface, shared — --bg-veil as of v1.7.89, so the
+     sheet, the pill it opens from and the top bar are all one material. It
+     really does float over content, so the translucency reads here. Still no
+     backdrop-filter: same rule as the pill. */
+  background: var(--bg-veil);
+  border: 1px solid var(--glass-edge);
   box-shadow: var(--shadow-modal);
   animation: vol-in .14s ease-out;
 }
@@ -1839,11 +2504,32 @@ main { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
   color: var(--text);
   cursor: pointer;
   flex: 0 0 auto;
-  font-size: 22px;
-  font-weight: 500;
+  /* No font sizing: the glyphs are SVG, not text (see .vol-step-icon). */
+  padding: 0;
+  line-height: 0;
 }
 .vol-step:hover  { background: var(--border); }
 .vol-step:active { transform: scale(.95); }
+/* The − and + are DRAWN, not typed. As characters they were centred by their
+   LINE BOX, and a line box is not the glyph: "+" and "−" sit on the maths axis
+   with the font's descender space hanging below them, so the box lands dead
+   centre while the ink in it does not, and no amount of align-items moves it —
+   the offset lives inside the font, and changes with the font. Two lines in a
+   symmetric 24-unit box are centred on the box itself, at any size, in any
+   font. Stroke width is the weight, for the same reason: font-weight on a
+   system symbol may do nothing, and the text minus drew a 1.3px line here
+   against the 2.75px this renders (3 user units mapped into 22px). */
+.vol-step-icon {
+  display: block;
+  width: 22px; height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  /* The click belongs to the button; without this the target is the <svg>,
+     and every listener here is bound to the button. */
+  pointer-events: none;
+}
 
 /* Big touch-friendly slider (the native 4px hairline was unusable on
    phones). Track fill uses --vol-fill, kept in sync from JS, because
@@ -1904,7 +2590,8 @@ input.vol-range::-moz-range-thumb {
 .np-popover.vol-sheet {
   padding: 16px 16px 30px;
   border-radius: 16px;
-  background: var(--bg-elev);
+  background: var(--bg-veil);
+  border-color: var(--glass-edge);
   box-shadow: var(--shadow-modal);
 }
 @keyframes pill-spin { to { transform: rotate(360deg); } }
@@ -2020,12 +2707,14 @@ input.vol-range::-moz-range-thumb {
 .settings-grip { width: 40px; height: 4px; border-radius: 999px; background: var(--border); margin: 4px auto 14px; }
 .settings-head { margin-bottom: 18px; }
 .settings-head h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--text); }
-/* Full-page browser overlays (Qobuz/Tidal/Pitchfork) put the close button on
-   the same row as the title, pinned top-right. Scoped to these overlays so the
-   plain Settings/Filter heads (title only, no button) are unaffected. */
+/* Full-page overlays put the close button on the same row as the title,
+   pinned top-right: the Qobuz/Tidal/Pitchfork browsers, and the Settings list
+   since it fills the screen (v1.8.69). Scoped, so the Filter sheet's plain head
+   (title only, no button) is unaffected. */
 #qobuz-overlay .settings-head,
 #tidal-overlay .settings-head,
-#pitchfork-overlay .settings-head {
+#pitchfork-overlay .settings-head,
+#settings-overlay .settings-view[data-view="home"] .settings-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
 .settings-sub { font-size: 13px; color: var(--text-faint); }
@@ -2041,6 +2730,8 @@ input.vol-range::-moz-range-thumb {
 }
 .modal-artist-link:hover { opacity: .75; }
 .modal-subtitle-year { color: var(--text-dim); }
+
+/* Artist albums view */
 .count-text { font-size: 13px; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artist-section-header {
   grid-column: 1 / -1;
@@ -2106,6 +2797,9 @@ input.vol-range::-moz-range-thumb {
 .settings-info-toast.visible { opacity: 1; pointer-events: auto; }
 
 .settings-select-wrap { position: relative; flex: 0 0 auto; }
+/* UI Settings (v1.8.77): the four selects one width — the widest, "3 columns",
+   with room to spare — rather than each sized to its own longest option. */
+.settings-pane[data-pane="ui"] .settings-select { width: 9.5em; }
 .settings-select {
   appearance: none; -webkit-appearance: none;
   background: var(--bg-elev-2); color: var(--text);
@@ -2118,38 +2812,71 @@ input.vol-range::-moz-range-thumb {
 .settings-divider { height: 1px; background: var(--border); margin: 18px 0; }
 
 /* Settings home: category list. Each row pushes into a pane. */
-.settings-nav { display: flex; flex-direction: column; gap: 6px; }
-.settings-nav-item {
-  display: flex; align-items: center; gap: 14px; width: 100%;
-  padding: 12px 14px; border-radius: 14px;
-  border: 1px solid var(--border); background: var(--bg-elev-2);
-  color: var(--text); text-align: left; cursor: pointer;
-  transition: background .15s ease, border-color .15s ease;
+/* One column of flat rows, drawn the way the side menu draws its rows — an
+   icon, then the title — as Mandarin lays out its Settings (v1.8.69). They
+   were two columns of large icon-over-title cards (v1.8.27); what that change
+   decided about the CONTENT stands: the description lives in the panel it
+   describes (moved, not copied, so the two cannot drift), and there is no
+   caret, because nothing else on a row is tappable for it to point away from.
+   minmax(0,1fr) rather than 1fr: a grid track's default min-width is its
+   content, so a long title would push the column wider than the sheet and the
+   page would scroll sideways — the title ellipsizes instead. */
+.settings-nav {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 2px; padding: 0 4px;
 }
-.settings-nav-item:hover { background: var(--bg-elev); border-color: var(--text-faint); }
-.settings-nav-item:active { transform: scale(.995); }
+.settings-nav-item {
+  display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
+  gap: 14px; width: 100%;
+  padding: 13px 12px; border-radius: 10px;
+  border: 0; background: transparent;
+  color: var(--text); font-family: inherit; text-align: left; cursor: pointer;
+  transition: background .12s ease, transform .06s ease;
+}
+.settings-nav-item:hover { background: var(--bg-elev-2); }
+.settings-nav-item:active { transform: scale(.99); }
 .settings-nav-ico {
   flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
-  width: 38px; height: 38px; border-radius: 10px;
-  background: var(--bg-elev); color: var(--accent-text);
+  width: 22px; height: 22px;
+  color: var(--accent-text);
 }
-.settings-nav-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
-.settings-nav-title { font-size: 16px; font-weight: 600; color: var(--text); }
-.settings-nav-desc { font-size: 12.5px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.settings-nav-caret { flex: 0 0 auto; color: var(--text-faint); }
+.settings-nav-ico svg { width: 22px; height: 22px; }
+.settings-nav-txt {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: flex-start;
+  min-width: 0; overflow: hidden;
+}
+.settings-nav-title {
+  max-width: 100%;
+  font-size: 15px; font-weight: 500; color: var(--text); line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* The description the tile used to carry, now under the title of the panel it
+   belongs to. Indented past the back button so it starts under the <h2>. */
+.settings-pane-desc {
+  margin: 0 0 18px 38px;
+  font-size: 13.5px; line-height: 1.35; color: var(--text-faint);
+}
 
 /* Pane header: back chevron + title, mirroring a pushed page. */
-.settings-pane-head { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+.settings-pane-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .settings-pane-head h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--text); }
-.settings-back {
+/* The pane's Back and the list's close (v1.8.69) are one kind of button. */
+.settings-back,
+.settings-app-close {
   flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; margin-left: -6px;
   border: none; border-radius: 999px; background: none;
   color: var(--text-dim); cursor: pointer;
   transition: color .15s ease, background .15s ease;
 }
-.settings-back:hover { color: var(--text); background: var(--bg-elev-2); }
-.settings-back:active { transform: scale(.94); }
+.settings-back { width: 36px; height: 36px; margin-left: -6px; }
+.settings-app-close { width: 40px; height: 40px; margin-right: -6px; }
+.settings-back:hover,
+.settings-app-close:hover { color: var(--text); background: var(--bg-elev-2); }
+.settings-back:active,
+.settings-app-close:active { transform: scale(.94); }
 
 .settings-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 22px; }
 .settings-version { font-size: 13px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
@@ -2161,6 +2888,54 @@ input.vol-range::-moz-range-thumb {
   transition: color .15s ease, background .15s ease;
 }
 .settings-repo:hover { color: var(--text); background: var(--bg-elev); }
+
+/* Every Settings page opens full screen (v1.8.69), as Mandarin draws it. The
+   sheet used to rise only as far as its content, to a cap of 86vh, so each pane
+   opened at a different height; the list and every pane now fill the screen,
+   and a pane longer than the screen scrolls inside it as before. Settings
+   only: the Qobuz / TIDAL / Pitchfork browsers have full-page rules of their
+   own below, and the filter sheet stays a sheet.
+   height: 100% and not a viewport unit, because the overlay is a fixed inset:0
+   parent, which covers the safe areas that dvh leaves out (v1.7.62, pinned in
+   test/static/pwa-icons.test.js). The insets become padding instead: the sides
+   and foot here, the top on the pinned heads below. */
+#settings-overlay { align-items: stretch; }
+#settings-overlay > .settings-sheet {
+  max-width: none; max-height: none; height: 100%;
+  border-radius: 0; border-top: 0; box-shadow: none;
+  /* One ground (v1.7.87): a full-screen panel is the page colour, which is the
+     colour iOS fills the status bar with (theme-color). The sheet's lighter
+     tone here would be a seam under the clock. */
+  background: var(--bg);
+  padding: 0 calc(20px + env(safe-area-inset-right))
+           calc(16px + env(safe-area-inset-bottom))
+           calc(20px + env(safe-area-inset-left));
+}
+/* The heads stay put while a long page scrolls under them. The list's close
+   and a pane's Back are the only ways out on a phone — there is no Escape key,
+   and at full screen no backdrop to tap — so neither may scroll away. Opaque,
+   on the ground, and carrying the top inset, as .qobuz-pin does for the
+   browsers: a head that sticks at the very top still clears the status bar. */
+#settings-overlay .settings-view[data-view="home"] .settings-head,
+#settings-overlay .settings-pane-head {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--bg);
+  margin-bottom: 0;
+}
+#settings-overlay .settings-view[data-view="home"] .settings-head {
+  padding: calc(14px + env(safe-area-inset-top)) 0 14px;
+}
+#settings-overlay .settings-pane-head {
+  padding: calc(14px + env(safe-area-inset-top)) 0 6px;
+}
+/* The list fills the page, so its footer (version, GitHub) sits at the foot of
+   the screen rather than under the last row. On a short landscape screen the
+   rows outrun the page, and it scrolls instead. */
+#settings-overlay .settings-view[data-view="home"] {
+  min-height: 100%;
+  display: flex; flex-direction: column;
+}
+#settings-overlay .settings-view[data-view="home"] .settings-foot { margin-top: auto; padding-top: 14px; }
 .settings-update-btn {
   min-height: var(--ctl-h-sm); padding: 0 14px; border-radius: 8px; border: 1px solid var(--border);
   background: var(--bg-elev-2); color: var(--text-dim); font-size: 13px;
@@ -2186,6 +2961,22 @@ input.vol-range::-moz-range-thumb {
   color: var(--text); font-size: 13px; font-family: inherit;
 }
 .settings-token-input:focus { outline: none; border-color: var(--accent); }
+/* The box and its check (v1.8.74): the input fills the field and the ✓ / ✕
+   sits inside its right end, so "this key works" is said on the box itself. */
+.token-field { position: relative; flex: 1; min-width: 0; display: flex; }
+.token-field .settings-token-input { width: 100%; padding-right: 34px; }
+.settings-token-input.is-ok { border-color: var(--accent); }
+.settings-token-input.is-ok::placeholder { color: var(--accent-text); opacity: 1; }
+.settings-token-input.is-bad { border-color: var(--danger); }
+.token-check {
+  position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 20px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800; line-height: 1; pointer-events: none;
+}
+.token-check.hidden { display: none; }
+.token-check.is-ok  { background: var(--accent); color: var(--on-accent); }
+.token-check.is-bad { background: var(--danger); color: #fff; }
 .settings-token-status { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 /* Explanatory line under a settings row — the sentence that says why the
    control above it exists, rather than what it is called. */
@@ -2351,7 +3142,7 @@ input.vol-range::-moz-range-thumb {
 .playlist-back { align-self: flex-start; }
 .playlist-head { display: flex; flex-direction: column; gap: 4px; }
 .playlist-title {
-  margin: 0; font-size: 22px; font-weight: 700; color: var(--text);
+  margin: 0; font-size: calc(22px * var(--ui-title, 1)); font-weight: 700; color: var(--text);
   border-bottom: 1px solid var(--panel-hairline); padding-bottom: 8px;
 }
 .playlist-sub { font-size: 14px; color: var(--text-dim); }
@@ -2424,27 +3215,28 @@ input.vol-range::-moz-range-thumb {
 .np-vol-fixed svg { width: 16px; height: 16px; flex: 0 0 auto; }
 
 /* ------------------------------------------------------------------ */
-/*  Phone landscape block overlay                                      */
-/*  Phones in landscape have height ≤ ~500px; tablets/desktop do not. */
+/*  Phone landscape — no longer blocked (v1.8.40)                      */
+/*                                                                     */
+/*  There used to be a full-viewport `position: fixed` layer here that  */
+/*  appeared at (orientation: landscape) and (max-height: 500px) and    */
+/*  said "please rotate your device to portrait mode". It is gone, and  */
+/*  the app lays out in landscape like anything else.                   */
+/*                                                                     */
+/*  IT WAS BLOCKING A LAYOUT THAT WORKS. Measured at 844x390 before     */
+/*  removing it: the shell, the top bar, the wall and the transport all */
+/*  lay out and scroll, and the Now playing screen is the two-column    */
+/*  Roon layout v1.6.14 built for exactly this shape — art on the left, */
+/*  title, seek and transport on the right, all of it inside 390px.     */
+/*                                                                     */
+/*  AND IT WAS THE ONLY THING IN THE APP THAT ADDED OR REMOVED A        */
+/*  FULL-VIEWPORT FIXED LAYER ON ROTATION, which is what a report of    */
+/*  "coming back to portrait leaves the screen unresponsive" points at. */
+/*  That mechanism is NOT proven — it is an iOS-only symptom and this   */
+/*  project's harness is headless Chromium, which cannot observe iOS    */
+/*  window behaviour at all (see CLAUDE.md). So this removes the only   */
+/*  candidate rather than claiming the cause; if the freeze outlives it */
+/*  the next step is a different one, not a second guess at this one.   */
 /* ------------------------------------------------------------------ */
-.landscape-block {
-  display: none;
-  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 1000; /* inset longhands: old Safari */
-  background: var(--bg);
-  flex-direction: column; align-items: center; justify-content: center;
-  gap: 20px;
-  color: var(--text-dim);
-  font-size: 15px; line-height: 1.5;
-  text-align: center;
-  padding: 32px;
-  -webkit-user-select: none; user-select: none;
-}
-.landscape-block p { margin: 0; }
-.landscape-block svg { opacity: .55; }
-/* Show only when phone is in landscape (max-height catches phones, not tablets) */
-@media (orientation: landscape) and (max-height: 500px) {
-  .landscape-block { display: flex; }
-}
 
 /* Selected tile states — applies to both label tiles and regular album tiles */
 .album.is-selected .album-art-wrap,
@@ -2907,7 +3699,7 @@ input.vol-range::-moz-range-thumb {
   display: grid;
   grid-auto-flow: column;
   grid-template-rows: 1fr;          /* phone / portrait: single row */
-  grid-auto-columns: 150px;
+  grid-auto-columns: calc(150px * var(--ui-tile, 1));
   gap: 12px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch; scrollbar-width: none;
@@ -2950,7 +3742,7 @@ input.vol-range::-moz-range-thumb {
    and dark palettes come out right without a second rule set.
    -------------------------------------------------------------------------- */
 .pick-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.home-carousel .pick-card { width: 150px; cursor: pointer; }
+.home-carousel .pick-card { width: calc(150px * var(--ui-tile, 1)); cursor: pointer; }
 .pick-art {
   position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: 8px;
   overflow: hidden; background: var(--bg-elev); border: 1px solid var(--border);
@@ -2960,11 +3752,11 @@ input.vol-range::-moz-range-thumb {
    not mistaken for a bad adjacent recommendation. */
 .pick-meta { min-width: 0; }
 .pick-artist {
-  font-size: 13px; font-weight: 600; color: var(--text);
+  font-size: calc(13px * var(--ui-text, 1)); font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pick-album {
-  font-size: 12px; color: var(--text-dim);
+  font-size: calc(12px * var(--ui-text, 1)); color: var(--text-dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pick-reason {
@@ -3003,11 +3795,21 @@ input.vol-range::-moz-range-thumb {
 .pick-play { letter-spacing: .01em; }
 .pick-add:disabled, .pick-block:disabled { opacity: .6; cursor: default; }
 .pick-block { color: var(--text-dim); }
+/* Listen later (v1.8.67). The pick's "＋ Listen later" reads as on once the
+   pick is put aside; "Open in Qobuz" is an <a> wearing the same pill, so it
+   needs the box a <button> gets for free. */
+.pick-later.is-on { color: var(--text); border-color: var(--accent); }
+.pick-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  text-decoration: none; box-sizing: border-box;
+}
 /* On a phone the two buttons sit under the text rather than beside it — a
    96px art block plus two stacked pill buttons does not fit a 360px screen. */
 @media (max-width: 520px) {
   .pick-card-full { flex-wrap: wrap; }
-  .pick-actions { flex-direction: row; width: 100%; }
+  /* Three or four pills now (Add, Listen later, Not for me; Open in Qobuz):
+     they wrap to a second line rather than squeeze their labels off the end. */
+  .pick-actions { flex-direction: row; flex-wrap: wrap; width: 100%; }
   .pick-add, .pick-block { flex: 1 1 0; text-align: center; }
 }
 /* 12 genre buttons divide evenly into 2 / 3 / 4 / 6 columns, so every screen
@@ -3056,6 +3858,24 @@ input.vol-range::-moz-range-thumb {
 #topbar-search.hidden { display: none; }
 #topbar-search .search-row { margin: 0; }
 #topbar-search .search-row.open { animation: none; }   /* no reveal jump in the bar */
+
+/*  The Labels screen's tools (v1.8.77): order, then the glass in the corner,
+    the same resting state as Home's search. Open, the field takes the bar and
+    the "Labels" title steps aside for it.  */
+.labels-tools {
+  flex: 0 0 auto; min-width: 0;
+  display: flex; align-items: center; gap: 4px;
+  margin-left: auto;
+}
+.labels-tools.hidden { display: none; }
+.labels-tools.is-open { flex: 1 1 auto; }
+.labels-tools .search-row { margin: 0; }
+.labels-tools .search-row.open { animation: none; }
+.topbar.labels-searching .album-count { display: none; }
+.labels-order-txt {
+  font-size: 13px; font-weight: 700; letter-spacing: .04em;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 
 /* Album-of-the-day badge on the first "Not played" tile. */
 .home-aotd .album-art-wrap { position: relative; }
@@ -3110,9 +3930,8 @@ body.show-quality .album-quality { display: block; }
    it rather than sitting lost in a corner. */
 #modal-quality { left: 8px; bottom: 8px; padding: 3px 7px; font-size: 12px; border-radius: 6px; }
 
-/* Larger on the album detail artwork, which is far bigger than a tile. */
-#modal-source { width: 28px; height: 28px; top: 8px; right: 8px; border-radius: 8px; }
-#modal-source::before { -webkit-mask-size: 16px 16px; mask-size: 16px 16px; }
+/* (No source badge on the album view's artwork since v1.8.60 — its top-right
+   corner is under the Share button. index.html says why.) */
 /* TIDAL — its overlapping-diamond mark (evenodd leaves the overlap open,
    which is what gives the logo its character). */
 .album-source.tidal::before {
@@ -3420,24 +4239,43 @@ body.show-quality .album-quality { display: block; }
 
 /* Overflow menu — the three-dots-in-a-circle affordance, used wherever a screen
    has more secondary actions than belong on a row. The dropdown reuses
-   .sel-menu above so there is one dropdown look in the app. */
-.overflow-wrap { position: relative; flex: 0 0 auto; }
+   .sel-menu above so there is one dropdown look in the app.
+
+   It always sits in a row of .action-btn pills — Play now and Queue, on the
+   album view and all three playlist screens — and since v1.8.60 it is sized
+   and finished AS one of them: the row's height here, and the pills' own
+   finish, which it shares by selector with .action-btn (up with that rule,
+   including the album view's outlined variant) rather than by copy. It used
+   to be a transparent 40px box round a ring drawn inside the SVG, so what the
+   eye measured was the ring, about half the height of the pills beside it.
+   The circle is the button's own border now, so its box IS what is seen. The
+   height is the ROW's, not a copy of the pills' number: the row stretches the
+   wrap, the wrap (a flex box) stretches the button, and aspect-ratio keeps it
+   round — if the pills ever grow, this grows with them. */
+.overflow-wrap { position: relative; flex: 0 0 auto; display: flex; }
 .overflow-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; padding: 0;
-  border-radius: 999px; border: 0; background: transparent;
-  color: var(--text); cursor: pointer;
+  min-width: var(--ctl-h); min-height: var(--ctl-h); aspect-ratio: 1 / 1;
+  padding: 0;
 }
-.overflow-btn svg { width: 26px; height: 26px; }
-.overflow-btn:hover { filter: brightness(1.2); }
-.overflow-btn:active { transform: scale(.94); }
+.overflow-btn svg { width: 22px; height: 22px; }
 /* The menu is anchored to the button, and on a narrow screen the button is at
    the right-hand end of its row — so it opens leftwards to stay on screen. */
 .overflow-menu { top: calc(100% + 6px); right: 0; }
 
 /* Parked inside the album view. The modal paints over the top bar, so the menu
-   moves into the modal's own header band — to the LEFT of Share and ×, which
-   sit at right:12px and right:60px. z-index clears those (2). */
+   moves into the modal's own header band, to the LEFT of Share. z-index clears
+   the corner buttons (2).
+
+   Inline with the back chevron and Share, and for the same reason they are:
+   the panel covers the whole screen INCLUDING the status bar, so a top of
+   plain 12px puts this under it. There the system takes the taps and the
+   button does nothing — which is exactly how it behaved. Every pinned control
+   on this panel measures from the same inset.
+
+   The right offset clears Share rather than guessing at it: one control width
+   plus the gap, from the same variable Share's own width comes from. It was
+   108px, which was right for whatever Share measured the day it was written. */
 .sel-menu-wrap.in-modal {
   /* Inline with the back chevron and Share, and for the same reason they are:
      the panel covers the whole screen INCLUDING the status bar, so a top of
@@ -3474,12 +4312,12 @@ body.show-quality .album-quality { display: block; }
 .import-save { width: 100%; margin-top: 8px; }
 .sheet-row { display: block; width: 100%; margin-bottom: 8px; text-align: left; }
 
-/* An action that sits in a carousel of albums — currently only "New Dynamic
-   Playlist". Borrows .album wholesale so it sizes with the grid on every
-   screen; only the art square is different. Named for what it is rather than
-   for the one caller, which is how it came to be called "unheard-tile" and
-   then outlive the row it was built for. */
-.action-tile-art {
+/* An action that sits in a carousel of albums — "New Dynamic Playlist"
+   (.action-tile-*), and Random Album at the top of Home (.unheard-*, Rouen's
+   name for it). Both borrow .album wholesale so they size with the grid on
+   every screen; only the art square is different. */
+.action-tile-art,
+.unheard-art {
   display: flex; align-items: center; justify-content: center;
   background: var(--accent-soft);
   border: 1px solid var(--accent);
@@ -3488,6 +4326,20 @@ body.show-quality .album-quality { display: block; }
 .home-action-tile .album-title { color: var(--accent-text); }
 .home-action-tile:hover .action-tile-art { background: var(--accent); }
 .home-action-tile:hover .action-tile-glyph { color: var(--on-accent); }
+.unheard-glyph { font-size: 2.4rem; line-height: 1; color: var(--accent-text); }
+.home-unheard-tile .album-title { color: var(--accent-text); }
+.home-unheard-tile:hover .unheard-art { background: var(--accent); }
+.home-unheard-tile:hover .unheard-glyph { color: var(--on-accent); }
+/* The disc (Mandarin's): it turns slowly all the time, on its own centre in
+   the middle of the tile. Tapping it speeds THIS animation up rather than
+   swapping in a faster one — playUnheard ramps its playbackRate — so the disc
+   accelerates from where it is instead of jumping to another angle. */
+.unheard-disc { display: block; width: 52%; aspect-ratio: 1; color: var(--accent);
+  transform-origin: 50% 50%; animation: unheard-spin 8s linear infinite; }
+.unheard-disc svg { display: block; width: 100%; height: 100%; }
+.home-unheard-tile:hover .unheard-disc { color: var(--on-accent); }
+@media (prefers-reduced-motion: reduce) { .unheard-disc { animation: none; } }
+@keyframes unheard-spin { to { transform: rotate(360deg); } }
 /* Share sheet — the blob is the payload, so it gets the room and the monospace
    face; everything above it is the honest accounting of what went in. */
 .share-sum { font-weight: 600; margin: 4px 0 6px; }
@@ -3643,6 +4495,10 @@ body.show-quality .album-quality { display: block; }
 }
 .home-row-item:last-child { border-bottom: 0; }
 .home-row-item.is-dragging {
+  /* Above its neighbours while it follows the finger (a transform), and no
+     text selection starting under a long press. */
+  position: relative; z-index: 2;
+  -webkit-user-select: none; user-select: none;
   background: var(--bg-elev-2);
   border-radius: 8px;
   box-shadow: var(--shadow-card);
@@ -3732,3 +4588,336 @@ body.show-quality .album-quality { display: block; }
 /* Three columns at EVERY width. The album wall widens to five on a tablet,
    which turns a wall of names into a hedge — and three is what was asked for. */
 .album-grid.artists-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* ---------------------------------------------------------------------------
+   Discover — new records by the acts you play.
+
+   The rows are the share card's suggestion rows (same element, same builder,
+   same rules about where a tap goes), laid out for a full screen rather than a
+   sheet. One difference matters: in the sheet the ACT is the subject and its
+   name never truncates, while here the RECORD is the subject — so the album
+   takes a line of its own and is allowed to WRAP. A nowrap headline on a phone
+   either overflows the card or pushes the artist off the end, and a title you
+   cannot read is not a discovery.
+--------------------------------------------------------------------------- */
+.discover-list {
+  grid-column: 1 / -1;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.discover-list .share-similar-act {
+  align-items: center; flex-wrap: wrap; row-gap: 4px;
+  padding: 10px 12px; border-radius: 12px;
+}
+/* flex-basis 100% is what puts the record on its own line — the artist and the
+   date then share the second line with the tag pushed to its end. Only for a
+   row WITHOUT artwork; with a cover the two lines are a column beside it. */
+.discover-list .share-similar-act:not(.has-art) .share-similar-name {
+  flex: 1 1 100%; min-width: 0;
+  white-space: normal; font-size: 15px; line-height: 1.3;
+}
+.discover-list .share-similar-rec { font-size: 12.5px; }
+
+/* ── A row with a cover ────────────────────────────────────────────────
+   [ art ][ record / artist · when ][ tag ]
+
+   The art is a fixed square, the text column takes what is left, and the tag
+   keeps its place at the end. nowrap is CANCELLED on both lines here: the
+   record is the headline and it is the thing people are reading, and a title
+   like "Destroys Anaheim '76 (Live At Anaheim Stadium, Anaheim, California -
+   August 20, 1976)" is not rare enough to truncate on a phone. */
+.share-similar-act.has-art { flex-wrap: nowrap; gap: 12px; }
+.row-art {
+  flex: 0 0 56px; width: 56px; height: 56px;
+  border-radius: 4px; overflow: hidden;
+  /* The tile is what holds the row's shape when an image never arrives, so it
+     has a surface of its own rather than being a transparent gap. */
+  background: var(--bg-elev);
+  align-self: center;
+}
+.row-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.row-text {
+  display: flex; flex-direction: column; gap: 2px;
+  flex: 1 1 auto; min-width: 0;
+}
+.has-art .share-similar-name {
+  flex: 0 1 auto; white-space: normal;
+  font-size: 15px; line-height: 1.3;
+}
+.has-art .share-similar-rec { white-space: normal; }
+.discover-list .share-similar-act.has-art { align-items: center; padding: 10px; }
+
+/* ================================================================== */
+/*  The look (v1.8.74): Mandarin's, both themes.                       */
+/*  v1.8.68 ported Mandarin's COLOURS only. This is the rest of it:    */
+/*  the serif titles, the greeting, the small brass section capitals,  */
+/*  rounder covers, the genre cards and the mini player's kicker and   */
+/*  level meter. Rules keyed [data-palette] (any palette) are drawn    */
+/*  from tokens, so Brass light gets them in its own colours; rules    */
+/*  keyed [data-palette="graphite"] carry Graphite's literal colours.  */
+/*  The Now-playing seek bar is NOT given the meter: it is pinned to   */
+/*  the pixel by the waveform tests and the waveform draws under it.   */
+/*  Last in the file on purpose: several rules overridden here (the    */
+/*  album view's primary button, for one) share these selectors'       */
+/*  specificity and would otherwise win by coming later.               */
+/* ================================================================== */
+@font-face {
+  font-family: "Manrope"; src: url("/fonts/manrope.woff2") format("woff2");
+  font-weight: 200 800; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Young Serif"; src: url("/fonts/young-serif.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+[data-palette] {
+  --font-sans: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Young Serif", Georgia, "Times New Roman", serif;
+}
+/* Titles in the serif; the rest in Manrope. */
+[data-palette] .album-count,
+[data-palette] .home-greeting-text,
+[data-palette] .settings-view h2,
+[data-palette] .settings-head h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: .01em; }
+[data-palette] .menu-brand { font-family: var(--font-display); font-weight: 400; font-size: 20px; }
+
+/* ---- Home: the greeting, and section titles in small brass capitals -- */
+.home-greeting { display: block; margin: 6px 0 26px; }
+.home-greeting-date {
+  font-size: 12px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--accent-text);
+}
+.home-greeting-text { margin: 6px 0 0; font-size: 34px; line-height: 1.1; color: var(--text); font-family: var(--font-display); font-weight: 400; }
+[data-palette] .home-section { margin-bottom: 32px; }
+[data-palette] .home-section-title {
+  font-family: var(--font-sans); font-size: 12px; font-weight: 700; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--accent-text);
+  border-bottom: 0; padding-bottom: 0; margin-bottom: 14px;
+}
+[data-palette] .home-section-link::after { color: var(--text); font-size: 20px; }
+[data-palette] .home-section-link:hover { color: var(--accent-text); }
+[data-palette] .home-carousel { gap: 16px; padding-bottom: 18px; }
+
+/* Covers: rounder, flat on the ground with a hairline edge. */
+[data-palette] .album-art-wrap { border-radius: 12px; }
+[data-palette="graphite"] .album-art-wrap { box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+[data-palette] .album-meta { margin-top: 11px; }
+[data-palette] .album-title { font-weight: 600; }
+[data-palette] .pick-art { border-radius: 12px; }
+
+/* ---- The mini player: a small receiver ------------------------------ */
+.mt-kicker { display: none; }
+[data-palette] .mt-kicker:not(:empty) {
+  display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--accent-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 1px;
+}
+[data-palette] .mt-art { border-radius: 10px; }
+/* The pill: rounder, a brass rim, and room under the text for the meter. */
+[data-palette] .mini-transport {
+  border-radius: 22px; padding: 10px 12px 16px;
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+/* Progress as a level meter along the bottom: brass segments over faint ones
+   (Mandarin's), in place of the line along the pill's top edge. */
+[data-palette] .mt-progress {
+  inset: auto 16px 7px 16px; height: 4px; border-radius: 0; overflow: hidden;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 10px);
+          mask-image: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 10px);
+}
+[data-palette] .mt-progress-fill {
+  height: 100%; border-top: 0; border-radius: 0; background: var(--accent);
+}
+
+/* The top bar's rule, faint and warm. */
+[data-palette="graphite"] .topbar { border-bottom-color: rgba(201,164,92,.12); }
+/* Buttons with a disc — the top bar's menu, search and settings, the album
+   view's back, home and share: a brass disc, the glyph in the charcoal. */
+[data-palette] .topbar .icon-btn,
+[data-palette] .modal .modal-close,
+[data-palette] .modal .modal-home,
+[data-palette] .modal .modal-share {
+  border-radius: 50%; border-color: var(--accent); background: var(--accent); color: var(--on-accent);
+}
+[data-palette] .topbar .icon-btn:hover,
+[data-palette] .modal .modal-close:hover,
+[data-palette] .modal .modal-home:hover,
+[data-palette] .modal .modal-share:hover {
+  background: var(--accent); color: var(--on-accent); filter: brightness(1.08);
+}
+/* The search box, open: a brass edge, the glass in brass. */
+[data-palette] .search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+[data-palette] .search-ico { color: var(--accent); }
+/* The side menu's icons, and Settings' list of panes. */
+[data-palette] .menu-item svg,
+[data-palette] .settings-nav-ico { color: var(--accent); }
+/* Volume, on Now playing and above the mini player: the speaker, the number,
+   the 0 and 100, the − and + and the thumb, in the brass. */
+[data-palette] .vol-readout .vol-icon,
+[data-palette] .vol-readout .vol-value,
+[data-palette] .vol-scale { color: var(--accent); }
+[data-palette] .vol-step { color: var(--accent); border-color: var(--accent); }
+[data-palette] input.vol-range::-webkit-slider-thumb { background: var(--accent); }
+[data-palette] input.vol-range::-moz-range-thumb { background: var(--accent); }
+/* Glyphs on their own — the mini player's zone and volume, Now playing's
+   device and volume, previous and next — in the brass. A mode that is on
+   (shuffle, repeat, radio) in the lighter brass; one that is off stays dim. */
+[data-palette] .mt-btn,
+[data-palette] .np-mini-btn,
+[data-palette] .np-btn { color: var(--accent); }
+[data-palette] .np-mode-btn { color: var(--text-dim); }
+[data-palette] .np-mode-btn.is-on,
+[data-palette] .np-mini-btn.is-on { color: var(--accent-text); }
+[data-palette] .mt-btn:disabled,
+[data-palette] .np-btn:disabled,
+[data-palette] .np-mini-btn:disabled { color: var(--text-faint); }
+/* Play/pause, in the mini player and on Now playing: a brass disc, the glyph
+   in the charcoal. */
+[data-palette] .mt-playpause,
+[data-palette] .np-playpause {
+  background: var(--accent); color: var(--on-accent); border: 1px solid transparent;
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-palette] .mt-playpause:hover,
+  [data-palette] .np-playpause:hover { background: var(--accent); color: var(--on-accent); filter: brightness(1.1); }
+}
+/* NOT ported: MusicD Server gives its mini player a body of its own,
+   rgba(31,34,38,.97). Here every floating piece of chrome — the pill, both
+   volume sheets, the top bar — is ONE material (v1.7.86), and the suite holds
+   them to it; the palette's own --bg-veil and its brass --glass-edge already
+   give the pill Mandarin's colours without breaking that. */
+/* The album view: its text in white rather than the cream, which reads washed
+   out over the cover's own colours; Play now and Queue alike in the brass. */
+[data-theme="dark"][data-palette="graphite"] .modal { --text: #ffffff; }
+[data-theme="dark"][data-palette="graphite"] .modal .track-list li,
+[data-theme="dark"][data-palette="graphite"] .modal .t-title { color: #ffffff; }
+[data-palette] .modal-actions .action-btn {
+  background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 700;
+}
+[data-palette] .modal-actions .action-btn:hover { background: var(--accent); filter: brightness(1.08); }
+/* "Play something unheard": a dashed brass sleeve. */
+[data-palette] .unheard-art {
+  background: var(--bg-elev); border: 1px dashed rgba(201,164,92,.6); box-shadow: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-palette] .home-unheard-tile:hover .unheard-art { background: var(--accent-soft); }
+  [data-palette] .home-unheard-tile:hover .unheard-glyph { color: var(--accent-text); }
+}
+/* Browse by genre: six earthy tones in turn, each with a soft disc in its
+   corner, the name in the cream. The card is its own stacking context and the
+   disc sits at -1 inside it: above the card's fill, BELOW the name — a
+   positioned pseudo-element otherwise paints over in-flow text, and a long
+   genre name would run under a half-opaque disc. */
+[data-palette="graphite"] .home-genre-card {
+  position: relative; overflow: hidden; isolation: isolate;
+  background: #3b2a22; border-color: rgba(239,230,212,.10); color: #ecebe6;
+}
+[data-palette="graphite"] .home-genre-card::after {
+  content: ""; position: absolute; right: -18px; top: -18px; width: 64px; height: 64px;
+  border-radius: 50%; background: #c97b5a; opacity: .5; pointer-events: none; z-index: -1;
+}
+[data-palette="graphite"] .home-genre-card:nth-child(6n+2) { background: #26382f; }
+[data-palette="graphite"] .home-genre-card:nth-child(6n+2)::after { background: #7fa38a; }
+[data-palette="graphite"] .home-genre-card:nth-child(6n+3) { background: #3a3324; }
+[data-palette="graphite"] .home-genre-card:nth-child(6n+3)::after { background: #c9a45c; }
+[data-palette="graphite"] .home-genre-card:nth-child(6n+4) { background: #2a3140; }
+[data-palette="graphite"] .home-genre-card:nth-child(6n+4)::after { background: #7d8fb3; }
+[data-palette="graphite"] .home-genre-card:nth-child(6n+5) { background: #402a2c; }
+[data-palette="graphite"] .home-genre-card:nth-child(6n+5)::after { background: #b87a86; }
+[data-palette="graphite"] .home-genre-card:nth-child(6n) { background: #2f3a27; }
+[data-palette="graphite"] .home-genre-card:nth-child(6n)::after { background: #9fae6b; }
+[data-palette="graphite"] .home-genre-card:hover { border-color: rgba(201,164,92,.5); filter: brightness(1.08); }
+
+/* ================================================================== */
+/*  v1.8.75 — album view and Now playing chrome                        */
+/* ================================================================== */
+/* The share card's × is a brass disc like every other corner button. */
+[data-palette] .share-close {
+  border-radius: 50%; border-color: var(--accent); background: var(--accent); color: var(--on-accent);
+}
+[data-palette] .share-close:hover { background: var(--accent); color: var(--on-accent); filter: brightness(1.08); }
+
+/* The album view's corner button: a back chevron while it fills the screen,
+   an × from 720px up, where it is a card over the page. */
+.modal-close .ico-close { display: none; }
+@media (min-width: 720px) {
+  .modal:not(.np-mode) .modal-close .ico-back  { display: none; }
+  .modal:not(.np-mode) .modal-close .ico-close { display: block; }
+  /* THE ARTWORK STARTS BELOW THE CORNER BUTTONS. They sit 12px in and are
+     --ctl-h (40px) tall, so 64px of top padding keeps 12px clear under them;
+     at 28px the × sat on the cover's corner. The prev/next chevrons are
+     positioned inside .modal-art at 50%, so they move down with it and stay
+     on the cover's centre line. Same specificity as the two-column block it
+     overrides (three classes), and later in the file. */
+  .modal:not(.np-mode) .modal-body {
+    padding-top: calc(24px + var(--ctl-h) + env(safe-area-inset-top));
+  }
+}
+
+/* Now playing, reduced (large screens): the size button beside Back, and the
+   card the screen becomes — the album view's width, a fixed height so the art
+   still sizes from the space left, draggable by its top strip (app.js). */
+.modal-np-size .ico-grow { display: none; }
+.modal.np-reduced .modal-np-size .ico-shrink { display: none; }
+.modal.np-reduced .modal-np-size .ico-grow { display: block; }
+.modal-np-size { display: none; }
+@media (min-width: 1200px) and (min-height: 700px) {
+  .modal.np-mode .modal-np-size {
+    display: inline-flex;
+    position: absolute; top: calc(12px + env(safe-area-inset-top));
+    left: calc(20px + var(--ctl-h)); z-index: 2;
+  }
+  .modal.np-mode.np-reduced { padding: 24px; align-items: center; justify-content: center; }
+  .modal.np-mode.np-reduced .modal-panel {
+    /* No entrance animation on the reduced card: it animates transform, so
+       every time it restarted (when a drag ended and .is-dragging came off)
+       the card faded in back at the centre for .18s and then jumped to where
+       it had been dropped. */
+    animation: none;
+    width: min(960px, 100%);
+    height: min(760px, calc(100vh - 48px)); max-height: calc(100vh - 48px);
+    border-radius: 12px; border: 1px solid var(--border);
+  }
+  /* A grip on the top strip, so it reads as something to hold. */
+  .modal.np-mode.np-reduced .modal-panel::after {
+    content: ""; position: absolute; top: 6px; left: 50%; z-index: 3;
+    width: 44px; height: 4px; border-radius: 2px;
+    background: var(--border); transform: translateX(-50%); pointer-events: none;
+  }
+  .modal.np-mode.np-reduced .modal-panel.is-dragging {
+    cursor: grabbing; user-select: none; -webkit-user-select: none;
+  }
+}
+[data-palette] .modal .modal-np-size {
+  border-radius: 50%; border-color: var(--accent); background: var(--accent); color: var(--on-accent);
+}
+[data-palette] .modal .modal-np-size:hover { background: var(--accent); color: var(--on-accent); filter: brightness(1.08); }
+
+/* Now playing's corner button: ‹ on phones and tablets (going back), × on a
+   desktop — a large screen with a mouse — where it closes the screen. A
+   tablet in landscape is as wide as a laptop, so width alone cannot tell
+   them apart; the pointer can (app.js reads the same query for the label). */
+.modal-home .ico-close { display: none; }
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .modal.np-mode .modal-home .ico-back  { display: none; }
+  .modal.np-mode .modal-home .ico-close { display: block; }
+}
+
+/* Random Album and Album of the day, under the greeting with no heading
+   (v1.8.75). Laid out by .home-carousel like every row, one row always. */
+.home-today { margin-bottom: 30px; }
+
+/* No label matches the Labels search (v1.8.77). */
+.labels-empty {
+  grid-column: 1 / -1;
+  margin: 24px 0; text-align: center;
+  font-size: 14px; color: var(--text-dim);
+}
+
+/* The Labels order button (v1.8.77). Last in the file on purpose: the phone
+   rules that pin .topbar .icon-btn to a square and the palette rule that
+   rounds it to a disc are both as specific as this, so source order decides —
+   and a text label needs a pill, not a squeezed or stretched circle. */
+.topbar .icon-btn.labels-order { width: auto; min-width: 44px; padding: 0 10px; border-radius: 999px; }
+
+/* Smart Picks (v1.8.77): the cover and details open the album or the service,
+   and say which before they are tapped. */
+.pick-card-full .pick-open { cursor: pointer; }
+.pick-opens { font-size: 12px; color: var(--accent-text); margin-top: 2px; }

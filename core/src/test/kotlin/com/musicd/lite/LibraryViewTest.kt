@@ -138,6 +138,46 @@ class LibraryViewTest {
         assertEquals(first!!.title, view.albumOfTheDay()!!.title)
     }
 
+    /**
+     * The day's album is chosen once and kept by identity (Rouen v1.8.74).
+     * Worked out as hash(date) % library size, as it used to be, a scan that
+     * added one album mid-day put a different album there — and one already
+     * played came back as a "new" pick.
+     */
+    @Test
+    fun albumOfTheDaySurvivesAnAlbumBeingAddedMidDay() {
+        val names = (1..40).map { "Album $it" to "Artist $it" }.toTypedArray()
+        build(*names)
+        val first = view.albumOfTheDay()!!
+        for (i in 41..47) core.addAlbum("Album $i", "Artist $i")
+        index.build(core.tree)
+        assertEquals(first.key, view.albumOfTheDay()!!.key)
+    }
+
+    @Test
+    fun albumOfTheDayIsChosenAgainOnlyIfItLeavesTheLibrary() {
+        build("Aja" to "Steely Dan", "Blue" to "Joni Mitchell", "Kid A" to "Radiohead")
+        val first = view.albumOfTheDay()!!
+        // The kept album is gone: a new one is chosen, from what is there.
+        core.albums.removeIf { it.title == first.title }
+        index.build(core.tree)
+        val next = view.albumOfTheDay()!!
+        assertNotEquals(first.key, next.key)
+        assertEquals(next.key, view.albumOfTheDay()!!.key)
+    }
+
+    @Test
+    fun albumOfTheDayTurnsAtOneMinutePastMidnight() {
+        val day = java.time.LocalDate.of(2026, 10, 5)
+        val zone = java.time.ZoneId.systemDefault()
+        fun at(h: Int, m: Int) = day.atTime(h, m).atZone(zone).toInstant().toEpochMilli()
+        assertEquals("2026-10-04", view.aotdDay(at(0, 0)))
+        assertEquals("2026-10-05", view.aotdDay(at(0, 1)))
+        // A play in the minute after midnight still counts against yesterday's.
+        assertEquals(day.minusDays(1).atTime(0, 1).atZone(zone).toInstant().toEpochMilli(),
+                     view.aotdDayStart(at(0, 0)))
+    }
+
     @Test
     fun albumOfTheDayNoticesItWasPlayed() {
         build("Aja" to "Steely Dan")

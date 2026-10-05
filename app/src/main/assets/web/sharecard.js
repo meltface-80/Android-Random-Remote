@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Lewis Menzies (Music Duck / MusicD)
  * Released under the MIT License. See the LICENSE file for details.
  *
- * Layout (1200 × 600, fixed) — v1.7.89, the app's own material:
+ * Layout (1200 wide, height grows to fit):
  *
  *   +--------------------------------------------------------+
  *   |  the cover again, blown up and softened, as the ground  |
@@ -12,18 +12,25 @@
  *   |    | +--------+   RELEASED 2009                     |  |
  *   |    | | cover  |   Album Title                       |  |
  *   |    | | 424px  |   by Artist                         |  |
- *   |    | +--------+   PITCHFORK  8.7 [BEST NEW MUSIC]   |  |
- *   |    | ----------------------------------------------- |  |
- *   |    | the album's blurb, full width, every word of it  |  |
- *   |    | Wikipedia                            [MusicD]   |  |
+ *   |    | +--------+                                     |  |
+ *   |    | ---------------------------------------------- |  |
+ *   |    | The description, across the WHOLE pane rather  |  |
+ *   |    | than squeezed into the column beside the art…  |  |
+ *   |    |                                                |  |
+ *   |    | Wikipedia                                      |  |
  *   |    +------------------------------------------------+  |
  *   +--------------------------------------------------------+
  *
- *  THE CARD IS 600 TALL UNTIL IT ISN'T. Everything above the rule is fixed
- *  1200x600 and unchanged. A blurb makes the card GROW downward instead of
- *  being squeezed or cut: the text is never ellipsized, because a share card
- *  that ends mid-sentence is worse than a tall one. 600 is the floor, not the
- *  height.
+ *  THE DESCRIPTION SITS BELOW THE ART, NOT BESIDE IT. In the column beside a
+ *  424px cover it had ~600px to wrap in and whatever vertical room the title
+ *  and artist had not taken, which on a four-line title was none — so the text
+ *  the server had gone and fetched was routinely dropped. Underneath it has the
+ *  full pane width, and the CARD GROWS to hold it, so the constraint is the
+ *  prose rather than the frame.
+ *
+ *  The height is therefore computed, not fixed: everything is measured first,
+ *  then the canvas is sized, then it is drawn. A card with no description comes
+ *  out at the 600px it always was.
  *
  *  The card used to be a hard vertical split: art on the left half, a flat
  *  #0e1012 slab on the right. It now reads the way the app does — the artwork
@@ -43,80 +50,84 @@
 
 const ShareCard = (() => {
   const CARD_W    = 1200;
-  const CARD_H    = 600;
+  // The floor, not the height. A card with nothing but art, title and artist
+  // comes out at exactly this — what the card was before the description moved
+  // below the cover — and anything with prose grows past it.
+  const MIN_CARD_H = 600;
+  /*
+   * And the ceiling.
+   *
+   * It is not the thing that decides how much review fits — DESC_MAX is — so
+   * it is set high enough to be out of the way of the WORST case rather than
+   * tuned: a four-line title and a four-line artist make the header 536px
+   * instead of the cover's 424, and a full-length description under that comes
+   * to about 1660. This is the backstop for an input nothing else bounded, not
+   * a budget the layout is expected to spend up to.
+   */
+  const MAX_CARD_H = 1800;
   const INSET     = 48;    // gap from the card edge to the glass pane
   const PANE_X    = INSET;
   const PANE_Y    = INSET;
   const PANE_W    = CARD_W - INSET * 2;
-  const PANE_H    = CARD_H - INSET * 2;
   const PANE_R    = 28;    // pane corner radius
   const PANE_PAD  = 40;    // gap from the pane edge to its contents
   const ART_W     = 424;   // the sharp cover, inside the pane
   const ART_H     = 424;
   const ART_R     = 18;
   const ART_X     = PANE_X + PANE_PAD;
-  const ART_Y     = PANE_Y + Math.round((PANE_H - ART_H) / 2);
   const DIVIDER   = 44;    // gap between the cover and the text column
   const TEXT_X    = ART_X + ART_W + DIVIDER;
   const TEXT_PAD_R = 44;
   const TEXT_W    = PANE_X + PANE_W - TEXT_PAD_R - TEXT_X;
+  // The description's column: the pane's FULL content width, which is roughly
+  // double what it had beside the cover.
+  const CONTENT_W = PANE_W - PANE_PAD * 2;
   const WORDMARK_W = 110;
   const WORDMARK_PAD = 34;
 
   // The dark the card is built on, and the pane drawn over the softened cover.
+  // The score badge sits INSIDE the cover's top-right corner, so the surface
+  // under it is the album art itself — unknown, and possibly white. It carries
+  // its own opaque ground for exactly that reason: everything else on this card
+  // is solved against a worst-case sleeve, and a badge over the art cannot be.
+  const SCORE_PAD   = 14;   // inset from the cover's edges
+  const SCORE_H     = 54;
+  const SCORE_R     = 12;
+  const SCORE_SIZE  = 30;
+  const BNM_H       = 26;
+  const BNM_SIZE    = 15;
+  // Bigger than it was, because it is no longer sharing a narrow column with a
+  // 56px title — at full pane width 22px read as small print.
+  const DESC_SIZE   = 26;
+  const DESC_LH     = 38;
+  /*
+   * How many lines of review the card will carry, and the number that actually
+   * decides it — MAX_CARD_H is only a backstop.
+   *
+   * IT IS SET FROM WHAT app.js CAN SEND. That end trims the description to ten
+   * sentences and hard-caps it at 1400 characters, so 1400 is the longest text
+   * that can ever reach here. At 26px Manrope in a 1024px column that is close
+   * to 20 lines once wrapping raggedness is counted, and 22 leaves room for a
+   * wider-than-average run of words.
+   *
+   * The two numbers are a pair: raise the trim at the app.js end without
+   * raising this and long reviews go back to being ellipsized, which is why
+   * test/unit/sharecard-layout.test.js asserts the longest text app.js can
+   * produce comes through whole.
+   */
+  const DESC_MAX    = 22;
+  const RULE_GAP    = 30;   // above and below the hairline
+  const RULE_COLOUR = 'rgba(255,255,255,.16)';
+  // Whose words these are. `source` says where the LINK goes and this says who
+  // WROTE what is on screen — they are different facts, and index.js keeps them
+  // in different fields for that reason (description_source).
+  const SRC_SIZE    = 20;
+  const SRC_H       = SRC_SIZE + 4;
+  const SRC_GAP     = 26;
+
   const GROUND    = '#12151a';
   const PANE_FILL = 'rgba(18,21,26,.5)';
   const PANE_EDGE = 'rgba(255,255,255,.14)';
-
-  // The app's own review language, lifted from style.css so the card and the
-  // screens say the same thing the same way: .pf-score is a dark pill with
-  // white tabular numerals, and Best New Music is this gold on near-black
-  // wherever it appears.
-  const BNM_BG = '#d4a017';
-  const BNM_FG = '#1a1000';
-
-  // Solved against the same worst case as the RELEASED line below: a white
-  // sleeve under the scrim and the pane flattens to rgb(83,85,88). White
-  // measures 7.48:1 there and #c2cad3 4.52:1 — the body text and the credit
-  // both clear AA at the sizes they are drawn.
-  //
-  // The blurb is white, and its size and leading started as Roon's, measured
-  // off its own share card and scaled: Roon draws a 512-wide card with a 17px
-  // line pitch and a 12px glyph band in pure white, which at 1200 is a 39.8px
-  // pitch and a 28px band. That was set at 28/40 and then nudged one notch to
-  // 30/43 — 7% — because side by side in a forum post it still read a shade
-  // small. The leading ratio is unchanged at 1.43, so this is a size change
-  // and not a spacing one. Weight, not colour, keeps the blurb under the
-  // title: 30px regular against 56px bold.
-  const BIO_FG    = '#ffffff';
-  const CREDIT_FG = '#c2cad3';
-  const LABEL_FG  = '#9aa2ab';
-
-  const BIO_SIZE   = 30;
-  const BIO_LH     = 43;
-  const BIO_RULE_GAP = 30;   // pane content bottom -> the hairline
-  const BIO_TEXT_GAP = 26;   // hairline -> first line of blurb
-  const CREDIT_GAP = 16;     // last line of blurb -> the credit
-  const CREDIT_H   = 24;
-
-  const BNM_CHIP = { font: '800 18px "Manrope", sans-serif', bg: BNM_BG, fg: BNM_FG,
-                     padX: 12, h: 32, r: 8 };
-
-  function fmtScore(n) { return (n % 1 === 0) ? n.toFixed(1) : String(n); }
-
-  /** A filled pill of text. Returns the width it took. */
-  function pill(ctx, x, y, text, o) {
-    ctx.font = o.font;
-    const w = Math.round(ctx.measureText(text).width + o.padX * 2);
-    roundRectPath(ctx, x, y, w, o.h, o.r);
-    ctx.fillStyle = o.bg;
-    ctx.fill();
-    ctx.fillStyle = o.fg;
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, x + o.padX, y + o.h / 2 + 1);
-    ctx.textBaseline = 'top';
-    return w;
-  }
 
   // A rounded rectangle path. roundRect() is still missing in enough shipping
   // browsers to be worth not depending on.
@@ -205,54 +216,133 @@ const ShareCard = (() => {
     return { lines: r.lines, size, lh: Math.round(size * lhRatio) };
   }
 
+  const META_SIZE  = 26;
+  const META_H     = META_SIZE + 4;
+  const META_GAP   = 24;   // gap below the year line
+  const BLOCK_GAP  = 18;   // gap between title and artist
+
+  /*
+   * Everything the card needs to know before it can be sized.
+   *
+   * Separate from render() because the height is a RESULT of it: the canvas
+   * cannot be sized until the description has been wrapped, and the wrapping
+   * needs a context with fonts loaded. Pure apart from reading `ctx` font
+   * metrics — it draws nothing.
+   */
+  function measure(ctx, data) {
+    const releaseStr = formatReleaseDate(data.releaseRaw);
+    // The label rides on the release line rather than earning a line of its
+    // own: it was already being fetched for the card and then dropped on the
+    // floor, and a second 30px row costs more than the fact is worth.
+    const metaParts = [];
+    if (releaseStr) metaParts.push('Released ' + releaseStr);
+    if (data.label) metaParts.push(String(data.label));
+    const metaText = metaParts.length ? metaParts.join('  \u00b7  ') : null;
+
+    // Title and artist are adaptive: up to 4 lines each, stepping the font size
+    // down until the text fits (56→27px title, 37→21px artist); only when even
+    // the smallest size overflows is the last line ellipsized.
+    const title  = fitText(ctx, data.title || '', TEXT_W, 4, 700, [56, 48, 42, 36, 31, 27], 68 / 56);
+    const artist = fitText(ctx, 'by ' + (data.artist || ''), TEXT_W, 4, 400, [37, 32, 28, 24, 21], 48 / 37);
+
+    const headerTextH = (metaText ? META_H + META_GAP : 0)
+                      + title.lines.length * title.lh
+                      + BLOCK_GAP
+                      + artist.lines.length * artist.lh;
+    // The header is as tall as the taller of its two columns. A four-line title
+    // beside a 424px cover now makes the CARD taller instead of evicting the
+    // description, which is the whole point of moving it below.
+    const headerH = Math.max(ART_H, headerTextH);
+
+    const srcText = data.reviewSource ? String(data.reviewSource).trim() : '';
+    const srcH    = srcText ? SRC_GAP + SRC_H : 0;
+
+    /*
+     * The description, into the room MAX_CARD_H allows.
+     *
+     * Two lines is the floor: a single orphaned line that stops mid-sentence
+     * reads as a rendering fault rather than as a summary, so below that the
+     * block is dropped and the card goes back to being art, title and artist.
+     *
+     * NOTE ON WHAT CAN APPEAR HERE: index.js emits no Pitchfork prose (only
+     * their score, the Best New Music flag and a link — see fetchAlbumBios),
+     * so this text is Qobuz's or Wikipedia's, and score and description are in
+     * practice mutually exclusive.
+     */
+    const roomForDesc = MAX_CARD_H - INSET * 2 - PANE_PAD * 2
+                      - headerH - (RULE_GAP * 2 + 1) - srcH;
+    const maxDesc = Math.min(DESC_MAX, Math.floor(roomForDesc / DESC_LH));
+    const desc = (data.review && maxDesc >= 2)
+      ? fitText(ctx, String(data.review), CONTENT_W, maxDesc, 400, [DESC_SIZE], DESC_LH / DESC_SIZE)
+      : null;
+
+    const descBlockH = desc
+      ? RULE_GAP + 1 + RULE_GAP + desc.lines.length * desc.lh + (srcText ? srcH : 0)
+      : 0;
+    const contentH = headerH + descBlockH;
+    const cardH = Math.max(MIN_CARD_H,
+                           Math.min(MAX_CARD_H, contentH + PANE_PAD * 2 + INSET * 2));
+
+    return { metaText, title, artist, desc,
+             // The source is only drawn with the text it attributes.
+             srcText: desc ? srcText : '',
+             headerTextH, headerH, contentH, cardH };
+  }
+
   async function render(data) {
     const cover = await loadImage(data.coverUrl).catch(() => null);
     const wm    = await loadImage(data.wordmarkUrl).catch(() => null);
 
+    // MEASURE FIRST, THEN SIZE, THEN DRAW. The height depends on how much
+    // description there is, and measuring needs a context with fonts — so the
+    // canvas starts at the minimum, every block is measured, and only then is
+    // its height set. Assigning canvas.height RESETS the context (it is a
+    // fresh bitmap), which is why textBaseline is set again afterwards and why
+    // nothing may be drawn before this point.
     const canvas = document.createElement('canvas');
-
-    // Measured before the canvas is sized, because the blurb is what decides
-    // how tall the card is. wrapText is given a line limit no real extract can
-    // reach: every word is kept, and the card grows to hold them.
-    const measure = document.createElement('canvas').getContext('2d');
-    measure.font = `400 ${BIO_SIZE}px "Manrope", sans-serif`;
-    const bioText = String(data.bio || '').replace(/\s+/g, ' ').trim();
-    const bioLines = bioText
-      ? wrapText(measure, bioText, PANE_W - PANE_PAD * 2, 999).lines : [];
-    const grow = bioLines.length
-      ? BIO_RULE_GAP + BIO_TEXT_GAP + bioLines.length * BIO_LH + CREDIT_GAP + CREDIT_H
-      : 0;
-
-    const cardH = CARD_H + grow;
-    const paneH = PANE_H + grow;
-
     canvas.width  = CARD_W;
-    canvas.height = cardH;
+    canvas.height = MIN_CARD_H;
     const ctx = canvas.getContext('2d');
     ctx.textBaseline = 'top';
     ctx.textAlign    = 'left';
 
+    const layout = measure(ctx, data);
+    const CARD_H = layout.cardH;
+    const PANE_H = CARD_H - INSET * 2;
+    canvas.height = CARD_H;
+    ctx.textBaseline = 'top';
+    ctx.textAlign    = 'left';
+
+    // Where the block sits in the pane. With slack (a short card held up to the
+    // minimum) it is centred; once the content fills the pane it is padded from
+    // the top and the card has already grown to hold it.
+    const contentY = PANE_Y + Math.max(PANE_PAD, Math.round((PANE_H - layout.contentH) / 2));
+    // The cover and the title column are each centred against the taller of the
+    // two, so a one-line title does not float at the top of a 424px cover.
+    const ART_Y   = contentY + Math.round((layout.headerH - ART_H) / 2);
+    const textY0  = contentY + Math.round((layout.headerH - layout.headerTextH) / 2);
+
     // --- Ground: the cover again, softened, filling the card ---
     ctx.fillStyle = GROUND;
-    ctx.fillRect(0, 0, CARD_W, cardH);
+    ctx.fillRect(0, 0, CARD_W, CARD_H);
     if (cover) {
-      drawSoftened(ctx, cover, CARD_W, cardH);
+      drawSoftened(ctx, cover, CARD_W, CARD_H);
       // Two scrims over it, doing different jobs. The flat one sets the floor
       // for how light the ground can get behind the pane — a white sleeve would
       // otherwise leave the pane sitting on near-white. The gradient darkens the
       // bottom, where the wordmark sits.
       ctx.fillStyle = 'rgba(12,14,18,.44)';
-      ctx.fillRect(0, 0, CARD_W, cardH);
-      const vign = ctx.createLinearGradient(0, cardH * 0.45, 0, cardH);
+      ctx.fillRect(0, 0, CARD_W, CARD_H);
+      const vign = ctx.createLinearGradient(0, CARD_H * 0.45, 0, CARD_H);
       vign.addColorStop(0, 'rgba(8,10,13,0)');
       vign.addColorStop(1, 'rgba(8,10,13,.55)');
       ctx.fillStyle = vign;
-      ctx.fillRect(0, 0, CARD_W, cardH);
+      ctx.fillRect(0, 0, CARD_W, CARD_H);
     }
 
     // --- The pane ---
     ctx.save();
-    roundRectPath(ctx, PANE_X, PANE_Y, PANE_W, paneH, PANE_R);
+    roundRectPath(ctx, PANE_X, PANE_Y, PANE_W, PANE_H, PANE_R);
     ctx.fillStyle = PANE_FILL;
     ctx.fill();
     ctx.lineWidth = 1;
@@ -280,41 +370,9 @@ const ShareCard = (() => {
     ctx.stroke();
     ctx.restore();
 
-    // --- Measure text blocks ---
-    const releaseStr = formatReleaseDate(data.releaseRaw);
-    const metaText   = releaseStr ? 'Released ' + releaseStr : null;
-    const META_SIZE  = 26;
-    const META_H     = META_SIZE + 4;
-    const META_GAP   = 24;   // gap below the year line
-
-    // Title and artist are adaptive: up to 4 lines each, stepping the font size
-    // down until the text fits (56→36px title, 37→24px artist); only when even
-    // the smallest size overflows is the last line ellipsized. Worst case
-    // (meta + 4 title lines @36 + 4 artist lines @24 ≈ 426px) fits the 600px card.
-    const title  = fitText(ctx, data.title || '', TEXT_W, 4, 700, [56, 48, 42, 36, 31, 27], 68 / 56);
-    const titleH = title.lines.length * title.lh;
-
-    const artist  = fitText(ctx, 'by ' + (data.artist || ''), TEXT_W, 4, 400, [37, 32, 28, 24, 21], 48 / 37);
-    const artistH = artist.lines.length * artist.lh;
-
-    const BLOCK_GAP  = 18;   // gap between title and artist
-
-    // The Pitchfork score, when the record has one. A number and a flag only:
-    // the written review is never carried, here or anywhere else in this app.
-    const hasScore  = typeof data.score === 'number' && !isNaN(data.score);
-    const bnm       = !!data.isBestNewMusic;
-    const showScore = hasScore || bnm;
-    const SCORE_GAP = 26;
-    const SCORE_H   = 90;
-
-    // Total height of the text block
-    const blockH = (metaText ? META_H + META_GAP : 0) + titleH + BLOCK_GAP + artistH +
-                   (showScore ? SCORE_GAP + SCORE_H : 0);
-
-    // Vertically centre the block in the pane, with a slight upward nudge
-    // (optical centre sits a little above mathematical centre).
-    const startY = PANE_Y + Math.round((PANE_H - blockH) / 2) - 10;
-    let ry = Math.max(PANE_Y + PANE_PAD, startY);
+    // --- The text, from the measurements taken before the canvas was sized ---
+    const { metaText, title, artist, desc, srcText } = layout;
+    let ry = textY0;
 
     // --- Year / release date ---
     if (metaText) {
@@ -333,62 +391,100 @@ const ShareCard = (() => {
     ctx.fillStyle = '#ffffff';
     ctx.font = `700 ${title.size}px "Manrope", sans-serif`;
     title.lines.forEach((line, i) => ctx.fillText(line, TEXT_X, ry + i * title.lh));
-    ry += titleH + BLOCK_GAP;
+    ry += title.lines.length * title.lh + BLOCK_GAP;
 
     // --- Artist ---
     ctx.fillStyle = '#cdd3d9';
     ctx.font = `400 ${artist.size}px "Manrope", sans-serif`;
     artist.lines.forEach((line, i) => ctx.fillText(line, TEXT_X, ry + i * artist.lh));
-    ry += artistH;
 
-    // --- The score, under the artist ---
-    if (showScore) {
-      const sy = ry + SCORE_GAP;
-      // A quiet label first, in the same voice as the RELEASED line, so the
-      // number is attributed without a logo and without shouting.
-      ctx.font = '700 18px "Manrope", sans-serif';
-      ctx.fillStyle = LABEL_FG;
-      ctx.fillText('PITCHFORK', TEXT_X, sy);
+    // --- The hairline, and the description under it ---
+    //
+    // Full pane width, starting under the cover rather than beside it. The rule
+    // is what makes the two halves read as one card instead of as a caption
+    // that happens to be below a picture.
+    if (desc) {
+      const ruleY = contentY + layout.headerH + RULE_GAP;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(ART_X, ruleY + 0.5);
+      ctx.lineTo(ART_X + CONTENT_W, ruleY + 0.5);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = RULE_COLOUR;
+      ctx.stroke();
+      ctx.restore();
 
-      const ny = sy + 26;
-      let sx = TEXT_X;
-      if (hasScore) {
-        const txt = fmtScore(data.score);
-        ctx.font = '800 58px "Manrope", sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(txt, sx, ny);
-        const nw = ctx.measureText(txt).width;
-        ctx.font = '700 20px "Manrope", sans-serif';
-        ctx.fillStyle = LABEL_FG;
-        ctx.fillText('/10', sx + nw + 9, ny + 34);
-        sx += nw + 9 + ctx.measureText('/10').width + 24;
+      // --- Description ---
+      let dy = ruleY + 1 + RULE_GAP;
+      ctx.fillStyle = '#c2cad3';
+      ctx.font = `400 ${desc.size}px "Manrope", sans-serif`;
+      desc.lines.forEach((line, i) => ctx.fillText(line, ART_X, dy + i * desc.lh));
+      dy += desc.lines.length * desc.lh;
+
+      // --- Source ---
+      //
+      // Whose prose this is, which is not the same question as where the link
+      // goes. Bottom left, under the text it attributes.
+      if (srcText) {
+        // SIZE carries the hierarchy here, not opacity. #c2cad3 measures 4.52:1
+        // on the worst pane this card can present (a white sleeve, softened,
+        // scrimmed, under the glass) — twenty hundredths over the floor, so
+        // there is no headroom to fade it: at 0.72 alpha it drops to 3.16 and
+        // the caption becomes unreadable on exactly the covers nobody checks.
+        // A treatment defined by REMOVING contrast has no floor; 20px against
+        // the description's 26px is a difference that costs nothing.
+        ctx.fillStyle = '#c2cad3';
+        ctx.font = `400 ${SRC_SIZE}px "Manrope", sans-serif`;
+        ctx.fillText(srcText, ART_X, dy + SRC_GAP);
       }
-      if (bnm) pill(ctx, sx, ny + Math.round((58 - BNM_CHIP.h) / 2), 'BEST NEW MUSIC', BNM_CHIP);
     }
 
-    // --- The blurb, full width inside the pane, under everything above ---
-    if (bioLines.length) {
-      const ruleY = PANE_Y + PANE_H - PANE_PAD + BIO_RULE_GAP;
-      // A hairline at the pane's own edge weight, so the blurb reads as part of
-      // the pane rather than a second box stuck underneath it.
-      ctx.strokeStyle = 'rgba(255,255,255,.10)';
+    // --- Pitchfork score, over the cover's top-right corner ---
+    //
+    // Only the number and the Best New Music flag, never a word of the review:
+    // fetchAlbumBios nulls Pitchfork's prose before it leaves the server, and
+    // the chip under the card is the link to read it at theirs.
+    if (data.score != null && isFinite(data.score)) {
+      const scoreStr = String(data.score);
+      ctx.font = `700 ${SCORE_SIZE}px "Manrope", sans-serif`;
+      const sw = Math.ceil(ctx.measureText(scoreStr).width) + 30;
+      const sx = ART_X + ART_W - SCORE_PAD - sw;
+      const sy = ART_Y + SCORE_PAD;
+
+      ctx.save();
+      roundRectPath(ctx, sx, sy, sw, SCORE_H, SCORE_R);
+      // Opaque, not translucent: this one sits on the album art rather than on
+      // the solved pane, so its own ground is the only thing keeping it legible
+      // over a white sleeve.
+      ctx.fillStyle = '#0c0e12';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.18)';
       ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(PANE_X + PANE_PAD, ruleY + 0.5);
-      ctx.lineTo(PANE_X + PANE_W - PANE_PAD, ruleY + 0.5);
       ctx.stroke();
+      ctx.restore();
 
-      let by = ruleY + BIO_TEXT_GAP;
-      ctx.fillStyle = BIO_FG;
-      ctx.font = `400 ${BIO_SIZE}px "Manrope", sans-serif`;
-      bioLines.forEach((line, i) => ctx.fillText(line, PANE_X + PANE_PAD, by + i * BIO_LH));
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `700 ${SCORE_SIZE}px "Manrope", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(scoreStr, sx + sw / 2, sy + Math.round((SCORE_H - SCORE_SIZE) / 2) - 2);
+      ctx.textAlign = 'left';
 
-      by += bioLines.length * BIO_LH + CREDIT_GAP;
-      ctx.font = '600 18px "Manrope", sans-serif';
-      ctx.fillStyle = CREDIT_FG;
-      // Wikipedia's text is CC BY-SA. The credit is a licence condition on a
-      // picture that leaves this app, not a nicety — it does not get trimmed.
-      ctx.fillText(data.bioSource || 'Wikipedia', PANE_X + PANE_PAD, by);
+      if (data.bestNewMusic) {
+        ctx.font = `700 ${BNM_SIZE}px "Manrope", sans-serif`;
+        const bw = Math.ceil(ctx.measureText('BEST NEW MUSIC').width) + 22;
+        const bx = ART_X + ART_W - SCORE_PAD - bw;
+        const by = sy + SCORE_H + 8;
+        ctx.save();
+        roundRectPath(ctx, bx, by, bw, BNM_H, 8);
+        ctx.fillStyle = '#e8482b';   // Pitchfork's own flag colour, opaque
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `700 ${BNM_SIZE}px "Manrope", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('BEST NEW MUSIC', bx + bw / 2, by + Math.round((BNM_H - BNM_SIZE) / 2) - 1);
+        ctx.textAlign = 'left';
+      }
     }
 
     // --- Wordmark pinned bottom-right (only if a wordmark image was supplied) ---
@@ -398,7 +494,7 @@ const ShareCard = (() => {
       ctx.drawImage(
         wm,
         PANE_X + PANE_W - WORDMARK_PAD - WORDMARK_W,
-        PANE_Y + paneH - WORDMARK_PAD - wmH,
+        PANE_Y + PANE_H - WORDMARK_PAD - wmH,
         WORDMARK_W, wmH
       );
       ctx.globalAlpha = 1;
@@ -441,5 +537,14 @@ const ShareCard = (() => {
     ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
   }
 
-  return { render };
+  // `measure` is exported for the suite: it owns the height arithmetic and the
+  // rule about when a description is worth drawing, and both are decisions
+  // rather than pixels. It needs only ctx.font and ctx.measureText, so a stub
+  // tests it without a canvas.
+  return { render, measure, MIN_CARD_H, MAX_CARD_H, CONTENT_W, TEXT_W };
 })();
+
+// Node (the test suite) rather than the browser. The file is loaded with a
+// <script> tag in the app and there is no module system there, so this is
+// guarded rather than unconditional.
+if (typeof module !== 'undefined' && module.exports) module.exports = ShareCard;
