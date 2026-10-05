@@ -6,7 +6,7 @@
 
 # Rouen Lite (Android)
 
-**📱 Download & install guide: [meltface-80.github.io/Android-Random-Remote](https://meltface-80.github.io/Android-Random-Remote/)**
+**📱 Download & install guide: [meltface-80.github.io/Rouen-Lite](https://meltface-80.github.io/Rouen-Lite/)**
 
 A native Android APK of [Rouen](https://github.com/meltface-80/Rouen) — the Roon
 remote formerly called MusicD Remote — with the same interface and no server
@@ -63,7 +63,7 @@ API testable on a JVM with no emulator — see [Verification](#verification).
 
 ## Install
 
-**Download: [musicd-remote-lite-0.5.0.apk](https://github.com/meltface-80/Android-Random-Remote/raw/main/dist/musicd-remote-lite-0.5.0.apk)**
+**Download: [musicd-remote-lite-0.5.0.apk](https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.5.0.apk)**
 
 Sideload it on Android 8.0 (API 26) or newer. The file in
 [`dist/`](dist/) is published by CI from the source in this repository, so it is

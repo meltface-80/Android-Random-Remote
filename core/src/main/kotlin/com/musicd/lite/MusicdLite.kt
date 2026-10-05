@@ -136,7 +136,7 @@ class MusicdLite(
 
         /** Published by CI next to the APK it describes. */
         const val UPDATE_MANIFEST_URL =
-            "https://raw.githubusercontent.com/meltface-80/Android-Random-Remote/main/dist/latest.json"
+            "https://raw.githubusercontent.com/meltface-80/Rouen-Lite/main/dist/latest.json"
     }
 
     /** What an Android host supplies so [updater] can finish the job. */
@@ -146,9 +146,9 @@ class MusicdLite(
         id = "com.musicd.lite.android",
         displayName = EXTENSION_NAME,
         version = version,
-        publisher = "Android-Random-Remote",
+        publisher = "Rouen Lite",
         email = "noreply@example.com",
-        website = "https://github.com/meltface-80/Android-Random-Remote"
+        website = "https://github.com/meltface-80/Rouen-Lite"
     )
 
     private val http = httpClient
