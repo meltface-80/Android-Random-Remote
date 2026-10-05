@@ -18,6 +18,7 @@ import com.musicd.lite.library.ListenLater
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
 import com.musicd.lite.library.UserPlaylists
+import com.musicd.lite.meta.Deezer
 import com.musicd.lite.meta.ImageCache
 import com.musicd.lite.meta.Metadata
 import com.musicd.lite.meta.Pitchfork
@@ -168,6 +169,12 @@ class MusicdLite(
     val art = ImageCache(http, artDir)
     val pitchfork = Pitchfork(http, "MusicDRemoteLite/$version ( ${extension.website} )")
     val qobuz = QobuzAlbum(http, "MusicDRemoteLite/$version ( ${extension.website} )")
+
+    /** Deezer's keyless catalogue: "If you like this" and Discover. */
+    val deezer = Deezer(http, "MusicDRemoteLite/$version ( ${extension.website} )")
+
+    /** New records by the acts you play — off until switched on. See Discover. */
+    val discover = Discover(store, index, settings, deezer, { live.bump("discover") })
 
     /**
      * The published manifest CI writes beside the APK. Read from the default
@@ -379,6 +386,7 @@ class MusicdLite(
     fun stop() {
         if (!started.compareAndSet(true, false)) return
         jobs.shutdownNow()
+        discover.close()
         server.stop()
         roon.stop()
     }
@@ -549,6 +557,10 @@ class MusicdLite(
         } catch (e: Exception) {
             Log.d(TAG, "library probe failed: ${e.message}")
         }
+        // Discover has no timer of its own: this check is one of the two
+        // things that ask whether today's list is due (opening the screen is
+        // the other). Off, or already built today, this returns at once.
+        discover.kick("library check")
     }
 
     // ------------------------------------------------------- play history

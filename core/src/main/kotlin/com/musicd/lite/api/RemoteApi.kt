@@ -2,6 +2,7 @@ package com.musicd.lite.api
 
 import com.musicd.lite.str
 import com.musicd.lite.strOrNull
+import com.musicd.lite.Discover
 import com.musicd.lite.LiveState
 import com.musicd.lite.QueueHistory
 import com.musicd.lite.Log
@@ -257,6 +258,12 @@ class RemoteApi(
             "/api/smart-picks/block" -> smartPickBlock(request)
             "/api/smart-picks/rebuild" -> requirePost(post) { Json.ok() }
 
+            // Deezer-backed: "If you like this" under the share card, and
+            // Discover. Neither touches the Core.
+            "/api/similar" -> similar(request)
+            "/api/discover" -> discoverList(request)
+            "/api/discover/rebuild" -> requirePost(post) { discoverRebuild() }
+
             "/api/settings/home-rows" -> if (post) saveHomeRows(request) else homeRows()
             "/api/settings/lan" -> if (post) saveLan(request) else lanStatus(request)
 
@@ -269,6 +276,7 @@ class RemoteApi(
                 requirePost(post) { addAlbumsToPlaylist(request) }
             "/api/settings/smart-picks" -> if (post) saveSmartPicks(request) else smartPickSettings()
             "/api/settings/share-links" -> if (post) saveShareLinks(request) else shareLinksSettings()
+            "/api/settings/discover" -> if (post) saveDiscover(request) else discoverSettings()
             "/api/settings/labels" -> labelsSetting(post)
             "/api/settings/discogs-token" ->
                 secret(request, post, Settings.KEY_DISCOGS_TOKEN, "token")
@@ -1944,6 +1952,137 @@ class RemoteApi(
             // instead promised an Add button that had nothing behind it.
             .put("service_ready", false)
     )
+
+    // --------------------------------------------- similar acts and Discover
+
+    /**
+     * Where a record the library may or may not hold should GO: in the library
+     * -> its offset plus the library's own title and artist (what /api/play
+     * checks identity against, since Deezer's punctuation differs from Roon's);
+     * otherwise a link per enabled service, the page choosing which.
+     *
+     * Resolved per request, never cached with the suggestion: whether Roon has
+     * a record changes with the library.
+     */
+    private fun placeOf(o: JSONObject, title: String?, artist: String, request: Request): AlbumRecord? {
+        val inLib = if (title.isNullOrBlank()) null else app.discover.resolve(title, artist)
+        o.put("in_library", inLib != null)
+            .put("offset", inLib?.offset ?: JSONObject.NULL)
+            .put("library_title", inLib?.title ?: JSONObject.NULL)
+            .put("library_subtitle", inLib?.subtitle ?: JSONObject.NULL)
+        val services = if (inLib != null) emptyList() else ShareLinks.serviceLinks(
+            artist, title ?: "",
+            locale = ShareLinks.localeFromAcceptLanguage(request.headers["accept-language"]),
+            enabled = settings.shareServices()
+        )
+        o.put("services", Json.arrayOf(services.map { it.toJson() }))
+        return inLib
+    }
+
+    /**
+     * "If you like this" — three acts like the one on the card, each with
+     * their earliest album (Rouen v1.8.34). Up to five Deezer calls, cached a
+     * day per artist. Never an error: a suggestion row is not worth one.
+     */
+    private fun similar(request: Request): Response {
+        val artist = request.str("artist")?.trim().orEmpty()
+        if (artist.isEmpty()) return Json.error(400, "artist query parameter required")
+        val acts = try {
+            // The FIRST credited act: a four-act credit searched whole finds nobody.
+            app.deezer.similarActs(ShareLinks.primaryArtist(artist))
+        } catch (e: Exception) {
+            Log.d(TAG, "similar: ${e.message}")
+            emptyList()
+        }
+        return Json.obj(
+            JSONObject().put(
+                "acts",
+                Json.arrayOf(
+                    acts.map { a ->
+                        JSONObject()
+                            .put("name", a.name).put("id", a.id)
+                            .put("album", a.album ?: JSONObject.NULL)
+                            .put("year", a.year ?: JSONObject.NULL)
+                            .put("cover", a.cover ?: JSONObject.NULL)
+                            .also { placeOf(it, a.album, a.name, request) }
+                    }
+                )
+            )
+        )
+    }
+
+    /**
+     * Discover's list: today's, or the most recent day that found something.
+     * Opening the screen is also one of the two things that ask whether the
+     * day's build is due — this build has no timer of its own (see Discover).
+     */
+    private fun discoverList(request: Request): Response {
+        if (!roon.isPaired) return Json.error(503, "Not paired with a Roon Core")
+        val discover = app.discover
+        discover.kick("screen opened")
+        val (day, rows) = discover.latest()
+        val releases = rows.map { r ->
+            val o = JSONObject()
+                .put("artist", r.artist).put("album", r.album)
+                .put("cover", r.cover ?: JSONObject.NULL)
+                .put("release_date", r.releaseDate ?: JSONObject.NULL)
+                .put("year", r.releaseDate?.take(4)?.toIntOrNull() ?: JSONObject.NULL)
+            val inLib = placeOf(o, r.album, r.artist, request)
+            // Roon's own art for a record the library holds.
+            o.put("image_key", inLib?.imageKey ?: JSONObject.NULL)
+        }
+        return Json.obj(
+            JSONObject()
+                .put("enabled", settings.discoverEnabled())
+                .put("day", day)
+                .put("releases", Json.arrayOf(releases))
+                .put("window_days", Discover.WINDOW_DAYS)
+                .put("building", discover.building)
+                .put("rules", Discover.RULES)
+                .put("rules_current", discover.stampCurrent(day))
+        )
+    }
+
+    private fun discoverRebuild(): Response {
+        if (!settings.discoverEnabled()) return Json.error(400, "Discover is switched off")
+        if (app.discover.building) return Json.ok(JSONObject().put("building", true))
+        // A refusal is reported, not swallowed: "Refreshing…" for a build that
+        // never started is the worst of both answers.
+        if (!app.discover.kick("manual rebuild", force = true)) {
+            return Json.error(
+                503,
+                if (roon.isPaired) "Still reading your library — try again in a minute"
+                else "Not paired with a Roon Core"
+            )
+        }
+        return Json.ok(JSONObject().put("building", true))
+    }
+
+    private fun discoverSettings(): Response = Json.obj(
+        JSONObject()
+            .put("enabled", settings.discoverEnabled())
+            .put("hour", settings.discoverHour())
+            .put("window_days", Discover.WINDOW_DAYS)
+            .put("seed_count", Discover.SEED_ARTISTS)
+    )
+
+    private fun saveDiscover(request: Request): Response {
+        val body = Json.body(request)
+        if (body.has("hour")) {
+            val h = body.optInt("hour", -1)
+            if (h !in 0..23) return Json.error(400, "hour must be 0-23")
+        }
+        settings.saveDiscover(
+            if (body.has("enabled")) body.optBoolean("enabled") else null,
+            if (body.has("hour")) body.optInt("hour") else null
+        )
+        // Switched on after the hour: today's list starts now rather than at
+        // the next library check.
+        if (settings.discoverEnabled()) app.discover.kick("switched on")
+        return Json.ok(
+            JSONObject().put("enabled", settings.discoverEnabled()).put("hour", settings.discoverHour())
+        )
+    }
 
     private fun saveSmartPicks(request: Request): Response {
         val body = Json.body(request)

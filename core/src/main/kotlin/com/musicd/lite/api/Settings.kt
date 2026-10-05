@@ -61,6 +61,9 @@ class Settings(
         /** Which link chips the share card shows — see shareServices. */
         const val KEY_SHARE_LINKS = "share_links"
 
+        /** Discover's switch and hour — see discoverEnabled. */
+        const val KEY_DISCOVER = "discover"
+
         /** Where Smart Picks can be sent in this build — see smartPicksDest. */
         val SMART_PICK_DESTS = listOf("later", "ask")
 
@@ -210,6 +213,26 @@ class Settings(
         // Bookkeeping, not a choice anybody made: written straight to the store
         // so it does not move the live `settings` revision and wake every page.
         store.putSetting(KEY_SMART_PICKS, d.put("later_day", day).toString())
+    }
+
+    // -------------------------------------------------------------- discover
+
+    /**
+     * Discover (Rouen v1.8.37): new records by the acts you play, looked up on
+     * Deezer once a day. OFF until switched on — it is the one feature that
+     * sends anything about this library's listening to a third party (an
+     * artist name per request), so it is opted into, as it is upstream.
+     */
+    fun discoverEnabled(): Boolean = doc(KEY_DISCOVER).optBoolean("enabled", false)
+
+    /** The hour the day's list is built at or after. Rouen's default: 05:00. */
+    fun discoverHour(): Int = doc(KEY_DISCOVER).optInt("hour", 5).coerceIn(0, 23)
+
+    fun saveDiscover(enabled: Boolean?, hour: Int?) {
+        val d = doc(KEY_DISCOVER)
+        if (enabled != null) d.put("enabled", enabled)
+        if (hour != null && hour in 0..23) d.put("hour", hour)
+        save(KEY_DISCOVER, d)
     }
 
     fun saveSmartPicks(enabled: Boolean?, hour: Int?, dest: String?) {
