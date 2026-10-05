@@ -14,6 +14,7 @@ import com.musicd.lite.library.AlbumIndex
 import com.musicd.lite.library.AlbumRecord
 import com.musicd.lite.library.Albums
 import com.musicd.lite.library.LibraryView
+import com.musicd.lite.library.ListenLater
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
 import com.musicd.lite.library.UserPlaylists
@@ -155,6 +156,9 @@ class MusicdLite(
     val live = LiveState({ index.builtAt }).also { l -> index.onChanged = { l.snapshotChanged() } }
 
     val settings = Settings(store) { live.bump("settings") }
+
+    /** Albums put aside to play another time — see ListenLater. */
+    val listenLater = ListenLater(store, index) { live.bump("later") }
     val view = LibraryView(index, store)
     val albums = Albums(roon.tree, index, store)
     val metadata = Metadata(http, "MusicDRemoteLite/$version ( ${extension.website} )")
@@ -584,6 +588,11 @@ class MusicdLite(
         val key = AlbumRecord(0, album, artist, null).key
         runCatching { store.recordPlay(key, album, artist, track, System.currentTimeMillis()) }
             .onSuccess { live.bump("plays") }
+        // An album on the Listen later list leaves it once every track has
+        // played. Logged and swallowed: this runs in the zone feed, and a
+        // failure here must cost the list its tidy-up, never play tracking.
+        runCatching { listenLater.noticePlay(album, artist) }
+            .onFailure { Log.w(TAG, "listen later play check failed: ${it.message}") }
         // A year learned once is worth keeping, but never at the cost of a
         // better source: file tags and MusicBrainz both outrank a guess.
         runCatching {

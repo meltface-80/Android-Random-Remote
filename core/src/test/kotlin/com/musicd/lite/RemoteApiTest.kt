@@ -1059,7 +1059,7 @@ class RemoteApiTest {
         val rows = json("/api/settings/home-rows").getJSONArray("rows")
         val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }
         assertEquals(
-            listOf("aotd", "history", "picks", "random", "artists", "library", "genres"),
+            listOf("history", "later", "picks", "random", "artists", "library", "genres"),
             ids
         )
         // The settings screen renders its list from this response, so a row
@@ -1080,6 +1080,26 @@ class RemoteApiTest {
      * A stored layout from an older build still names "lotw". It must be
      * dropped on the way back out, not carried through into the settings list.
      */
+    /**
+     * Album of the day had a row of its own ("aotd") until it moved into the
+     * strip under the greeting, which is always there and is not a row. A
+     * layout saved by the older build must lose it rather than offer a switch
+     * that controls nothing.
+     */
+    @Test
+    fun theOldAlbumOfTheDayRowIsDroppedFromAStoredLayout() {
+        post(
+            "/api/settings/home-rows",
+            """{"rows":[{"id":"aotd","on":true},{"id":"genres","on":false}]}"""
+        )
+        val ids = json("/api/settings/home-rows").getJSONArray("rows").let { rows ->
+            (0 until rows.length()).map { rows.getJSONObject(it).getString("id") }
+        }
+        assertFalse("aotd" in ids)
+        assertEquals("genres", ids.first())
+        assertTrue("later" in ids)
+    }
+
     @Test
     fun aStoredLayoutNamingARetiredRowLosesIt() {
         post(

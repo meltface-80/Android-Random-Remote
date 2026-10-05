@@ -42,11 +42,13 @@ class Settings(
          * information. The Home section itself is hidden in index.html, since
          * with the row gone from here nothing positions it.
          */
-        // "unplayed" was the "Not played in 6 months" row; it is gone, and the
-        // album-of-the-day tile it used to carry now has the row to itself.
-        // A stored order naming the old id is simply dropped by homeRows().
+        // "unplayed" was the "Not played in 6 months" row; it is gone. "aotd"
+        // was Album of the day's own row until 0.5.0, when it moved — with
+        // Random Album — into the strip under Rouen's greeting, which is not a
+        // row and cannot be switched off. A stored order naming either is
+        // simply dropped by homeRows(). "later" is Rouen's Listen later shelf.
         val HOME_ROW_IDS =
-            listOf("aotd", "history", "picks", "random", "artists", "library", "genres")
+            listOf("history", "later", "picks", "random", "artists", "library", "genres")
 
         const val KEY_HOME_ROWS = "home_rows"
         const val KEY_SMART_PICKS = "smart_picks"
@@ -54,6 +56,9 @@ class Settings(
         const val KEY_DISCOGS_TOKEN = "discogs_token"
         const val KEY_FANART_KEY = "fanart_key"
         const val KEY_LAST_ZONE = "last_zone"
+
+        /** Where Smart Picks can be sent in this build — see smartPicksDest. */
+        val SMART_PICK_DESTS = listOf("later", "ask")
 
         /**
          * Whether the page is served to the rest of the network, and the PIN
@@ -183,13 +188,31 @@ class Settings(
 
     fun smartPicksEnabled(): Boolean = doc(KEY_SMART_PICKS).optBoolean("enabled", true)
     fun smartPicksHour(): Int = doc(KEY_SMART_PICKS).optInt("hour", 7).coerceIn(0, 23)
-    fun smartPicksAutoAdd(): Boolean = doc(KEY_SMART_PICKS).optBoolean("auto_add", false)
+    /**
+     * Where each day's picks go (Rouen v1.8.67): "later" puts them on the
+     * Listen later list, "ask" leaves them on the Smart Picks screen. Rouen's
+     * third choice, "library", favourites them in a streaming account, which
+     * this build does not have — so it is not offered, and not accepted.
+     */
+    fun smartPicksDest(): String =
+        doc(KEY_SMART_PICKS).str("dest").takeIf { it in SMART_PICK_DESTS } ?: "ask"
 
-    fun saveSmartPicks(enabled: Boolean?, hour: Int?, autoAdd: Boolean?) {
+    /** The day whose picks have already been sent to Listen later, if any. */
+    fun smartPicksSentDay(): String = doc(KEY_SMART_PICKS).str("later_day")
+
+    fun markSmartPicksSent(day: String) {
+        val d = doc(KEY_SMART_PICKS)
+        if (d.str("later_day") == day) return
+        // Bookkeeping, not a choice anybody made: written straight to the store
+        // so it does not move the live `settings` revision and wake every page.
+        store.putSetting(KEY_SMART_PICKS, d.put("later_day", day).toString())
+    }
+
+    fun saveSmartPicks(enabled: Boolean?, hour: Int?, dest: String?) {
         val d = doc(KEY_SMART_PICKS)
         if (enabled != null) d.put("enabled", enabled)
         if (hour != null && hour in 0..23) d.put("hour", hour)
-        if (autoAdd != null) d.put("auto_add", autoAdd)
+        if (dest != null && dest in SMART_PICK_DESTS) d.put("dest", dest)
         save(KEY_SMART_PICKS, d)
     }
 

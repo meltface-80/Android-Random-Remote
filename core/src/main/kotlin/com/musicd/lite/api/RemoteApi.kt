@@ -15,6 +15,7 @@ import com.musicd.lite.library.Artists
 import com.musicd.lite.library.Albums
 import com.musicd.lite.library.UserPlaylists
 import com.musicd.lite.library.LibraryView
+import com.musicd.lite.library.ListenLater
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
 import com.musicd.lite.meta.Metadata
@@ -66,6 +67,9 @@ class RemoteApi(
          * round trips.
          */
         const val ADD_ALBUMS_MAX = 20
+
+        /** How many of the day's picks "Send to Listen later" puts on the list. Rouen's five. */
+        const val PICKS_TO_LATER = 5
 
         /** Distinguishes a blocked ARTIST from the album keys once stored. */
         const val BLOCKED_ARTIST_PREFIX = "artist:"
@@ -243,6 +247,7 @@ class RemoteApi(
             "/api/home/genre-groups" -> genreGroups()
 
             "/api/radio" -> radio(request)
+            "/api/listen-later" -> if (post) setListenLater(request) else listenLaterList()
             "/api/smart-picks" -> smartPicks(request)
             "/api/smart-picks/block" -> smartPickBlock(request)
             "/api/smart-picks/rebuild" -> requirePost(post) { Json.ok() }
@@ -821,6 +826,8 @@ class RemoteApi(
         )
         .put("offset", r.offset)
         .put("artists", artistNames(r.subtitle))
+        // The ⋯ menu's "Listen later / Remove from Listen later".
+        .put("listen_later", app.listenLater.has(r.title, r.subtitle))
         .put("library_moved", r.libraryMoved)
         .put("partial", r.partial)
         .put("declared_tracks", r.declaredTracks ?: JSONObject.NULL)
@@ -1394,7 +1401,8 @@ class RemoteApi(
         val day = java.time.LocalDate.now().toString()
         val base = JSONObject()
             .put("day", day)
-            .put("auto_add", settings.smartPicksAutoAdd())
+            .put("auto_add", false)
+            .put("dest", settings.smartPicksDest())
             .put("hour", settings.smartPicksHour())
             // No streaming account to favourite a pick into — see the note on
             // the settings endpoint.
@@ -1414,21 +1422,9 @@ class RemoteApi(
         }
 
         val count = (request.int("count") ?: 12).coerceIn(1, 48)
-        val blocked = store.blockedPicks()
-        // Both shapes are honoured: artist blocks (what "Not for me" writes) and
-        // the album keys an earlier build stored, so nothing a user already
-        // rejected comes back.
-        // The whole library, minus anything rejected. It used to be albums not
-        // played in six months, which the plays table cannot actually answer.
-        val pool = index.albums.filter { album ->
-            album.key !in blocked &&
-                (BLOCKED_ARTIST_PREFIX + Normalize.text(album.subtitle)) !in blocked
-        }
-        // Seeded by the day so the row does not reshuffle on every Home visit.
-        // Through view.sample because that IS this draw — the same seededRank
-        // order over the same pool — and having it in one place means it is
-        // ranked once per album rather than once per comparison.
-        val picks = view.sample(pool, count, LibraryView.fnv1a(day))
+        val pool = smartPickPool()
+        val picks = smartPicksFor(day, pool, count)
+        sendPicksToLaterIfDue(day, pool)
         return Json.obj(
             base
                 .put("enabled", true)
@@ -1460,10 +1456,108 @@ class RemoteApi(
                                 .put("library_title", album.title)
                                 .put("library_subtitle", album.subtitle)
                                 .put("image_key", album.imageKey ?: JSONObject.NULL)
+                                // The pick's "＋ Listen later" button reads it.
+                                .put("later", app.listenLater.has(album.title, album.subtitle))
                         }
                     )
                 )
         )
+    }
+
+    /**
+     * Everything a pick may be drawn from: the whole library, minus anything
+     * rejected. Both shapes are honoured — artist blocks (what "Not for me"
+     * writes) and the album keys an earlier build stored — so nothing a user
+     * already turned down comes back. It used to be albums not played in six
+     * months, which the plays table cannot actually answer.
+     */
+    private fun smartPickPool(): List<AlbumRecord> {
+        val blocked = store.blockedPicks()
+        return index.albums.filter { album ->
+            album.key !in blocked &&
+                (BLOCKED_ARTIST_PREFIX + Normalize.text(album.subtitle)) !in blocked
+        }
+    }
+
+    /**
+     * The day's picks. Seeded by the day so the row does not reshuffle on every
+     * Home visit. Through view.sample because that IS this draw — the same
+     * seededRank order over the same pool — and having it in one place means
+     * it is ranked once per album rather than once per comparison. A smaller
+     * count is the head of a larger one, so the five sent to Listen later are
+     * the first five on the screen.
+     */
+    private fun smartPicksFor(day: String, pool: List<AlbumRecord>, count: Int): List<AlbumRecord> =
+        view.sample(pool, count, LibraryView.fnv1a(day))
+
+    /**
+     * Settings → Smart Picks → "Send each day's picks to: Listen later" — the
+     * day's first few go on the list, once a day. Done when the picks are
+     * next asked for (the Home row, the screen, or the Listen later list
+     * itself), which on any day the app is opened is the first screenful.
+     */
+    private fun sendPicksToLaterIfDue(day: String, pool: List<AlbumRecord>? = null) {
+        if (!settings.smartPicksEnabled() || settings.smartPicksDest() != "later") return
+        if (!index.isBuilt || settings.smartPicksSentDay() == day) return
+        val picks = smartPicksFor(day, pool ?: smartPickPool(), PICKS_TO_LATER)
+        for (album in picks) app.listenLater.add(album.title, album.subtitle, source = "picks")
+        settings.markSmartPicksSent(day)
+    }
+
+    // --------------------------------------------------------- listen later
+
+    /**
+     * The Listen later list, newest first, each entry resolved against the
+     * library as it stands NOW — so it is playable wherever Roon has it, under
+     * Roon's own strings. The streaming fields Rouen fills (a service album an
+     * entry could be added from) are always empty here: every entry this
+     * build can hold was put aside from the library.
+     */
+    private fun listenLaterList(): Response {
+        sendPicksToLaterIfDue(java.time.LocalDate.now().toString())
+        val list = app.listenLater.entries().map { e ->
+            val rec = app.listenLater.record(e)
+            JSONObject()
+                .put("key", e.key)
+                .put("title", e.title)
+                .put("artist", e.artist)
+                .put("service", "")
+                .put("album_id", "")
+                .put("image", "")
+                .put("source", e.source)
+                .put("added_at", e.addedAt)
+                .put("added", JSONObject.NULL)
+                .put("service_url", JSONObject.NULL)
+                .put("offset", rec?.offset ?: JSONObject.NULL)
+                .put("library_title", rec?.title ?: "")
+                .put("library_subtitle", rec?.subtitle ?: "")
+                .put("image_key", rec?.imageKey ?: JSONObject.NULL)
+                .put("album", rec?.let { Json.album(it) } ?: JSONObject.NULL)
+        }
+        return Json.obj(JSONObject().put("albums", Json.arrayOf(list)))
+    }
+
+    /**
+     * Put an album aside, or take it off. `on` is the state ASKED FOR, not a
+     * toggle: two devices tapping at once must both end where they meant to,
+     * which a toggle cannot promise.
+     */
+    private fun setListenLater(request: Request): Response {
+        val body = Json.body(request)
+        val title = body.str("title").trim()
+        val artist = body.str("artist").trim()
+        if (title.isEmpty()) return Json.error(400, "title required")
+        val on = body.opt("on") as? Boolean ?: return Json.error(400, "on must be true or false")
+        if (ListenLater.keyOf(title, artist).isBlank()) return Json.error(400, "unrecognisable album title")
+        if (on) {
+            val source = body.str("source").takeIf { it in ListenLater.SOURCES } ?: "album"
+            if (!app.listenLater.add(title, artist, source)) {
+                return Json.error(500, "Couldn't save that — the list holds ${ListenLater.MAX_ENTRIES} albums")
+            }
+            return Json.ok(JSONObject().put("on", true))
+        }
+        app.listenLater.remove(title, artist)
+        return Json.ok(JSONObject().put("on", false))
     }
 
     /**
@@ -1484,6 +1578,10 @@ class RemoteApi(
         val canon = Normalize.text(artist).takeIf { it.isNotEmpty() }
             ?: return Json.error(400, "unrecognisable artist name")
         store.blockPick(BLOCKED_ARTIST_PREFIX + canon)
+        // The artist, everywhere: their picks leave Listen later too (an album
+        // put aside from the album view stays — that was the user's own find).
+        app.listenLater.forgetPickArtist(artist)
+        app.live.bump("picks")
         return Json.ok(JSONObject().put("artist", artist))
     }
 
@@ -1557,7 +1655,10 @@ class RemoteApi(
         JSONObject()
             .put("enabled", settings.smartPicksEnabled())
             .put("hour", settings.smartPicksHour())
-            .put("auto_add", settings.smartPicksAutoAdd())
+            // No streaming library to add picks to, so never "on".
+            .put("auto_add", false)
+            .put("dest", settings.smartPicksDest())
+            .put("dests", Json.strings(Settings.SMART_PICK_DESTS))
             // False, and not because the index is missing. `service_ready`
             // means "there is a streaming account to add a pick TO", and this
             // build has none — so the settings note and the picks banner both
@@ -1572,16 +1673,25 @@ class RemoteApi(
             val h = body.optInt("hour", -1)
             if (h !in 0..23) return Json.error(400, "hour must be 0-23")
         }
+        // Every field is checked before any is applied, so a refused request
+        // changes nothing. "library" is Rouen's third destination — a Qobuz or
+        // TIDAL favourite — and is refused rather than stored as a choice
+        // nothing here could act on.
+        val dest = body.strOrNull("dest")
+        if (dest != null && dest !in Settings.SMART_PICK_DESTS) {
+            return Json.error(400, "dest must be one of ${Settings.SMART_PICK_DESTS.joinToString(", ")}")
+        }
         settings.saveSmartPicks(
             if (body.has("enabled")) body.optBoolean("enabled") else null,
             if (body.has("hour")) body.optInt("hour") else null,
-            if (body.has("auto_add")) body.optBoolean("auto_add") else null
+            dest
         )
         return Json.ok(
             JSONObject()
                 .put("enabled", settings.smartPicksEnabled())
                 .put("hour", settings.smartPicksHour())
-                .put("auto_add", settings.smartPicksAutoAdd())
+                .put("dest", settings.smartPicksDest())
+                .put("auto_add", false)
         )
     }
 
