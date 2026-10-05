@@ -54,15 +54,27 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
         val image: String? = null
     )
 
-    data class AlbumExtras(val year: Int?, val album: Bio?, val artist: Bio?)
+    /**
+     * [releaseDate] is the first release's date as precisely as MusicBrainz
+     * knows it — "1997-05-21", "1997-05" or "1997" — which the album view shows
+     * in full (Rouen v1.8.62). [year] is its first four digits.
+     */
+    data class AlbumExtras(
+        val year: Int?,
+        val album: Bio?,
+        val artist: Bio?,
+        val releaseDate: String? = null
+    )
 
     fun extras(title: String, artist: String): AlbumExtras {
         val key = cacheKey(title, artist) ?: return AlbumExtras(null, null, null)
         return cache.get(key) {
+            val released = runCatching { musicBrainzRelease(title, artist) }.getOrNull()
             AlbumExtras(
-                year = runCatching { musicBrainzYear(title, artist) }.getOrNull(),
+                year = released?.let { yearOf(it) },
                 album = runCatching { wikipediaAlbum(title, artist) }.getOrNull(),
-                artist = runCatching { wikipediaArtist(artist, title) }.getOrNull()
+                artist = runCatching { wikipediaArtist(artist, title) }.getOrNull(),
+                releaseDate = released
             )
         }
     }
@@ -93,7 +105,18 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
     /** MusicBrainz's Lucene syntax needs quotes escaped, not stripped. */
     private fun mbQuote(s: String): String = s.replace("\"", "\\\"")
 
-    fun musicBrainzYear(title: String, artist: String): Int? {
+    fun musicBrainzYear(title: String, artist: String): Int? =
+        musicBrainzRelease(title, artist)?.let { yearOf(it) }
+
+    /**
+     * The first release's date: the earliest YEAR among the matches (a later
+     * reissue is a different pressing of the same record, not a different
+     * album), and within that year the most precise date any of them carries —
+     * a pressing dated "1997" and another "1997-05-21" are the same release
+     * told with more or less detail, and the detail is what the album view
+     * shows.
+     */
+    fun musicBrainzRelease(title: String, artist: String): String? {
         if (title.isBlank()) return null
         val query = buildString {
             append("release:\"").append(mbQuote(title)).append('"')
@@ -104,17 +127,27 @@ class Metadata(private val http: OkHttpClient, private val userAgent: String) {
         val json = mbGate.run { getJson(url) } ?: return null
         val releases = json.optJSONArray("releases") ?: return null
 
-        // The earliest dated release is the release YEAR; a later reissue is a
-        // different pressing of the same record, not a different album.
-        var best = Int.MAX_VALUE
+        val dates = ArrayList<String>()
         for (i in 0 until releases.length()) {
             val r = releases.optJSONObject(i) ?: continue
             // Below ~70 the match is a different record that shares a word.
             if (r.optInt("score", 0) < 70) continue
-            val year = yearOf(r.str("date")) ?: continue
-            if (year < best) best = year
+            val d = r.str("date").trim()
+            if (yearOf(d) == null || !RELEASE_DATE.matches(d)) continue
+            dates += d
         }
-        return best.takeIf { it != Int.MAX_VALUE }
+        return earliestRelease(dates)
+    }
+
+    /** "1997", "1997-05" or "1997-05-21" — anything else is not a date to show. */
+    private val RELEASE_DATE = Regex("^\\d{4}(-\\d{2}(-\\d{2})?)?$")
+
+    /** See [musicBrainzRelease]. Internal for the test that pins the rule. */
+    internal fun earliestRelease(dates: List<String>): String? {
+        val year = dates.mapNotNull { yearOf(it) }.minOrNull() ?: return null
+        val thatYear = dates.filter { yearOf(it) == year }
+        val mostPrecise = thatYear.maxOf { it.length }
+        return thatYear.filter { it.length == mostPrecise }.minOrNull()
     }
 
     private fun yearOf(date: String?): Int? {

@@ -212,6 +212,7 @@ class RemoteApi(
 
             "/api/album" -> album(request)
             "/api/album/extras" -> albumExtras(request)
+            "/api/album/release-date" -> releaseDate(request)
             "/api/album/now-playing" -> nowPlayingAlbum(request)
             "/api/play" -> playAlbum(request, "play_now")
             "/api/play-track" -> playTrack(request)
@@ -278,7 +279,27 @@ class RemoteApi(
             "/api/shortcut/zones" -> zones()
             "/api/shortcut/play-random" -> shortcutPlay(request)
 
-            else -> notInLite(path)
+            // Random Album — the disc under the greeting. Rouen's route plays
+            // something unheard in a year; see playRandomAlbum for why this one
+            // draws from the whole library.
+            "/api/play-unheard" -> requirePost(post) { playRandomFromHome(request) }
+
+            // The share card's Qobuz chip, upgraded to open the app on the
+            // record. The same lookup the Pitchfork screen has always used;
+            // answered here, ahead of the /api/qobuz prefix that is otherwise
+            // not in this build (an account-free page read, not the account API).
+            "/api/qobuz-link" -> pitchforkQobuz(request)
+
+            // Features this build does not have, in the "off" shape their
+            // screens already understand. A 404 left each one asking again.
+            "/api/settings/display" ->
+                if (post) Json.error(501, "The wall display isn't in this build.")
+                else Json.obj(JSONObject().put("enabled", false).put("seconds", 10))
+            "/api/settings/waveform" ->
+                if (post) Json.error(501, "Waveforms aren't in this build — they need the audio files or a streaming account.")
+                else Json.obj(JSONObject().put("enabled", false))
+
+            else -> notInLite(path, post)
         }
     }
 
@@ -312,6 +333,9 @@ class RemoteApi(
                 .put("library_importing", false)
                 .put("library_recheck_pending", index.isBuilding)
                 .put("index_built_at", index.builtAt)
+                // The side menu's "checked just now"; 0 until the first probe,
+                // and the page falls back to index_built_at then.
+                .put("library_checked_at", app.libraryCheckedAt)
                 .put("index_count", index.count)
                 // Not in MusicD-Remote's shape, and additive on purpose: the
                 // pairing screen needs to say WHY it is waiting, and on a phone
@@ -442,6 +466,7 @@ class RemoteApi(
                     .put("is_previous_allowed", zone.isPreviousAllowed)
                     .put("is_seek_allowed", zone.isSeekAllowed)
                     .put("settings", zone.settings.toJson())
+                    .put("queue_items_remaining", zone.queueItemsRemaining ?: JSONObject.NULL)
                     .put("outputs", Json.arrayOf(outputs))
                     .put("now_playing", nowPlaying)
             )
@@ -603,7 +628,25 @@ class RemoteApi(
             app.radio.setEnabled(id, false)
             stoodDown = true
         }
-        return Json.ok(JSONObject().put("random_album_radio_stands_down", stoodDown))
+        return Json.ok(
+            JSONObject().put("random_album_radio_stands_down", stoodDown)
+                .put(
+                    "radios",
+                    radiosJson(id, roonOverride = if (patch.has("auto_radio")) patch.optBoolean("auto_radio") else null)
+                )
+        )
+    }
+
+    /**
+     * Both radios for a zone: ours and Roon's. Roon's is read off the zone feed,
+     * which only catches up some time after change_settings calls back — so a
+     * route that has just changed it passes what it asked for, rather than the
+     * value from before the change.
+     */
+    private fun radiosJson(zoneId: String, roonOverride: Boolean? = null): JSONObject {
+        val roonOn = roonOverride
+            ?: (roon.zones().firstOrNull { it.zoneId == zoneId }?.settings?.autoRadio == true)
+        return JSONObject().put("own", app.radio.isEnabled(zoneId)).put("roon", roonOn)
     }
 
     private fun muteAll(request: Request): Response {
@@ -883,6 +926,11 @@ class RemoteApi(
             val o = JSONObject()
                 .put("description", b?.description ?: "")
                 .put("source", b?.source ?: JSONObject.NULL)
+                // WHOSE words the description is, which is a different fact
+                // from where `source`/`url` link to: Pitchfork takes the link
+                // below when it reviewed the record, and without this the
+                // share card credited Wikipedia's prose to Pitchfork.
+                .put("description_source", b?.takeIf { it.description.isNotBlank() }?.source ?: JSONObject.NULL)
                 .put("url", b?.url ?: JSONObject.NULL)
                 // The lite build has no label chain, and the album card reads
                 // this field. Null keeps the row hidden rather than blank.
@@ -901,9 +949,26 @@ class RemoteApi(
         return Json.obj(
             JSONObject()
                 .put("year", year ?: JSONObject.NULL)
+                // To the day where MusicBrainz knows it (Rouen v1.8.62); the
+                // album view prints it in the device's own date format.
+                .put("release_date", extras?.releaseDate ?: year?.toString() ?: JSONObject.NULL)
                 .put("album", bio(extras?.album, withReview = true))
                 .put("artist", bio(extras?.artist))
         )
+    }
+
+    /**
+     * The release date the album view shows, re-read when the live `dates`
+     * revision moves — from what is already known, never a lookup: the full
+     * lookup is /api/album/extras, which the view has already started.
+     */
+    private fun releaseDate(request: Request): Response {
+        val title = request.str("title") ?: return Json.error(400, "title is required")
+        val artist = request.str("artist") ?: ""
+        val known = app.metadata.cachedExtras(title, artist)
+        val stored = index.relocate(title, artist)?.let { view.albumYearOf(it) }
+        val date = known?.releaseDate ?: known?.year?.toString() ?: stored?.toString()
+        return Json.obj(JSONObject().put("release_date", date ?: JSONObject.NULL))
     }
 
     /** Match what a zone is playing back to a library tile, so it can be opened. */
@@ -1085,6 +1150,18 @@ class RemoteApi(
      * One tap, one album. Shared with the widget and the Quick Settings tile,
      * which reach the same action without going through HTTP at all.
      */
+    /**
+     * Random Album, from the Home strip: `{zone}` in, `{ok, album, artist}` out,
+     * which is what the page toasts ("Playing: <album>").
+     */
+    private fun playRandomFromHome(request: Request): Response {
+        val zone = Json.body(request).strOrNull("zone") ?: return Json.error(400, "zone required")
+        return app.playRandomAlbum(zone).fold(
+            onSuccess = { Json.ok(JSONObject().put("album", it.title).put("artist", it.subtitle)) },
+            onFailure = { Json.error(503, it.message ?: "Could not start an album") }
+        )
+    }
+
     private fun shortcutPlay(request: Request): Response =
         app.playRandomAlbum(request.str("zone")).fold(
             onSuccess = { Json.ok(JSONObject().put("album", Json.album(it))) },
@@ -1307,14 +1384,20 @@ class RemoteApi(
         )
     }
 
+    /**
+     * `day` is Album of the day's day (00:01 to 00:01). The page keeps a copy
+     * of the strip for an instant cold open and paints it only on the day it
+     * was chosen for — without this it could never tell, and never painted it.
+     */
     private fun albumOfTheDay(): Response {
+        val day = view.aotdDay()
         val album = view.albumOfTheDay()
-            ?: return Json.obj(JSONObject().put("album", JSONObject.NULL))
+            ?: return Json.obj(JSONObject().put("album", JSONObject.NULL).put("day", day))
         // A suggestion you have already taken is not a suggestion.
         if (view.playedToday(album)) {
-            return Json.obj(JSONObject().put("album", JSONObject.NULL).put("played", true))
+            return Json.obj(JSONObject().put("album", JSONObject.NULL).put("played", true).put("day", day))
         }
-        return Json.obj(JSONObject().put("album", Json.album(album)))
+        return Json.obj(JSONObject().put("album", Json.album(album)).put("played", false).put("day", day))
     }
 
     /**
@@ -1369,6 +1452,9 @@ class RemoteApi(
             }
             return Json.ok(
                 JSONObject().put("enabled", enabled).put("roon_radio_off", roonRadioOff)
+                    // Both switches, as they now stand — the page paints them
+                    // from this and treats an answer without it as a failure.
+                    .put("radios", radiosJson(zone, roonOverride = if (roonRadioOff) false else null))
             )
         }
         val zone = request.str("zone")
@@ -2082,7 +2168,7 @@ class RemoteApi(
      * shape gets a 501 that says what is missing and why, which is more use than
      * a bare 404.
      */
-    private fun notInLite(path: String): Response = when {
+    private fun notInLite(path: String, post: Boolean = false): Response = when {
         // Labels, and everything the label index feeds.
         path.startsWith("/api/labels") || path == "/api/label-albums" ->
             Json.error(501, Settings.LABELS_UNAVAILABLE)
@@ -2120,7 +2206,10 @@ class RemoteApi(
         // Playlists, sharing and saved lists are not in this build yet. Empty
         // collections keep their screens at "nothing here" rather than an error.
         path == "/api/playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
-        path == "/api/smart-playlists" -> Json.obj(JSONObject().put("playlists", JSONArray()))
+        // GET only. Answering a SAVE with the same empty list told the page it
+        // had worked — it checks for a 2xx and toasts 'Saved "<name>"' — while
+        // nothing was kept anywhere.
+        path == "/api/smart-playlists" && !post -> Json.obj(JSONObject().put("playlists", JSONArray()))
         path.startsWith("/api/playlist") ||
             path.startsWith("/api/smart-playlist") || path.startsWith("/api/share") ->
             Json.error(501, "Playlists and sharing aren't in the lite build yet.")

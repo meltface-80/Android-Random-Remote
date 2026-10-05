@@ -1210,12 +1210,18 @@ class RemoteApiTest {
      * to loopback — so nothing off the phone could ever reach it. Opening that
      * up would put an API that controls playback on the LAN with no
      * authentication in front of it.
+     *
+     * Rouen's page asks /api/settings/display at boot (it decides whether to
+     * show a "Wall display" menu entry and a screensaver), so that one route
+     * answers — OFF, which is what keeps both hidden — and still refuses to be
+     * turned on. Nothing that serves the display itself exists.
      */
     @Test
     fun theWallDisplayRoutesAreGone() {
         assertEquals(404, get("/api/display/content").first)
-        assertEquals(404, get("/api/settings/display").first)
-        assertEquals(404, post("/api/settings/display", """{"enabled":true}""").first)
+        assertFalse(json("/api/settings/display").getBoolean("enabled"))
+        assertEquals(501, post("/api/settings/display", """{"enabled":true}""").first)
+        assertFalse(json("/api/settings/display").getBoolean("enabled"))
     }
 
     @Test

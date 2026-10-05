@@ -232,7 +232,13 @@ data class Zone(
     val isSeekAllowed: Boolean,
     val settings: ZoneSettings,
     val outputs: List<Output>,
-    val nowPlaying: NowPlaying?
+    val nowPlaying: NowPlaying?,
+    /**
+     * How many queue items are still to come, as Roon reports it. The page's
+     * Queue tab re-reads the queue when this moves — a track ending, a radio
+     * top-up, an edit made in Roon's own app. Null when the Core did not say.
+     */
+    val queueItemsRemaining: Int? = null
 ) {
     val isPlaying: Boolean get() = state == "playing"
 
@@ -272,7 +278,9 @@ data class Zone(
                 isSeekAllowed = o.optBoolean("is_seek_allowed", false),
                 settings = ZoneSettings.parse(o.optJSONObject("settings")),
                 outputs = outs,
-                nowPlaying = NowPlaying.parse(o.optJSONObject("now_playing"))
+                nowPlaying = NowPlaying.parse(o.optJSONObject("now_playing")),
+                queueItemsRemaining = if (o.has("queue_items_remaining") && !o.isNull("queue_items_remaining"))
+                    o.optInt("queue_items_remaining", 0) else null
             )
         }
     }
