@@ -518,9 +518,23 @@ class RemoteApi(
             return Json.ok()
         }
 
+        // An output whose volume is incremental has no scale to step through,
+        // so the page's − and + send {"relative": ±1} rather than a value.
+        // This route demanded a value and answered 400, so on those
+        // amplifiers the buttons did nothing.
+        if (!body.has("value") && body.has("relative")) {
+            val step = body.optDouble("relative", Double.NaN)
+            if (step.isNaN() || step == 0.0) return Json.error(400, "relative must be a non-zero number")
+            for (out in targets) {
+                if (out.volume == null) continue
+                roon.changeVolume(out.outputId, "relative", step)
+            }
+            return Json.ok()
+        }
+
         val how = body.str("how").ifEmpty { "absolute" }
         val value = body.optDouble("value", Double.NaN)
-        if (value.isNaN()) return Json.error(400, "value is required")
+        if (value.isNaN()) return Json.error(400, "value, relative or mute is required")
 
         for (out in targets) {
             val vol = out.volume ?: continue
@@ -586,12 +600,19 @@ class RemoteApi(
         return Json.ok()
     }
 
+    /**
+     * Move playback to another zone. from_zone and to_zone are the page's
+     * names — this read `from` and `to`, which nothing sends, so every transfer
+     * was refused with 400 and the music stayed in the room it was in.
+     */
     private fun transferZone(request: Request): Response {
         val body = Json.body(request)
-        val from = body.str("from").takeIf { it.isNotEmpty() }
-            ?: return Json.error(400, "from is required")
-        val to = body.str("to").takeIf { it.isNotEmpty() }
-            ?: return Json.error(400, "to is required")
+        val from = body.strOrNull("from_zone")
+            ?: return Json.error(400, "from_zone and to_zone are required")
+        val to = body.strOrNull("to_zone")
+            ?: return Json.error(400, "from_zone and to_zone are required")
+        // Rouen's answer too: moving a zone onto itself is nothing to ask Roon.
+        if (from == to) return Json.ok(JSONObject().put("noop", true))
         roon.transferZone(from, to)
         return Json.ok()
     }

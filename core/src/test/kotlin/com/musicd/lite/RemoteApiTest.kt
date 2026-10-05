@@ -724,6 +724,39 @@ class RemoteApiTest {
         )
     }
 
+    /**
+     * Moving playback to another room, with exactly the body the zone picker
+     * sends. The route read `from` and `to`; the page has always sent
+     * from_zone and to_zone, so every transfer was answered 400 "from is
+     * required" and the music stayed where it was.
+     */
+    @Test
+    fun aTransferUsesThePagesFieldNames() {
+        val (code, text) = post("/api/transfer-zone", """{"from_zone":"z1","to_zone":"z2"}""")
+        assertEquals(text, 200, code)
+        assertEquals(listOf("transfer:z1:z2"), core.calls)
+    }
+
+    @Test
+    fun aTransferToTheSameZoneIsANoOpNotACoreCall() {
+        val (code, _) = post("/api/transfer-zone", """{"from_zone":"z1","to_zone":"z1"}""")
+        assertEquals(200, code)
+        assertEquals(emptyList<String>(), core.calls)
+    }
+
+    /**
+     * The − and + buttons on an output whose volume is incremental — up/down
+     * only, no scale — send {"relative": ±1}, because there is no value to
+     * step from. The route demanded `value` and answered 400, so on those
+     * amplifiers the buttons did nothing.
+     */
+    @Test
+    fun anIncrementalStepIsSentAsRelative() {
+        val (code, text) = post("/api/volume", """{"zone_or_output_id":"z1","relative":-1}""")
+        assertEquals(text, 200, code)
+        assertEquals(listOf("volume:o1:relative:-1.0"), core.calls)
+    }
+
     @Test
     fun transportCommandsReachRoon() {
         assertEquals(200, post("/api/control", """{"zone_or_output_id":"z1","command":"playpause"}""").first)
@@ -750,12 +783,12 @@ class RemoteApiTest {
         assertEquals(listOf("mute:o1:mute", "mute:o1:unmute"), core.calls)
     }
 
-    /** A request that is neither a mute nor a value is still a bad request. */
+    /** A request that is neither a mute, a value nor a relative step is still a bad request. */
     @Test
     fun aVolumeRequestWithNothingToDoIsRefused() {
         val (code, text) = post("/api/volume", """{"zone_or_output_id":"z1"}""")
         assertEquals(400, code)
-        assertTrue(JSONObject(text).getString("error").contains("value is required"))
+        assertTrue(JSONObject(text).getString("error").contains("value, relative or mute is required"))
         assertTrue(core.calls.isEmpty())
     }
 
