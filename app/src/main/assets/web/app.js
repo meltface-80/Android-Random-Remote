@@ -12934,7 +12934,12 @@ function toastBottomAbovePill() {
     const where = j.source === "env" ? " — from the install command (" + envName + "). Saving here overrides it." : "";
     if (j.check === "ok") return "✓ Checked and working: " + j.masked + where;
     if (j.check === "invalid") return "The service refused this key (" + j.masked + "). Check it was copied in full." + where;
-    return "Current: " + j.masked + " — couldn’t reach the service to check it." + where;
+    // Rouen Lite: "unknown" is a check that could not reach the service. No
+    // check at all is this build, which keeps the key but has nothing that
+    // uses it (the label features it feeds are not here) — and so never asks.
+    // Saying the service could not be reached would be untrue.
+    if (j.check === "unknown") return "Current: " + j.masked + " — couldn’t reach the service to check it." + where;
+    return "Current: " + j.masked + (j.unused ? " — kept, but nothing in Rouen Lite uses it yet." : "") + where;
   }
 
   const discogsTokenInput  = document.getElementById("discogs-token-input");
