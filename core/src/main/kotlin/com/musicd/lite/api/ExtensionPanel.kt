@@ -101,6 +101,6 @@ class ExtensionPanel(private val app: MusicdLite) : ExtensionServices.Panel {
             albums > 0 -> "$albums albums"
             else -> "No library yet"
         }
-        return "MusicD Remote Lite ${app.version} — $library"
+        return "Rouen Lite ${app.version} — $library"
     }
 }

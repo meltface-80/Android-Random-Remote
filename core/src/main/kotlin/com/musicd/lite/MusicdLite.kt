@@ -38,6 +38,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.OkHttpClient
 
 /**
+ * What Roon lists under Settings → Extensions, and what the page tells the
+ * user to click Enable on — ExtensionNameTest holds the two together. Only the
+ * NAME: the extension id is what Roon keys its authorisation on, and that is
+ * unchanged since the first build.
+ */
+const val EXTENSION_NAME = "Rouen Lite (Android)"
+
+/**
  * The whole app, minus the Android shell.
  *
  * Everything MusicD-Remote's Node process does — pair with the Core, hold the
@@ -136,7 +144,7 @@ class MusicdLite(
 
     val extension = RoonCore.ExtensionInfo(
         id = "com.musicd.lite.android",
-        displayName = "MusicD Remote Lite (Android)",
+        displayName = EXTENSION_NAME,
         version = version,
         publisher = "Android-Random-Remote",
         email = "noreply@example.com",

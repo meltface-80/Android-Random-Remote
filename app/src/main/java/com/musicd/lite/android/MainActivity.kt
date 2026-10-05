@@ -38,7 +38,7 @@ class MainActivity : Activity() {
         const val NOTIFICATION_PERMISSION = 1
 
         /** Matches the front-end's page background, so nothing flashes. */
-        const val BACKGROUND = 0xFF0E1012.toInt()
+        const val BACKGROUND = 0xFF17191C.toInt()
 
         /** How long to wait for the local server before saying something. */
         const val SERVER_WAIT_MS = 10_000L
