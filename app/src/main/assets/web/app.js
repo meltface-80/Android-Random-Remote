@@ -169,8 +169,14 @@
   // desktop) divided by the tile size, so a bigger tile is fewer columns. List
   // is the grid/list toggle's own stored choice, shown here as a fourth option.
   const UI_OPTS = {
-    text:  { key: "rra-ui-text",  def: "1",    allowed: ["1", "1.1", "1.25", "1.5"] },
-    title: { key: "rra-ui-title", def: "1",    allowed: ["1", "1.1", "1.25", "1.5"] },
+    // +75% and +100% are offered on a desktop only (v1.8.78) — a screen
+    // across the room. They are always ALLOWED, so a value chosen on a desktop
+    // survives the window being narrowed.
+    text:  { key: "rra-ui-text",  def: "1",    allowed: ["1", "1.1", "1.25", "1.5", "1.75", "2"] },
+    title: { key: "rra-ui-title", def: "1",    allowed: ["1", "1.1", "1.25", "1.5", "1.75", "2"] },
+    // Every other piece of text in the app — the side menu, Home's titles,
+    // Settings, sheets, buttons (v1.8.78).
+    chrome: { key: "rra-ui-chrome", def: "1",  allowed: ["1", "1.1", "1.25", "1.5", "1.75", "2"] },
     cols:  { key: "rra-ui-cols",  def: "auto", allowed: ["auto", "3", "2"] },
     tile:  { key: "rra-ui-tile",  def: "1",    allowed: ["0.5", "0.75", "0.9", "1", "1.1", "1.25", "1.5"] },
   };
@@ -213,6 +219,7 @@
     const put = (prop, v, def) => { if (v === def) root.removeProperty(prop); else root.setProperty(prop, v); };
     put("--ui-text",  uiVal("text"),  "1");
     put("--ui-title", uiVal("title"), "1");
+    put("--ui-chrome", uiVal("chrome"), "1");
     put("--ui-tile",  uiVal("tile"),  "1");
     const eff = effGridCols();
     if (eff === baseGridCols()) root.removeProperty("--grid-cols");
@@ -238,6 +245,13 @@
   // aborts the whole app (blank screen).
   const PHONE_WALL_COUNT = 24;
   let albumCount = computeAlbumCount();
+  // Whether the Library wall's filter field is open, and whether a filter was
+  // dropped by leaving the wall (so the wall re-reads unfiltered when it comes
+  // back). Up here because showHome(), showWall() and enterFullWall() reach
+  // them through hideLibraryControls(): a `let` read above its declaration is
+  // the v1.5.66 startup-crash class.
+  let libFilterOpen = false;
+  let libPrefixDropped = false;
   let labelsActive = false;        // viewing the record-label browser?
   let libraryWallActive = false;   // viewing the full A-Z library grid?
   // Declared up here with the other view flags, NOT beside showPlaylists():
@@ -664,7 +678,7 @@
     try { localStorage.setItem(THEME_KEY, currentThemeId); }
     catch (e) { /* localStorage optional — the theme still applies for this session */ }
   }
-  // The Appearance pane builds its picker from this.
+  // UI Settings builds its theme picker from this.
   window.__themes = THEMES;
   window.__currentThemeId = () => currentThemeId;
   window.__setTheme = setTheme;
@@ -975,6 +989,16 @@
       el.classList.toggle("hidden",
         !showable || (showable && rowHidesWhenEmpty(row.id) && !rowHasAnyContent(el)));
     }
+    // A screen whose Home row is switched off keeps a way in (v1.8.83). The
+    // side menu lost Random albums and Smart Picks because their rows' headings
+    // open them — so with a row off in Settings → Setup → Home Screen, the
+    // menu entry comes back, and goes again when the row does. Smart Picks
+    // switched off as a feature (unavailable) has no screen worth opening.
+    for (const [id, itemId] of [["random", "menu-item-random"], ["picks", "menu-item-picks"]]) {
+      const r = homeLayout.find(x => x.id === id);
+      const item = document.getElementById(itemId);
+      if (item) item.classList.toggle("hidden", !r || r.on || !!r.unavailable);
+    }
   }
   async function loadHomeLayout() {
     try {
@@ -1029,22 +1053,11 @@
   catch (e) {} // localStorage optional (private browsing) — grid is the default
 
   // Painted onto the grid itself, so it survives every re-render without each
-  // render path having to remember it.
+  // render path having to remember it. Chosen in Settings → UI Settings → Grid
+  // layout (v1.8.78: the grid/list button in the top bar is gone — one setting,
+  // in one place, for every grid screen).
   function applyAlbumView() {
     if (grid) grid.classList.toggle("as-list", albumViewList);
-    const btn  = document.getElementById("topbar-view");
-    const icoG = document.getElementById("topbar-view-grid");
-    const icoL = document.getElementById("topbar-view-list");
-    // The icon shows what a tap GIVES you, not what you are looking at — the
-    // same way the app's other mode buttons read.
-    if (icoG) icoG.classList.toggle("hidden",  albumViewList);
-    if (icoL) icoL.classList.toggle("hidden", !albumViewList);
-    if (btn) {
-      const label = albumViewList ? "Show as grid" : "Show as list";
-      btn.setAttribute("aria-label", label);
-      btn.setAttribute("title", label);
-      btn.setAttribute("aria-pressed", String(albumViewList));
-    }
   }
 
   window.__albumViewIsList = () => albumViewList;
@@ -1055,34 +1068,28 @@
     applyAlbumView();
   };
 
-  function setTopbarNav(back, refresh, search, view) {
+  // The menu button is Home's alone (v1.8.83, Mandarin v0.6.24): on every
+  // other screen — the album grids, Listen later, the playlists, an artist,
+  // Discover — the brass ‹ stands where it was and goes Home, which
+  // is where the menu is. Followed from the ‹ itself, so every place that
+  // shows or hides it (setTopbarNav, the artist view's save and restore) keeps
+  // the two in step without knowing about the menu.
+  {
+    const menuBtn = document.getElementById("menu-toggle");
+    if (menuBtn && topbarBack) {
+      const sync = () => menuBtn.classList.toggle("hidden", !topbarBack.classList.contains("hidden"));
+      new MutationObserver(sync).observe(topbarBack, { attributes: true, attributeFilter: ["class"] });
+      sync();
+    }
+  }
+  function setTopbarNav(back, refresh, search) {
     if (topbarBack)    topbarBack.classList.toggle("hidden", !back);
     if (topbarRefresh) topbarRefresh.classList.toggle("hidden", !refresh);
     if (topbarSearch)  topbarSearch.classList.toggle("hidden", !search);
-    // Defaults to hidden: only the screens that actually show album tiles ask
-    // for it, so it never appears over a playlist's track list.
-    const vb = document.getElementById("topbar-view");
-    if (vb) vb.classList.toggle("hidden", !view);
     // The Labels screen's tools belong to that one screen: every other screen
     // that sets the bar hides them, and the label list shows them again.
     if (window.__showLabelTools) window.__showLabelTools(false);
     applyAlbumView();
-  }
-
-  // Wired here, in the scope that owns albumViewList — it was briefly attached
-  // inside the mini-transport IIFE, where the state is not in scope at all and
-  // a tap would have thrown. `node --check` cannot see that; only running it
-  // can, which is what pre-flight step 3 is for.
-  {
-    const viewBtn = document.getElementById("topbar-view");
-    if (viewBtn) {
-      viewBtn.addEventListener("click", () => {
-        albumViewList = !albumViewList;
-        try { localStorage.setItem(ALBUM_VIEW_KEY, albumViewList ? "list" : "grid"); }
-        catch (e) {} // localStorage optional — the choice still holds for this session
-        applyAlbumView();
-      });
-    }
   }
 
   // Show the Home landing (hide the wall). The wall loads lazily when entered.
@@ -1134,7 +1141,7 @@
     if (window.__exitArtistView) window.__exitArtistView({ restore: false });
     if (homeView) homeView.classList.add("hidden");
     grid.classList.remove("hidden");
-    setTopbarNav(true, true, false, true);   // random / genre grid: Back + Refresh + view, no search
+    setTopbarNav(true, true, false);   // random / genre grid: Back + Refresh, no search
     // Home and the grid share <main>'s scroll container — without this, a
     // wall entered while Home was scrolled down (e.g. tapping a genre card
     // below the fold) opens mid-page/at-the-bottom instead of at the top.
@@ -2179,7 +2186,7 @@
   // (an entry Roon has just imported becomes playable where it stands).
   const LATER_DEPS = ["later", "library"];
   const LATER_EMPTY = "Nothing put aside yet. Open any album and choose Listen later from its ⋯ menu, " +
-                      "or send Smart Picks here in Settings → Smart Picks.";
+                      "or send Smart Picks here in Settings → Setup → Smart Picks.";
   let laterReadStamp = null;
   const laterOnScreen = () =>
     laterActive && !(window.__artistViewActive && window.__artistViewActive());
@@ -2294,7 +2301,7 @@
     }
     if (!j.enabled) {
       grid.innerHTML = "";
-      setBanner("Discover is switched off. Turn it on in Settings \u2192 Discover and " +
+      setBanner("Discover is switched off. Turn it on in Settings \u2192 Setup \u2192 Discover and " +
                 "it will look for new records by the artists you play.", false);
       return;
     }
@@ -2429,7 +2436,21 @@
       if (sec) sec.classList.add("hidden");
       return false;
     }
-    if (titleEl) titleEl.textContent = "Label of the week: " + label;
+    if (titleEl) {
+      // "Label of the week: Island" — the name in its own span, which the look
+      // sets large on its own line under the heading (Mandarin's). The text
+      // reads the same either way, so screen readers and the header's
+      // accessible name are unchanged.
+      titleEl.textContent = "Label of the week";
+      const name = document.createElement("span");
+      name.className = "home-lotw-name";
+      const sep = document.createElement("span");
+      sep.className = "home-lotw-sep";
+      sep.textContent = ": ";
+      name.appendChild(sep);
+      name.appendChild(document.createTextNode(label));
+      titleEl.appendChild(name);
+    }
     homeLotw.dataset.label = label;
     if (sec) sec.classList.toggle("hidden", !homeRowOn("lotw"));   // never un-hide a row the layout switched off
     reconcileTiles(homeLotw, albums, (a) => homeTile(a));   // full-hierarchy offsets → filter:null
@@ -2507,6 +2528,32 @@
     if (e.key === "Escape") closeOverflowMenu();
   });
 
+  /*
+   * A menu that would be cut off, opened the other way (Mandarin v0.7.8). A
+   * menu opens under its button as a rule, but the box that clips it (the
+   * nearest scrolling ancestor, within the window) is not always where the
+   * rule expects: a playlist's ⋯ at the foot of the screen, or an album's with
+   * the page scrolled so its row sits at the bottom. A menu cut off by a box
+   * that does not scroll cannot be reached at all. So it is measured as it
+   * opens, and turned round when the other side has more room.
+   */
+  function placeOverflowMenu(menu, btn) {
+    menu.classList.remove("opens-up", "opens-down");
+    const m = menu.getBoundingClientRect(), b = btn.getBoundingClientRect();
+    let top = 0, bottom = window.innerHeight;
+    for (let el = menu.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(el).overflowY)) {
+        const r = el.getBoundingClientRect();
+        top = Math.max(top, r.top); bottom = Math.min(bottom, r.bottom);
+        break;
+      }
+    }
+    const up = m.bottom <= b.top + 1;
+    const roomAbove = b.top - top - 6, roomBelow = bottom - b.bottom - 6;
+    if (up && m.height > roomAbove && roomBelow > roomAbove) menu.classList.add("opens-down");
+    else if (!up && m.height > roomBelow && roomAbove > roomBelow) menu.classList.add("opens-up");
+  }
+
   // items: [{ label, onClick, danger, title }]. Returns the wrapper to append.
   function buildOverflowMenu(items, opts) {
     opts = opts || {};
@@ -2553,6 +2600,7 @@
       closeOverflowMenu();
       if (wasOpen) return;
       menu.classList.remove("hidden");
+      placeOverflowMenu(menu, btn);
       btn.setAttribute("aria-expanded", "true");
       _openOverflow = { btn, menu };
     });
@@ -2594,7 +2642,7 @@
     if (homeView) homeView.classList.add("hidden");
     if (homeSections) homeSections.classList.remove("hidden");
     grid.classList.remove("hidden");
-    setTopbarNav(true, false, false, !!albumWall);   // Back (to Home), no Refresh, no search
+    setTopbarNav(true, false, false);   // Back (to Home), no Refresh, no search
     setCountText(title);
     const m = document.querySelector("main");
     if (m) m.scrollTop = 0;
@@ -2824,6 +2872,20 @@
     playlistsActive = true;
     const mySeq = ++playlistSeq;
     grid.innerHTML = "";
+    // Import, at the top of the screen (v1.8.83, Mandarin v0.6.24; it was a
+    // side-menu item). Taken away again by leavePlaylistScreens.
+    {
+      const pc = document.getElementById("content-count");
+      if (pc) {
+        pc.innerHTML = "";
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "playlists-import"; b.textContent = "Import";
+        b.setAttribute("aria-label", "Import a playlist");
+        b.addEventListener("click", () => { if (window.__openImportSheet) window.__openImportSheet(); });
+        pc.appendChild(b);
+        pc.classList.remove("hidden");
+      }
+    }
 
     // `null` means "this source did not answer", which is distinct from a
     // source that answered with an empty list — one is a warning, the other is
@@ -3108,7 +3170,16 @@
   // firing a browse walk per playlist at the Core long after the user has left.
   // Centralised so a future screen can call one thing instead of remembering
   // four flags.
-  function leavePlaylistScreens() {
+  function leavePlaylistScreens(opts) {
+    // The Playlists screen's Import button goes with the screen. Looked for
+    // rather than gated on playlistsActive: Mandarin tests the flag after
+    // clearing it, so its button stayed on every screen after Playlists.
+    // The artist view keeps it (keepChrome): it saves the line the button sits
+    // in and puts it back with the screen it came from.
+    if (!(opts && opts.keepChrome)) {
+      const pc = document.getElementById("content-count");
+      if (pc && pc.querySelector(".playlists-import")) { pc.innerHTML = ""; pc.classList.add("hidden"); }
+    }
     playlistsActive = false;
     playlistDetailActive = false;
     smartWallActive = false;
@@ -3134,10 +3205,40 @@
   }
   window.__leavePlaylistScreens = leavePlaylistScreens;
 
-  function leaveLibraryWall() { const was = libraryWallActive; libraryWallActive = false; return was; }
+  // The wall's Focus / Sort / search live in the TOP BAR since v1.8.78, so a
+  // view that borrows the grid (the artist page) must take them with it, and
+  // hand them back with the wall.
+  // Every way off the wall goes through here: the controls leave the bar, an
+  // open filter closes, and the title the open field had hidden comes back —
+  // otherwise the NEXT screen's title stays hidden under .lib-filtering.
+  function hideLibraryControls() {
+    const c = document.getElementById("library-controls");
+    if (c) c.classList.add("hidden");
+    const f = document.getElementById("library-filter");
+    if (f) f.classList.add("hidden");
+    if (libFilterOpen || libView.prefix) {
+      if (libView.prefix) libPrefixDropped = true;
+      libFilterOpen = false;
+      libView.prefix = "";
+    }
+    const tb = document.querySelector(".topbar");
+    if (tb) tb.classList.remove("lib-filtering", "lib-wall");
+  }
+  function leaveLibraryWall() {
+    const was = libraryWallActive;
+    libraryWallActive = false;
+    hideLibraryControls();
+    return was;
+  }
   window.__leaveLibraryWall = leaveLibraryWall;
   window.__restoreLibraryWall = (was) => {
     libraryWallActive = !!was;
+    // The tiles that come back are the ones on screen when the wall was left.
+    // If a filter was dropped on the way out they are FILTERED tiles under a
+    // closed field — so read the wall again, unfiltered, rather than show them.
+    const dropped = libPrefixDropped;
+    libPrefixDropped = false;
+    if (was) { if (dropped) applyLibView(); else renderLibraryControls(); }
     // Anything that moved while another view borrowed the grid was not heard:
     // this wall was not active then. Catch up now that it is on screen again.
     if (libraryWallNeedsRead()) liveWhenIdle("library-wall", refreshLibraryWall);
@@ -6097,7 +6198,7 @@
   // tile built from an older cached payload keeps its badge.
   // ----- Quality badge -----------------------------------------------------
   //
-  // "24/96" on the artwork, off by default and switched on in Appearance. It is
+  // "24/96" on the artwork, off by default and switched on in UI Settings. It is
   // read from your own files, so a streamed album simply has none — the server
   // sends the field only when it knows, and no badge is drawn otherwise. A
   // question mark or a guess would be worse than silence.
@@ -6275,11 +6376,16 @@
       finally { pendingNavTile = null; }
     });
     if (selectable) {
-      // Long press ARMS selection without selecting the tile under the finger.
-      // Pressing something and having it become selected is how you end up
-      // with a selection you didn't ask for when you only wanted the mode.
+      // A long press starts selecting WITH the tile under the finger as the
+      // first pick (Mandarin v0.7.0): the press says which album you meant.
+      // Once selecting, a long press does nothing — a tap toggles, and a press
+      // that also toggled would undo the pick it was meant to make. The click
+      // the browser dispatches on release is eaten by addLongPress, so the
+      // pick is made once (v1.7.22's double-fire cannot return).
       addLongPress(btn, () => {
-        if (!albumSelectMode) enterAlbumSelectMode();
+        if (albumSelectMode) return;
+        enterAlbumSelectMode();
+        handleAlbumTileSelect(btn, a);
       });
     }
     return btn;
@@ -7948,7 +8054,7 @@
     const labels = {
       play_now:  "Play Now",
       queue:     "Queue",
-      play_next: "Next",
+      play_next: "Play Next",
       shuffle:   "Shuffle",
       radio:     "Radio"
     };
@@ -7957,7 +8063,7 @@
       if (!map.has(a.kind)) map.set(a.kind, a);
     }
 
-    // Play Now and Queue stay on the row; Next / Shuffle / Radio go behind the
+    // Play Now and Queue stay on the row; Play Next / Shuffle / Radio go behind the
     // overflow menu. Five pills hit the same wall the playlist screens did —
     // .action-btn is `flex: 1 1 0`, so they shrink together instead of
     // wrapping, and on a phone the labels start clipping.
@@ -8089,9 +8195,13 @@
           toggleTrackActions(li, t, idx);
         });
 
-        // Long press ARMS selection without selecting this track — same rule
-        // as the album grid.
-        addLongPress(li, () => { if (!trackSelectMode) enterTrackSelectMode(); });
+        // A long press starts selecting with this track picked — same rule
+        // as the album grid (Mandarin v0.7.0).
+        addLongPress(li, () => {
+          if (trackSelectMode) return;
+          enterTrackSelectMode();
+          toggleTrackSelected(li, t, idx);
+        });
         modalTracks.appendChild(li);
       });
     }
@@ -8154,6 +8264,11 @@
     if (!currentAlbum) { showToast("No album open", "error"); return; }
     const picks = trackSelected.slice().sort((a, b) => a.index - b.index);
     if (!picks.length) return;
+    // Play next, several at once (Mandarin v0.6.22): every one goes in
+    // straight after the track playing, so each lands IN FRONT of the one sent
+    // before it. Sent last to first, they end up in album order — the same
+    // assumption lib/queue-history.js's playNextSendOrder names.
+    if (kind === "play_next") picks.reverse();
 
     let queued = 0, failed = 0, firstError = "";
     for (let i = 0; i < picks.length; i++) {
@@ -8168,10 +8283,11 @@
             track: p.index,
             title: p.title,
             zone_or_output_id: zone,
-            // Only the FIRST track honours the requested kind; the rest queue
-            // behind it. Sending play_now for each would leave the last track
-            // playing alone, having wiped the ones before it.
-            kind: (i === 0 ? kind : "queue"),
+            // Only the FIRST track honours Play now; the rest queue behind it.
+            // Sending play_now for each would leave the last track playing
+            // alone, having wiped the ones before it. Play next is every one,
+            // last to first (above).
+            kind: (kind === "play_next" || i === 0 ? kind : "queue"),
             album_title: currentAlbum.title || "",
             album_subtitle: currentAlbum.subtitle || "",
             filter_type:   currentDetailFilter ? currentDetailFilter.type   : "",
@@ -8192,7 +8308,7 @@
       showToast(firstError || "Roon refused those tracks", "error", TOAST_REPORT_MS);
       return;
     }
-    const verb = kind === "queue" ? "Queued" : "Playing";
+    const verb = kind === "queue" ? "Queued" : kind === "play_next" ? "Playing next:" : "Playing";
     let msg = `${verb} ${queued} track${queued === 1 ? "" : "s"}`;
     if (failed) msg += ` (${failed} failed: ${firstError})`;
     showToast(msg, failed ? "error" : null, TOAST_REPORT_MS);
@@ -8223,6 +8339,9 @@
       return b;
     };
     row.appendChild(mk("Play now", "play_now", true));
+    // Play next (Mandarin v0.6.22): straight after the track playing, the rest
+    // of the queue moved down behind it.
+    row.appendChild(mk("Play next", "play_next", false));
     row.appendChild(mk("Queue", "queue", false));
     li.appendChild(row);
   }
@@ -8254,7 +8373,10 @@
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      showToast(`${j.action || orig}: ${track.title} → ${zoneName(selectedZoneId)}`);
+      // Said in the app's own words for what was asked (Roon's own titles —
+      // "Add Next" — read as a different thing from the button tapped).
+      const said = { play_now: "Playing", play_next: "Playing next", queue: "Queued" }[kind] || j.action || orig;
+      showToast(`${said}: ${track.title} → ${zoneName(selectedZoneId)}`);
       // Success — collapse the action row; the user stays on the album.
       closeTrackRow(li);
     } catch (e) {
@@ -8349,8 +8471,10 @@
       labelBtn.className = "modal-artist-link";
       labelBtn.textContent = extras.album.label;
       labelBtn.addEventListener("click", () => {
+        // Back from the label's albums returns to this page (v1.8.83).
+        const back = { album, opts: { source: currentSource, zoneId: currentSourceZoneId, filter: currentDetailFilter } };
         closeModal();
-        if (window.__showLabelAlbums) window.__showLabelAlbums(extras.album.label);
+        if (window.__showLabelAlbums) window.__showLabelAlbums(extras.album.label, false, back);
       });
       modalSub.appendChild(labelBtn);
     }
@@ -8477,7 +8601,8 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       if (typeof j.offset === "number" && j.offset >= 0) currentAlbum.offset = j.offset;
-      showToast(`${j.action || orig} → ${zoneName(selectedZoneId)}`);
+      const said = { play_now: "Playing", play_next: "Playing next", queue: "Queued", shuffle: "Shuffling", radio: "Starting radio" }[kind] || j.action || orig;
+      showToast(`${said} → ${zoneName(selectedZoneId)}`);
       // Keep the album view open after playing so the user stays on the album.
     } catch (e) {
       showToast(e.message, "error");
@@ -9573,9 +9698,17 @@
       if (logoCandidatesEl) logoCandidatesEl.innerHTML = "";
     }
 
-    async function showLabelAlbums(name, fromLabelsList = false) {
+    // Where ‹ goes from one label's albums when they were opened from an
+    // album's page: back to that page, not Home (v1.8.83, Mandarin v0.6.24).
+    let _labelsReturn = null;
+    async function showLabelAlbums(name, fromLabelsList = false, returnTo = null) {
       if (window.__leavePlaylistScreens) window.__leavePlaylistScreens();
       if (window.__clearSearchIfActive) window.__clearSearchIfActive();  // drop stale search results
+      // The label page is its own screen: an artist view still standing under
+      // the album it came from would take the ‹ and put back a screen from
+      // before both, losing the way back to the album (v1.8.83).
+      if (window.__exitArtistView) window.__exitArtistView({ restore: false });
+      _labelsReturn = returnTo && returnTo.album ? returnTo : null;
       if (fromLabelsList) {
         // Came from a tap on the Labels grid — remember the grid scroll position.
         _labelsScrollSaved = mainEl ? mainEl.scrollTop : 0;
@@ -9663,7 +9796,22 @@
       });
     });
 
-    if (labelsBack) labelsBack.addEventListener("click", () => showLabelsList());
+    if (labelsBack) labelsBack.addEventListener("click", () => { _labelsReturn = null; showLabelsList(); });
+    // The top bar's ‹ on a label's albums opened from an album's page: the
+    // usual ‹ (Home) runs, and the album's page comes back over it. Capture
+    // phase, so it sees the press before the handler that goes Home.
+    {
+      const tb = document.getElementById("topbar-back");
+      if (tb) tb.addEventListener("click", () => {
+        if (!_labelsReturn) return;
+        // An artist view opened over the label page takes this ‹ itself (back
+        // to the label page); the way back to the album is still wanted after.
+        if (window.__artistViewActive && window.__artistViewActive()) return;
+        if (!labelAlbumsOnScreen()) { _labelsReturn = null; return; }
+        const r = _labelsReturn; _labelsReturn = null;
+        if (window.__openAlbum) setTimeout(() => window.__openAlbum(r.album, r.opts), 0);
+      }, true);
+    }
 
     window.__exitLabelSelectMode = exitLabelSelectMode;
 
@@ -9732,7 +9880,7 @@
       // play-multi now answers 200 with counts when some albums failed, so the
       // count reported has to come from the response, not from what was asked.
       // `total` is omitted — a hand-picked selection is never capped.
-      showToast(multiOutcome(kind === "play_now" ? "Playing" : "Queued",
+      showToast(multiOutcome(kind === "play_now" ? "Playing" : kind === "play_next" ? "Playing next:" : "Queued",
                              j, albumSelected.length, null) +
                 " → " + zoneName(selectedZoneId));
       exitAlbumSelectMode();
@@ -9955,8 +10103,9 @@
   // Reflect the opt-in features into the side menu.
   //
   // A menu entry for a feature that is switched off leads to a screen that can
-  // only ever be empty — the Labels browser with no scan behind it, Smart Picks
-  // with no build. Hiding the entry is part of "off", not decoration.
+  // only ever be empty — the Labels browser with no scan behind it, Discover
+  // with no build. Hiding the entry is part of "off", not decoration. (Smart
+  // Picks has no menu entry since v1.8.83: its Home row leads to it.)
   //
   // Exported because the settings pane flips these switches and the menu lives
   // elsewhere; both call this rather than reaching into each other's DOM.
@@ -9964,12 +10113,8 @@
   // cannot hide the other feature's entry.
   window.__applyFeatureMenu = (state) => {
     const labelsItem = document.getElementById("menu-item-labels");
-    const picksItem  = document.getElementById("menu-item-picks");
     if (labelsItem && typeof state.labels === "boolean") {
       labelsItem.classList.toggle("hidden", !state.labels);
-    }
-    if (picksItem && typeof state.picks === "boolean") {
-      picksItem.classList.toggle("hidden", !state.picks);
     }
     const discoverItem = document.getElementById("menu-item-discover");
     if (discoverItem && typeof state.discover === "boolean") {
@@ -10016,6 +10161,9 @@
   window.__buildAlbumTile = (a) => buildAlbumTile(a);
   window.__loadRandom = loadRandom;
   window.__showToast = (msg, kind) => showToast(msg, kind);
+  // The same dialog for the top-level screens outside this IIFE (Backup &
+  // restore, v1.8.84), so a question asked from Settings looks like every other.
+  window.__confirmDialog = (msg) => confirmDialog(msg);
 
   async function bootstrap() {
     // Instant open: paint the last Home from cache before we've reconnected, so
@@ -11021,9 +11169,11 @@
       npSeek.style.removeProperty("--seek-fill");
       return;
     }
+    // The unplayed part in --seek-rest where the look sets it (the level
+    // meter's faint segments, as Mandarin's), else the border colour.
     npSeek.style.setProperty("--seek-fill",
       "linear-gradient(to right, var(--accent) 0%, var(--accent) " + pct + "%, " +
-      "var(--border) " + pct + "%, var(--border) 100%)");
+      "var(--seek-rest, var(--border)) " + pct + "%, var(--seek-rest, var(--border)) 100%)");
   }
 
   async function seek(seconds) {
@@ -11691,6 +11841,153 @@
 })();
 
 /* ------------------------------------------------------------------ */
+/*  The mini player, moved about on a desktop (v1.8.81, Mandarin      */
+/*  v0.7.11)                                                          */
+/* ------------------------------------------------------------------ */
+/*
+ * Press anywhere on the bar but a button and drag: it goes where it is put,
+ * kept wholly on screen, and stays there (this browser remembers it). A
+ * press that hardly moves is a click as before — the cover and the title
+ * still open Now playing. Double-click the bar to send it back to its
+ * corner. Desktops only (a mouse, 1024px and wider, as the stylesheet's
+ * desktop size): on a phone or a tablet it stays put. The sheets it opens
+ * go with it: the volume sheet beside it, the zone list above it, or under
+ * it when it is near the top of the screen.
+ *
+ * Two things learned building it, both kept: the moves and the release are
+ * followed on the WINDOW, because a quick flick leaves the bar before the
+ * first move arrives; and the "swallow the next click" flag is cleared
+ * straight after the release, because a release outside the bar fires no
+ * click and the next real one would otherwise be lost.
+ */
+(function movableMiniPlayer() {
+  const bar = document.getElementById("mini-transport");
+  const volPop = document.getElementById("mt-vol-popover");
+  if (!bar || !window.matchMedia) return;
+  const desk = window.matchMedia("(hover: hover) and (pointer: fine) and (min-width: 1024px)");
+  const KEY = "rra-mini-pos";
+  const MARGIN = 8, THRESHOLD = 5;
+  let pos = null;            // { left, top } in px, or null: the corner
+  try { const v = JSON.parse(localStorage.getItem(KEY) || "null"); if (v && Number.isFinite(v.left) && Number.isFinite(v.top)) pos = v; } catch (e) { /* storage blocked */ }
+
+  const clamp = (p) => {
+    const r = bar.getBoundingClientRect();
+    return {
+      left: Math.max(MARGIN, Math.min(window.innerWidth - r.width - MARGIN, p.left)),
+      top: Math.max(MARGIN, Math.min(window.innerHeight - r.height - MARGIN, p.top))
+    };
+  };
+  function place() {
+    if (!desk.matches || !pos) {
+      bar.style.left = bar.style.top = bar.style.right = bar.style.bottom = "";
+      bar.classList.remove("mt-moved", "mt-drop-down");
+      placeSheets();
+      return;
+    }
+    // Hidden, it has no size to keep on screen: that waits till it shows.
+    if (bar.offsetWidth) pos = clamp(pos);
+    bar.style.left = pos.left + "px"; bar.style.top = pos.top + "px";
+    bar.style.right = "auto"; bar.style.bottom = "auto";
+    bar.classList.add("mt-moved");
+    placeSheets();
+  }
+  // The sheets it opens, beside it wherever it is.
+  function placeSheets() {
+    room();
+    const moved = desk.matches && !!pos;
+    const r = bar.getBoundingClientRect();
+    // Room above for the room list (it opens upwards): else under the bar.
+    bar.classList.toggle("mt-drop-down", moved && r.top < 360);
+    if (!volPop) return;
+    if (!moved) { volPop.style.left = volPop.style.top = volPop.style.right = volPop.style.bottom = ""; return; }
+    const h = volPop.offsetHeight || 96;
+    const above = r.top - h - 8 >= MARGIN;
+    volPop.style.left = r.left + "px"; volPop.style.right = "auto";
+    volPop.style.top = (above ? r.top - h - 8 : r.bottom + 8) + "px"; volPop.style.bottom = "auto";
+  }
+  function save() { try { if (pos) localStorage.setItem(KEY, JSON.stringify(pos)); else localStorage.removeItem(KEY); } catch (e) { /* this visit only */ } }
+
+  let drag = null, dragged = false;
+  // The moves and the release followed on the window: a quick flick leaves
+  // the bar before the first move is seen.
+  const move = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moving) {
+      if (Math.hypot(dx, dy) < THRESHOLD) return;
+      drag.moving = true;
+      bar.classList.add("is-dragging");
+    }
+    pos = { left: drag.left + dx, top: drag.top + dy };
+    place();
+    e.preventDefault();
+  };
+  const end = (e) => {
+    if (!drag || (e && e.pointerId !== drag.id)) return;
+    // The click that may follow this release is swallowed, and only that
+    // one: released off the bar there is none, and the next is a click.
+    if (drag.moving) { dragged = true; save(); setTimeout(() => { dragged = false; }, 0); }
+    drag = null;
+    bar.classList.remove("is-dragging");
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", end);
+    window.removeEventListener("pointercancel", end);
+  };
+  bar.addEventListener("pointerdown", (e) => {
+    if (!desk.matches || e.button !== 0 || drag) return;
+    if (e.target.closest("button, a, input, select, .mt-zone-popover, .mt-vol-popover")) return;
+    const r = bar.getBoundingClientRect();
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, left: r.left, top: r.top, moving: false };
+    dragged = false;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  });
+  // The cover is an <img>: a press and move on it starts the browser's own
+  // image drag, which cancels the pointer — the card stopped after its first
+  // step whenever it was picked up by its biggest part (found in review; the
+  // stylesheet's -webkit-user-drag covers WebKit, this covers the rest).
+  bar.addEventListener("dragstart", (e) => e.preventDefault());
+  // The room the card takes at the foot of the screen, MEASURED: it grows
+  // with the text size (UI Settings, up to twice), and the page, the album
+  // view, Now playing's queue, the share sheet and the volume sheet all read
+  // it (--mt-room in the stylesheet's desktop block). Its height, its 16px
+  // off the bottom and a 6px gap. Not on a phone or tablet, whose bar keeps
+  // the stylesheet's own numbers.
+  function room() {
+    const root = document.documentElement;
+    if (desk.matches && bar.offsetHeight) root.style.setProperty("--mt-room", (bar.offsetHeight + 22) + "px");
+    else root.style.removeProperty("--mt-room");
+  }
+  if (window.ResizeObserver) new ResizeObserver(room).observe(bar);
+  if (desk.addEventListener) desk.addEventListener("change", room); else if (desk.addListener) desk.addListener(room);
+  room();
+  // A drag is not a click: the cover and the title don't open Now playing
+  // at the end of one.
+  bar.addEventListener("click", (e) => { if (dragged) { dragged = false; e.stopPropagation(); e.preventDefault(); } }, true);
+  // Back to its corner.
+  bar.addEventListener("dblclick", (e) => {
+    if (!desk.matches || e.target.closest("button, a, input, select, .mt-zone-popover, .mt-vol-popover")) return;
+    pos = null; save(); place();
+  });
+  window.addEventListener("resize", () => place());
+  if (desk.addEventListener) desk.addEventListener("change", place); else if (desk.addListener) desk.addListener(place);
+  // The volume sheet placed as it opens (its height is known then).
+  if (volPop) new MutationObserver(() => { if (!volPop.classList.contains("hidden")) placeSheets(); })
+    .observe(volPop, { attributes: true, attributeFilter: ["class"] });
+  // Shown again (it is hidden on Now playing): kept on screen. Only the
+  // change from hidden to shown: place() sets the bar's own classes too.
+  let shown = !bar.classList.contains("hidden");
+  new MutationObserver(() => {
+    const now = !bar.classList.contains("hidden");
+    if (now && !shown) { room(); requestAnimationFrame(place); }
+    shown = now;
+  }).observe(bar, { attributes: true, attributeFilter: ["class"] });
+  place();
+  window.__miniPlayerPos = () => pos;
+})();
+
+/* ------------------------------------------------------------------ */
 /*  Where a toast sits: ABOVE the now-playing pill, never over it.     */
 /* ------------------------------------------------------------------ */
 // The pill floats at the bottom of every screen, and both toasts used to be
@@ -11699,11 +11996,16 @@
 // Measured rather than guessed: the pill's height follows its artwork, the
 // home-indicator inset and the Now-playing screen (which hides it). Returns
 // a CSS length for `bottom`, or "" to leave the stylesheet's own value.
+// A desktop's card can be MOVED (v1.8.81): dragged into the top half of the
+// screen, "above the pill" put the toast off the top of the window, so every
+// "Queued…" was invisible. There the pill is nowhere near the toast's own
+// place at the foot of the screen, so the stylesheet's value stands.
 function toastBottomAbovePill() {
   const pill = document.getElementById("mini-transport");
   if (!pill || pill.classList.contains("hidden")) return "";
   const r = pill.getBoundingClientRect();
   if (!r.height || r.top >= window.innerHeight) return "";
+  if (r.top < window.innerHeight / 2) return "";
   return Math.round(window.innerHeight - r.top + 12) + "px";
 }
 
@@ -11873,6 +12175,54 @@ function toastBottomAbovePill() {
     };
   }
 
+  // The card on screen, as an object URL; revoked when the next replaces it.
+  let cardUrl = null;
+
+  /*
+   * THE COVER THE CARD DRAWS IS THE ONE ALREADY ON SCREEN (v1.8.82, Mandarin
+   * v0.7.6). The card asked for the cover at 1000px with a timestamp on the
+   * end — a size nothing else on the page uses and an address that could
+   * never be cached — so every share meant the server decoding the full cover
+   * and encoding it again, and the phone downloading it. The album view and
+   * Now playing both show the cover at 800px, and the card's own cover pane is
+   * 424px, so the card asks for exactly that address and gets the browser's
+   * copy back. Mandarin measured 335 ms → 130 ms, and ~1.1 MB → nothing on a
+   * repeat share.
+   */
+  const COVER_SIZE = 800;
+  const coverUrlOf = (imageKey) => imageKey ? `/api/image/${encodeURIComponent(imageKey)}?size=${COVER_SIZE}` : "";
+  function prewarmCover(imageKey) {
+    if (!imageKey) return;
+    try { const im = new Image(); im.src = coverUrlOf(imageKey); } catch (e) { /* only a head start */ }
+  }
+  // The Rouen tile in the card's bottom-right corner (Rouen v1.8.82) — the
+  // same logo as this app's icon — fetched once the page is idle, so the
+  // first card never waits for it. It ships in the APK's assets.
+  const LOGO_URL = "/icons/rouen-tile.png";
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500));
+  idle(() => { try { const im = new Image(); im.src = LOGO_URL; } catch (e) { /* only a head start */ } });
+
+  /*
+   * The pill's room under the sheet (v1.8.82, Mandarin v0.7.9), only while
+   * the pill is on screen: it floats over the overlay, so the panel is centred
+   * above it. On Now playing it is hidden, and the sheet takes the full
+   * height. A desktop's card can be MOVED (v1.8.81): one dragged into the top
+   * half of the screen is not under the sheet's foot, and measuring "the room
+   * above it" there would squash the sheet to nothing, so it takes none.
+   */
+  function fitShareReserve() {
+    const mt = document.getElementById("mini-transport");
+    let reserve = 0;
+    if (mt && !mt.classList.contains("hidden")) {
+      const r = mt.getBoundingClientRect();
+      if (r.height > 0 && r.top < window.innerHeight && r.top >= window.innerHeight / 2) {
+        reserve = Math.max(0, Math.ceil(window.innerHeight - r.top - 20 + 8));
+      }
+    }
+    overlay.style.setProperty("--share-reserve", reserve + "px");
+  }
+  window.addEventListener("resize", () => { if (!overlay.classList.contains("hidden")) fitShareReserve(); });
+
   /*
    * Public entry point — called from album modal share button + mini transport.
    *
@@ -11912,16 +12262,23 @@ function toastBottomAbovePill() {
     frame.innerHTML =
       `<div class="share-placeholder"><div class="share-spinner"></div><div>Generating card…</div></div>`;
     overlay.classList.remove("hidden");
+    fitShareReserve();
 
     try {
-      await ensureFont();
-
+      // THE CARD FIRST, THEN THE SUGGESTIONS (Rouen v1.8.82). The font and the
+      // fast extras are asked for at once rather than one after the other, and
+      // the cover is the one ALREADY ON SCREEN — the album view's and Now
+      // playing's address, so it is the WebView's copy, not a fresh pull off
+      // the Core.
+      const coverUrl = coverUrlOf(input.image_key);
+      prewarmCover(input.image_key);
       const params = new URLSearchParams({ title, artist });
-      let fastExtra = EMPTY_EXTRA;
-      try {
-        const r = await fetch("/api/album/extras?fast=1&" + params, { cache: "no-store" });
-        if (r.ok) fastExtra = extraOf(await r.json());
-      } catch { /* keep blank */ }
+      const fast = fetch("/api/album/extras?fast=1&" + params, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then(extraOf)
+        .catch(() => EMPTY_EXTRA);   // no extras: the card is drawn without them
+      const [, fastExtra] = await Promise.all([ensureFont(), fast]);
+      if (!current()) return;
 
       const wantLate = !fastExtra.release || !fastExtra.review;
       const late = !wantLate ? null :
@@ -11930,19 +12287,13 @@ function toastBottomAbovePill() {
           .then(extraOf)
           .catch(() => EMPTY_EXTRA);
 
-      // size=800 is the size the album view and Now playing already loaded, so
-      // the picture is in the WebView's cache and the app's art cache by the
-      // time Share is pressed. No `t=` cache-buster: that made every card pull
-      // a fresh megapixel off the Core, twice for the same album.
-      const coverUrl = input.image_key
-        ? `/api/image/${encodeURIComponent(input.image_key)}?size=800`
-        : "";
-
       let shownLinks = null;
       const paint = async (extra) => {
         const blob = await ShareCard.render({
           coverUrl,
           wordmarkUrl: null,
+          // The Rouen tile in the card's bottom-right corner (Rouen v1.8.82).
+          logoUrl: LOGO_URL,
           title,
           artist,
           releaseRaw: extra.release,
@@ -11955,9 +12306,14 @@ function toastBottomAbovePill() {
         // Superseded while rendering: another record's card is on screen (or
         // the sheet is closed), and this one must not paint over it.
         if (!current()) return false;
-        const dataUrl = await blobToDataUrl(blob);
-        if (!current()) return false;
-        frame.innerHTML = `<img src="${dataUrl}" alt="Share card">`;
+        // On screen as an object URL, with no base64 copy of a large PNG to
+        // build first (Rouen v1.8.82). The previous one is let go.
+        if (cardUrl) URL.revokeObjectURL(cardUrl);
+        cardUrl = URL.createObjectURL(blob);
+        frame.innerHTML = "";
+        const img = document.createElement("img");
+        img.src = cardUrl; img.alt = "Share card";
+        frame.appendChild(img);
         buildActions(blob, title, artist);
         if (extra.links && extra.links !== shownLinks) {
           shownLinks = extra.links;
@@ -12365,7 +12721,16 @@ function toastBottomAbovePill() {
       // record line is optional rather than the row being dropped.
       const sub = act.album
         ? (act.year ? act.album + " \u00b7 " + act.year : act.album) : "";
-      similarLs.appendChild(goRow(act, act.name, sub));
+      const row = goRow(act, act.name, sub);
+      // Why it is here (v1.8.82, Mandarin v0.7.6): near which of your acts,
+      // or one you know with a record you don't have.
+      if (act.reason) {
+        const why = document.createElement("span");
+        why.className = "share-similar-why";
+        why.textContent = act.reason;
+        row.appendChild(why);
+      }
+      similarLs.appendChild(row);
     }
     similarEl.classList.toggle("hidden", !similarLs.children.length);
   }
@@ -12490,14 +12855,6 @@ function toastBottomAbovePill() {
       : "The card can't be shared from this device.";
   }
 
-  function blobToDataUrl(blob) {
-    return new Promise((res, rej) => {
-      const r = new FileReader();
-      r.onload  = () => res(r.result);
-      r.onerror = () => rej(new Error("read failed"));
-      r.readAsDataURL(blob);
-    });
-  }
   function mkBtn(cls, iconSvg, label) {
     const b = document.createElement("button");
     b.className = cls;
@@ -13240,6 +13597,9 @@ function toastBottomAbovePill() {
     });
     // Fall back to home if an unknown pane was requested.
     if (!matched) views.forEach(v => v.classList.toggle("hidden", v.getAttribute("data-view") !== "home"));
+    // Which level is up, for the tablet/desktop layout (v1.8.78): the list is a panel
+    // the width of the side menu, a page is as wide as its content.
+    overlay.classList.toggle("on-pane", matched && name !== "home");
     // Each level starts scrolled to the top, like a pushed page.
     if (sheet) sheet.scrollTop = 0;
   };
@@ -13248,11 +13608,20 @@ function toastBottomAbovePill() {
     return !home || !home.classList.contains("hidden");
   };
 
+  // One level up: a pane that names its parent (data-parent) goes there —
+  // Setup's pages back to Setup (v1.8.83, Mandarin v0.6.21) — anything else
+  // to the Settings list.
+  const stepBack = () => {
+    const open = sheet && sheet.querySelector('.settings-view[data-view="pane"]:not(.hidden)');
+    const parent = open && open.getAttribute("data-parent");
+    showView(parent || "home");
+  };
+
   if (sheet) {
     sheet.addEventListener("click", (e) => {
       const nav = e.target.closest(".settings-nav-item");
       if (nav) { showView(nav.getAttribute("data-pane")); return; }
-      if (e.target.closest("[data-settings-back]")) { showView("home"); return; }
+      if (e.target.closest("[data-settings-back]")) { stepBack(); return; }
     });
   }
 
@@ -13657,7 +14026,7 @@ function toastBottomAbovePill() {
   // asks Qobuz for audio and streaming tracks keep the plain bar.
   const qSecStatus = document.getElementById("qobuz-secret-status");
 
-  // No controls of its own any more: one Qobuz sign-in under Streaming accounts
+  // No controls of its own any more: one Qobuz sign-in under Services
   // covers browsing, favourites and waveforms alike, so this only reports what
   // that sign-in means for waveforms.
   function showQobuzSecretState(j) {
@@ -13669,10 +14038,10 @@ function toastBottomAbovePill() {
     }
     if (j && j.qobuz_secret_set) {
       qSecStatus.textContent = "Using saved credentials from an earlier version. " +
-        "Reconnect Qobuz under Streaming accounts to replace them.";
+        "Reconnect Qobuz under Services to replace them.";
       return;
     }
-    qSecStatus.textContent = "Connect Qobuz under Streaming accounts to enable this. " +
+    qSecStatus.textContent = "Connect Qobuz under Services to enable this. " +
       "Qobuz tracks keep the plain bar until then.";
   }
 
@@ -13973,18 +14342,48 @@ function toastBottomAbovePill() {
   const uiSelects = {
     text:   document.getElementById("ui-text-select"),
     title:  document.getElementById("ui-title-select"),
+    chrome: document.getElementById("ui-chrome-select"),
     layout: document.getElementById("ui-layout-select"),
     tile:   document.getElementById("ui-tile-select"),
   };
+  // The desktop-only steps: added to the three text selects on a desktop (the
+  // same test Now playing's × uses), and taken out again elsewhere — a hidden
+  // <option> is not reliably hidden in iOS's picker, so they are not there at
+  // all. A value already chosen stays selectable, so the select never shows a
+  // setting it cannot name.
+  const UI_DESKTOP_MQ = window.matchMedia
+    ? window.matchMedia("(min-width: 1024px) and (hover: hover) and (pointer: fine)") : null;
+  function syncUiDesktopSteps() {
+    const desktop = !!(UI_DESKTOP_MQ && UI_DESKTOP_MQ.matches);
+    for (const k of ["text", "title", "chrome"]) {
+      const sel = uiSelects[k];
+      if (!sel) continue;
+      const current = window.__uiSettings ? window.__uiSettings.get(k) : "1";
+      for (const [v, label] of [["1.75", "+75%"], ["2", "+100%"]]) {
+        const has = sel.querySelector('option[value="' + v + '"]');
+        const want = desktop || current === v;
+        if (want && !has) {
+          const o = document.createElement("option");
+          o.value = v; o.textContent = label;
+          sel.appendChild(o);
+        } else if (!want && has) {
+          has.remove();
+        }
+      }
+    }
+  }
+  if (UI_DESKTOP_MQ && UI_DESKTOP_MQ.addEventListener) UI_DESKTOP_MQ.addEventListener("change", syncUiDesktopSteps);
   function loadUiSettings() {
     const ui = window.__uiSettings;
     if (!ui) return;
+    syncUiDesktopSteps();
     if (uiSelects.text)   uiSelects.text.value   = ui.get("text");
     if (uiSelects.title)  uiSelects.title.value  = ui.get("title");
+    if (uiSelects.chrome) uiSelects.chrome.value = ui.get("chrome");
     if (uiSelects.layout) uiSelects.layout.value = ui.layout();
     if (uiSelects.tile)   uiSelects.tile.value   = ui.get("tile");
   }
-  for (const k of ["text", "title", "tile"]) {
+  for (const k of ["text", "title", "chrome", "tile"]) {
     if (uiSelects[k]) uiSelects[k].addEventListener("change", () => {
       if (window.__uiSettings) window.__uiSettings.set(k, uiSelects[k].value);
     });
@@ -14007,12 +14406,16 @@ function toastBottomAbovePill() {
   // icon, and a tap lands on the icon's path rather than on the button.
   overlay.addEventListener("click", (e) => {
     if (e.target.closest("[data-settings-close]")) close();
+    // On a tablet or desktop the panel leaves the page visible beside it
+    // (v1.8.78); a tap on that dimmed space closes Settings, as for the menu.
+    else if (e.target === overlay) close();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || overlay.classList.contains("hidden")) return;
-    // Escape steps back one level: pane → home, home → closed.
+    // Escape steps back one level: a Setup page → Setup, a pane → home,
+    // home → closed.
     if (atHome()) close();
-    else showView("home");
+    else stepBack();
   });
 })();
 
@@ -14039,6 +14442,289 @@ function toastBottomAbovePill() {
 /*  review detail. Handler no-ops while the overlay is closed, so the  */
 /*  rest of the app is unaffected.                                     */
 /* ------------------------------------------------------------------ */
+(function initBackups() {
+  // Backup & restore (v1.8.84, after Mandarin v0.6.14). The app keeps the
+  // backups (/api/backups); this page chooses the parts, makes one, lists
+  // them, and restores. Rouen restarts its server after a restore; this build
+  // has nothing to restart — every reader goes to the store — so the page
+  // simply reloads, and nothing keeps showing what was there before.
+  const pane    = document.querySelector('.settings-pane[data-pane="backup"]');
+  const partsEl = document.getElementById("backup-parts");
+  const listEl  = document.getElementById("backup-list");
+  const nowBtn  = document.getElementById("backup-now");
+  const upBtn   = document.getElementById("backup-upload");
+  const fileIn  = document.getElementById("backup-file");
+  const status  = document.getElementById("backup-status");
+  if (!pane || !partsEl || !listEl || !nowBtn || !upBtn || !fileIn || !status) return;
+
+  const PART_NAMES = {
+    settings:  "Settings",
+    playlists: "Playlists",
+    later:     "Listen later",
+    keys:      "API keys",
+  };
+  const KIND_NAMES = { manual: "Backup", uploaded: "From a file", "before-restore": "Before restore" };
+  const PARTS_KEY = "rra-backup-parts";
+  // The Android app's own window: its bridge to the share sheet is there, and
+  // nowhere else (a browser on the network downloads instead). The bridge
+  // itself, not navigator.share: the app installs that after the page has
+  // loaded, which is after this runs.
+  const inApp = !!window.MusicDShare;
+  let busy = false;
+  let restarting = false;
+
+  const say = (msg, isError) => {
+    status.textContent = msg || "";
+    status.classList.toggle("is-error", !!isError);
+  };
+  const ask = (msg) => window.__confirmDialog ? window.__confirmDialog(msg) : Promise.resolve(window.confirm(msg));
+  const partsLabel = (parts) => (parts || []).map(p => PART_NAMES[p] || p).join(", ");
+
+  // The parts chosen, remembered per device: a person who never backs up keys
+  // should not have to switch them off every time.
+  function chosen() {
+    return Array.from(partsEl.querySelectorAll("input[data-part]")).filter(i => i.checked).map(i => i.dataset.part);
+  }
+  function renderParts(all) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(PARTS_KEY) || "null"); } catch (e) { /* none saved, or unreadable: all on */ }
+    partsEl.textContent = "";
+    for (const id of all) {
+      const row = document.createElement("div");
+      row.className = "settings-row";
+      const label = document.createElement("span");
+      label.className = "settings-label";
+      label.textContent = PART_NAMES[id] || id;
+      const sw = document.createElement("label");
+      sw.className = "switch";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.part = id;
+      input.checked = Array.isArray(saved) ? saved.includes(id) : true;
+      input.setAttribute("aria-label", PART_NAMES[id] || id);
+      input.addEventListener("change", () => {
+        try { localStorage.setItem(PARTS_KEY, JSON.stringify(chosen())); } catch (e) { /* private mode: the choice lasts this visit */ }
+        syncButtons();
+      });
+      const track = document.createElement("span");
+      track.className = "switch-track";
+      const thumb = document.createElement("span");
+      thumb.className = "switch-thumb";
+      track.appendChild(thumb);
+      sw.appendChild(input);
+      sw.appendChild(track);
+      row.appendChild(label);
+      row.appendChild(sw);
+      partsEl.appendChild(row);
+    }
+    syncButtons();
+  }
+  function syncButtons() {
+    const none = !chosen().length;
+    nowBtn.disabled = busy || restarting || none;
+    upBtn.disabled = busy || restarting || none;
+    listEl.querySelectorAll("button").forEach(b => { b.disabled = busy || restarting; });
+  }
+
+  function fmtDate(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "Unknown date";
+    try {
+      return d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch (e) { return d.toISOString().slice(0, 16).replace("T", " "); }
+  }
+  function fmtSize(n) {
+    return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+  }
+
+  function renderList(backups) {
+    listEl.textContent = "";
+    if (!backups.length) {
+      const empty = document.createElement("div");
+      empty.className = "settings-note";
+      empty.textContent = "No backups yet.";
+      listEl.appendChild(empty);
+      return;
+    }
+    for (const b of backups) {
+      const row = document.createElement("div");
+      row.className = "backup-row";
+      row.dataset.id = b.id;
+      const txt = document.createElement("div");
+      txt.className = "backup-txt";
+      const title = document.createElement("div");
+      title.className = "backup-title";
+      title.textContent = fmtDate(b.created);
+      const kind = document.createElement("span");
+      kind.className = "backup-kind" + (b.kind === "before-restore" ? " is-before" : "");
+      kind.textContent = KIND_NAMES[b.kind] || "Backup";
+      title.appendChild(kind);
+      const sub = document.createElement("div");
+      sub.className = "backup-sub";
+      sub.textContent = b.error
+        ? "Can't be read: " + b.error
+        : partsLabel(b.parts) + " · " + fmtSize(b.size || 0) + (b.version ? " · v" + b.version : "");
+      txt.appendChild(title);
+      txt.appendChild(sub);
+      const acts = document.createElement("div");
+      acts.className = "backup-acts";
+      const mk = (cls, label, aria, fn) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "settings-update-btn " + cls;
+        btn.textContent = label;
+        btn.setAttribute("aria-label", aria);
+        btn.addEventListener("click", fn);
+        acts.appendChild(btn);
+        return btn;
+      };
+      if (!b.error) {
+        mk("backup-restore", "Restore", "Restore the backup of " + fmtDate(b.created), () => restore(b));
+        mk("backup-download", inApp ? "Share" : "Download",
+           (inApp ? "Share" : "Download") + " the backup of " + fmtDate(b.created), () => download(b));
+      }
+      mk("backup-delete", "Delete", "Delete the backup of " + fmtDate(b.created), () => remove(b));
+      row.appendChild(txt);
+      row.appendChild(acts);
+      listEl.appendChild(row);
+    }
+    syncButtons();
+  }
+
+  async function load() {
+    try {
+      const r = await fetch("/api/backups", { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      if (!partsEl.children.length) renderParts(j.parts || Object.keys(PART_NAMES));
+      renderList(j.backups || []);
+    } catch (e) {
+      say("Couldn't read the backups: " + (e.message || e), true);
+    }
+  }
+
+  async function call(url, opts) {
+    const r = await fetch(url, opts);
+    const j = await r.json().catch(() => null);
+    if (!r.ok) throw new Error((j && j.error) || ("HTTP " + r.status));
+    return j;
+  }
+  async function run(fn) {
+    if (busy || restarting) return;
+    busy = true; syncButtons();
+    try { await fn(); }
+    catch (e) { say(e.message || String(e), true); }
+    finally { busy = false; syncButtons(); }
+  }
+
+  nowBtn.addEventListener("click", () => run(async () => {
+    say("Backing up…");
+    const j = await call("/api/backups", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parts: chosen() }),
+    });
+    renderList(j.backups || []);
+    say("Backed up: " + partsLabel(chosen()) + ".");
+  }));
+
+  // A backup brought in from a file is kept beside the others first, so it can
+  // be restored from the list like any other — and the restore that follows is
+  // the same one, with the same "before restore" copy.
+  upBtn.addEventListener("click", () => { if (!busy && !restarting) fileIn.click(); });
+  fileIn.addEventListener("change", () => {
+    const f = fileIn.files && fileIn.files[0];
+    fileIn.value = "";
+    if (!f) return;
+    run(async () => {
+      say("Reading " + f.name + "…");
+      const j = await call("/api/backups/upload", {
+        method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f,
+      });
+      renderList(j.backups || []);
+      const b = (j.backups || []).find(x => x.id === j.id);
+      say("");
+      if (b) { busy = false; await restore(b); }
+    });
+  });
+
+  async function restore(b) {
+    if (restarting) return;
+    const parts = chosen().filter(p => (b.parts || []).includes(p));
+    if (!parts.length) {
+      say("This backup holds none of what is switched on above (it has: " + partsLabel(b.parts) + ").", true);
+      return;
+    }
+    const ok = await ask("Restore " + partsLabel(parts) + " from " + fmtDate(b.created) + "?\n\n" +
+      "This replaces them with what the backup holds. A copy of how things are now is kept first, " +
+      "and the page reloads.");
+    if (!ok) return;
+    busy = true; syncButtons();
+    try {
+      say("Restoring…");
+      const r = await fetch("/api/backups/" + encodeURIComponent(b.id) + "/restore", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parts }),
+      });
+      const j = await r.json().catch(() => null);
+      if (r.ok && j && j.ok) {
+        // Already stored: reload so every screen reads it, this one included.
+        restarting = true; syncButtons();
+        say("Restored. Reloading…");
+        setTimeout(() => location.reload(), 400);
+        return;
+      }
+      throw new Error((j && j.error) || ("HTTP " + r.status));
+    } catch (e) {
+      say(e.message || String(e), true);
+      load();   // a failed restore may still have kept a "before restore" copy
+    } finally {
+      busy = false; syncButtons();
+    }
+  }
+
+  function remove(b) {
+    run(async () => {
+      if (!(await ask("Delete the backup of " + fmtDate(b.created) + "?"))) return;
+      const j = await call("/api/backups/" + encodeURIComponent(b.id), { method: "DELETE" });
+      renderList(j.backups || []);
+      say("Deleted.");
+    });
+  }
+
+  /*
+   * In the app the file goes to Android's share sheet — save it to Files or
+   * Drive, or send it anywhere — because a WebView has no downloads (the app
+   * removes every `<a download>`; see ShareBridge). In a browser on the
+   * network, a plain download link.
+   */
+  function download(b) {
+    const url = "/api/backups/" + encodeURIComponent(b.id) + "/download";
+    if (inApp) {
+      run(async () => {
+        const r = await fetch(url, { cache: "no-store" });
+        if (!r.ok) throw new Error("Couldn't read the backup (HTTP " + r.status + ")");
+        const file = new File([await r.blob()], b.id + ".json", { type: "application/json" });
+        if (typeof navigator.share !== "function") throw new Error("Sharing isn't ready yet — try again in a moment.");
+        await navigator.share({ files: [file], title: "Save or send the backup" });
+        say("");
+      });
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = b.id + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // Read the list each time the page opens: another device may have made or
+  // restored one since.
+  document.addEventListener("click", (e) => {
+    if (e.target.closest && e.target.closest('.settings-nav-item[data-pane="backup"]')) { say(""); load(); }
+  });
+})();
+
 (function initPitchfork() {
   const overlay  = document.getElementById("pitchfork-overlay");
   const trigger  = document.getElementById("pitchfork-toggle");
@@ -14604,10 +15290,12 @@ function toastBottomAbovePill() {
     if (!zone) { if (window.__showToast) window.__showToast("Select a zone first"); return; }
     if (el.classList.contains("spinning")) return;
 
-    // Spin the compass for 2 seconds, then fetch. The Home tile's disc is
-    // always turning; it is sped up rather than restarted (rampDisc).
+    // Spin the compass for 2 seconds, then fetch. The Home tile's disc is sped
+    // up from where it is rather than restarted (rampDisc), and turning again
+    // if it had come to rest (discTurns, v1.8.83).
     el.classList.add("spinning");
     const disc = el.querySelector && el.querySelector(".unheard-disc");
+    discTurns(disc, Infinity);
     rampDisc(disc, 10);
     await new Promise(r => setTimeout(r, 2000));
 
@@ -14628,6 +15316,28 @@ function toastBottomAbovePill() {
     } finally {
       el.classList.remove("spinning");
       rampDisc(disc, 1);
+      // Then still again at the end of the turn it is on: back where it began.
+      discTurns(disc, 0);
+    }
+  }
+  // The disc's turns (Mandarin v0.6.10): Infinity to keep it going (and start
+  // it if it had come to rest), 0 to stop at the end of the current turn. The
+  // animation stays the same one throughout, so the angle never jumps.
+  function discTurns(disc, n) {
+    if (!disc || typeof disc.getAnimations !== "function") return;
+    const anim = disc.getAnimations()[0];
+    if (!anim || !anim.effect) return;   // reduced motion: no animation
+    if (n === Infinity) {
+      // Come to rest after its two turns, it sits at a whole number of turns —
+      // the angle it started at. Its clock, though, has run on since then, so
+      // extending a finished animation would put the disc wherever that clock
+      // now points. From the start of a turn instead: the same angle, no jump.
+      if (anim.playState === "finished") anim.currentTime = 0;
+      anim.effect.updateTiming({ iterations: Infinity });
+      if (anim.playState !== "running") anim.play();
+    } else {
+      const turn = anim.effect.getTiming().duration || 8000;
+      anim.effect.updateTiming({ iterations: Math.floor((Number(anim.currentTime) || 0) / turn) + 1 });
     }
   }
   // Ease the disc's running animation to `rate` times its resting speed over
@@ -14839,7 +15549,7 @@ function toastBottomAbovePill() {
 
   async function showArtistAlbums(artistName, how) {
     const fromAlbum = (how && how.fromAlbum) || null;
-    if (window.__leavePlaylistScreens) window.__leavePlaylistScreens();
+    if (window.__leavePlaylistScreens) window.__leavePlaylistScreens({ keepChrome: true });
     if (!artistName) return;
     // Drop any active/pending search (incl. the delayed external-sources fetch)
     // — reachable from the album-modal artist link with a search still live,
@@ -15184,15 +15894,13 @@ function toastBottomAbovePill() {
       const target = item.dataset.target;
       closeMenu();
 
-      if (action === "home") {
-        if (window.__showHome) window.__showHome();
+      if (action === "shuffle") {
+        // Random albums, a fresh wall (only listed while its Home row is off).
+        if (window.__applyFilter) window.__applyFilter(null);
         return;
       }
-      if (action === "shuffle") {
-        // Clear any active filter/labels so "Random albums" is a fresh wall.
-        // applyFilter(null) reveals the wall and loads it.
-        if (window.__applyFilter) window.__applyFilter(null);
-        else if (window.__loadRandom) window.__loadRandom();
+      if (action === "smart-picks") {
+        if (window.__showSmartPicks) window.__showSmartPicks();
         return;
       }
       if (action === "rescan-library") {
@@ -15207,10 +15915,6 @@ function toastBottomAbovePill() {
         if (window.__showListenLater) window.__showListenLater();
         return;
       }
-      if (action === "smart-picks") {
-        if (window.__showSmartPicks) window.__showSmartPicks();
-        return;
-      }
       if (action === "discover") {
         if (window.__showDiscover) window.__showDiscover();
         return;
@@ -15221,10 +15925,6 @@ function toastBottomAbovePill() {
       }
       if (action === "playlists") {
         if (window.__showPlaylists) window.__showPlaylists();
-        return;
-      }
-      if (action === "import-playlist") {
-        if (window.__openImportSheet) window.__openImportSheet();
         return;
       }
 

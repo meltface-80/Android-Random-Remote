@@ -21,14 +21,19 @@ wall, the Network pane, grouped Pitchfork, the dial), and keeps a few rules
 Rouen does not (it never polls, the Home draws are the same all day). So a newer
 Rouen is a THREE-WAY MERGE, not a copy:
 
-  UPSTREAM BASE: meltface-80/Rouen a1daa61 (v1.8.77, 2026-10-04)
+  UPSTREAM BASE: meltface-80/Rouen affea8c (v1.8.84, 2026-10-07)
 
   base   = git show a1daa61:public/<file>        (in a Rouen clone)
   ours   = this directory
   theirs = the newer Rouen public/<file>
   git merge-file -p --diff3 ours base theirs
 
-Then update the commit above. The previous base was MusicD-Remote 40f02f1
-(v1.7.70), and sharecard.js separately bdc1a0c (v1.7.89).
+Then update the commit above. The bases before it were Rouen a1daa61
+(v1.8.77) and MusicD-Remote 40f02f1 (v1.7.70), and sharecard.js separately
+bdc1a0c (v1.7.89). HQPlayer control (Rouen v1.8.74–v1.8.78) is left out of
+this build, page and server both.
+
+  icons/rouen-tile.png — the Rouen tile the share card draws in its corner,
+  from Rouen's icons/ unchanged.
 
 dial.html and dial.js are this app's own, a page version of the dial.
