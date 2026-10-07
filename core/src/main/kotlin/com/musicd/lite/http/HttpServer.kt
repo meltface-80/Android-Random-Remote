@@ -185,8 +185,9 @@ class HttpServer(
         val q = target.indexOf('?')
         val path = if (q < 0) target else target.substring(0, q)
         val query = if (q < 0) emptyMap() else parseQuery(target.substring(q + 1))
+        val queryAll = if (q < 0) emptyMap() else parseQueryAll(target.substring(q + 1))
 
-        return Request(method, decodePath(path), query, headers, body, keepAlive, remote)
+        return Request(method, decodePath(path), query, headers, body, keepAlive, remote, queryAll)
     }
 
     private fun readLine(input: InputStream): String? {
@@ -311,6 +312,24 @@ class HttpServer(
             return out
         }
 
+        /**
+         * Every value of every parameter, in order: the Library's Focus sends a
+         * facet once per value (genre=Rock&genre=Jazz). [parseQuery] keeps the
+         * last of each, which is what every other route wants.
+         */
+        fun parseQueryAll(raw: String): Map<String, List<String>> {
+            if (raw.isEmpty()) return emptyMap()
+            val out = LinkedHashMap<String, MutableList<String>>()
+            for (pair in raw.split('&')) {
+                if (pair.isEmpty()) continue
+                val eq = pair.indexOf('=')
+                val key = if (eq < 0) pair else pair.substring(0, eq)
+                val value = if (eq < 0) "" else pair.substring(eq + 1)
+                out.getOrPut(formDecode(key)) { ArrayList() } += formDecode(value)
+            }
+            return out
+        }
+
         /** Query values are form-encoded, so "+" is a space. */
         private fun formDecode(s: String): String =
             try {
@@ -380,7 +399,9 @@ class Request(
      * loopback, so it comes from the socket rather than from any header a
      * client could set — X-Forwarded-For and friends are deliberately ignored.
      */
-    val remoteAddress: String = HttpServer.LOOPBACK
+    val remoteAddress: String = HttpServer.LOOPBACK,
+    /** Every value of each query parameter — see HttpServer.parseQueryAll. */
+    val queryAll: Map<String, List<String>> = query.mapValues { listOf(it.value) }
 ) {
     val bodyText: String get() = body.toString(Charsets.UTF_8)
 
