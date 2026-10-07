@@ -58,11 +58,11 @@ Tap **Random albums** on Home (with its row switched off, it is in the side menu
 
 📚 Library
 
-Every album in a grid or a list, sorted by album, artist, release date, recently added, most played, last played or random, in either direction.
+Every album, sorted seven ways in either direction, and narrowed with Focus: genre, decade, first letter, when added, played or never played.
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Tap **Library** on Home. **Sort** is at the top, with an arrow to reverse it; **Random** adds a reshuffle button. Grid or list is chosen under **☰ → Settings → Setup → UI Settings → Grid layout**. Recently added, Most played and Last played use what this app has seen since it was installed — Roon publishes no import date or play counts.
+Tap **Library** on Home. **Focus** and **Sort** sit in a row under the top bar. In **Focus**, tap a filter once to include it, again to exclude it, once more to clear it, then **Show albums**; the badge counts the filters on. **Sort** has an arrow to reverse it; with **Random**, the top bar's shuffle button reshuffles. Grid or list: **☰ → Settings → Setup → UI Settings → Grid layout**. Genres and their counts are Roon's own. Decades come from MusicBrainz as albums are opened or played; when added, most played and last played use what this app has seen since it was installed — Roon publishes none of them.
 
 </details>
 

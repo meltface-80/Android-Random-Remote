@@ -1029,6 +1029,8 @@
   function parkTopbarSort() {
     const slot = topbarSortSlot();
     if (slot) slot.classList.add("hidden");
+    // The Library wall's own Focus / Sort row (0.6.1) leaves the same way.
+    hideLibraryControls();
     // The reshuffle belongs to a Random sort, so it leaves with the sort. The
     // random-album wall lights it again through setTopbarNav.
     const r = document.getElementById("topbar-refresh");
@@ -2696,11 +2698,13 @@
       note: "from plays Rouen Lite has seen" },
     { id: "random",     label: "Random",       dir: "asc" }   // no direction
   ];
+  // This build's three (LibraryView.PLAYED_FILTERS): the plays table only
+  // holds what this app has seen play, so Rouen's "not in 6 / 12 months"
+  // would answer a question it cannot know.
   const LIB_PLAYED_OPTIONS = [
-    { id: "any",   label: "Any" },
-    { id: "never", label: "Never played" },
-    { id: "6",     label: "Not in 6 months" },
-    { id: "12",    label: "Not in 12 months" }
+    { id: "any",    label: "Any" },
+    { id: "never",  label: "Never played" },
+    { id: "played", label: "Played" }
   ];
   // Random has no meaningful direction, so the arrow control hides for it.
   const libSortHasDir = (id) => id !== "random";
@@ -2737,6 +2741,8 @@
   // reset and the active-count from drifting apart as facets are added.
   const LIB_FACET_IDS = ["genre", "source", "decade", "label", "format",
                          "rate", "bits", "chan", "letter", "added"];
+  // The ones this build's server answers (LibraryView.FACET_IDS).
+  const LIB_FOCUS_SERVED = ["genre", "decade", "letter", "added"];
   const libEmptyFacets = () => {
     const o = {};
     for (const id of LIB_FACET_IDS) o[id] = [];
@@ -2755,13 +2761,10 @@
       const stale = saved.v !== LIB_VIEW_VERSION;
       const dirChangedMeaning = stale && LIB_V1_INVERTED_SORTS.indexOf(saved.sort) > -1;
       if (dirChangedMeaning) delete saved.dir;
-      libView = Object.assign(libView, saved, { v: LIB_VIEW_VERSION, prefix: "" },
-                              // The Focus button and the in-wall filter are
-                              // gone, so a facet or a `played` restriction left
-                              // in an older stored view would narrow the wall
-                              // with nothing on screen to say so and no way to
-                              // undo it. Sort, direction and seed survive.
-                              libEmptyFacets(), { played: "any" });
+      // Focus is back (0.6.1), so a stored focus is shown on its button again
+      // and kept. Builds 0.4.34 to 0.6.0 dropped it on load; nothing they
+      // stored has one to lose.
+      libView = Object.assign(libView, saved, { v: LIB_VIEW_VERSION, prefix: "" });
       if (dirChangedMeaning) libView.dir = libSortDefaultDir(libView.sort);
       // A blob is JSON, so it can be well-formed and still the wrong SHAPE —
       // a partial write or a synced/hand-edited value. Object.assign copies it
@@ -3396,29 +3399,41 @@
   // the v1.5.66 startup-crash class this project pre-flights for.
 
   function renderLibraryControls() {
-    const bar = topbarSortSlot();
-    if (!bar) return;
+    let bar = document.getElementById("library-controls");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "library-controls";
+      // Its own row under the top bar's (Rouen v1.8.78, as Mandarin v0.6.24):
+      // smaller pills, Focus on the left, Sort on the right. Inside .topbar,
+      // which lies over the scroller, so the row stays put while the grid
+      // scrolls, and the bar's measured height reserves its room.
+      bar.className = "library-controls sub-bar";
+      const row = document.querySelector(".topbar-row");
+      if (row) row.insertAdjacentElement("afterend", bar);
+      else grid.parentNode.insertBefore(bar, grid);
+    }
     // Both controls open a sheet rather than mutating the view in place, so a
     // rebuild can no longer land under the user's finger mid-interaction — but
     // applyLibView() still rebuilds this row while the sort sheet is open and
     // focus is inside it, and dropping focus to <body> then would strand a
-    // keyboard user. Restoring by class is enough: there are two controls and
-    // they are rebuilt in a fixed order.
-    // Restored by the control's OWN class, not its first one. Every control
-    // here starts with `lib-ctl`, so splitting on the first token matched
-    // whichever came first in the DOM — focus on Sort came back on Focus.
+    // keyboard user. Restored by the control's OWN class, not its first one:
+    // every control here starts with `lib-ctl`.
     const act = document.activeElement;
     const refocus = act && bar.contains(act) && act.className
       ? (String(act.className).split(" ").find(c => c !== "lib-ctl" && c) || "lib-ctl")
       : null;
     bar.innerHTML = "";
-    // Sort is the only control on this row now. Focus and the in-wall filter
-    // were removed at the owner's request — the chrome's own search covers
-    // finding a record, and neither of the other two was used.
+    // Roon's own order on this screen: Focus left, Sort right. (Rouen's
+    // in-wall "Starts with…" field stays out — the top bar's search finds a
+    // record, and Focus → Starts with narrows by letter.)
+    bar.appendChild(buildLibFocusButton());
     bar.appendChild(buildLibSortButton());
     bar.classList.toggle("hidden", !libraryWallActive);
-    // Random's reshuffle is a button in the bar beside the control, not a glyph
-    // inside it: it is an action, and the label slot next to it is a label.
+    // Marks the bar as the Library wall's, for the phone rule that gives the
+    // title's room to the controls.
+    { const tb = document.querySelector(".topbar"); if (tb) tb.classList.toggle("lib-wall", libraryWallActive); }
+    // Random's reshuffle is the top bar's button, beside the search glass: it
+    // is an action, and the Sort pill's arrow slot is a label.
     showSortReshuffle(libraryWallActive && libView.sort === "random");
 
     if (refocus) {
@@ -3427,15 +3442,49 @@
     }
   }
 
-  // THE FOCUS BUTTON IS GONE, THE FOCUS SHEET IS NOT, and the difference
-  // matters. openLibFocusSheet is also the editor for Dynamic Playlists — a
-  // saved playlist IS a stored libView, and the sheet is where its facets are
-  // chosen. Removing the button removes the library wall's entry into it, as
-  // asked; removing the sheet would have taken Dynamic Playlists with it.
-  //
-  // Because the button is what showed a focus was on, any facets left in the
-  // stored view would now filter the wall invisibly and unclearably. They are
-  // dropped on load — see the libView restore above.
+  // How many Focus filters are on — the badge on the button, and the only
+  // thing on screen that says the wall is narrowed. Only the facets this build
+  // serves count: a value saved for one it doesn't (Rouen's Format, say)
+  // narrows nothing, so it must not light the badge either. A function
+  // declaration, so it is there whenever the row is first drawn.
+  function libFocusCount() {
+    return LIB_FOCUS_SERVED.reduce((n, id) => n + (libView[id] || []).length, 0) +
+      (libView.played !== "any" ? 1 : 0);
+  }
+
+  function buildLibFocusButton() {
+    const n = libFocusCount();
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "lib-ctl lib-ctl-focus" + (n ? " is-active" : "");
+
+    const chev = document.createElement("span");
+    chev.className = "lib-ctl-chevron";
+    chev.setAttribute("aria-hidden", "true");
+    chev.textContent = "›";
+    b.appendChild(chev);
+
+    const text = document.createElement("span");
+    text.className = "lib-ctl-text";
+    text.textContent = "Focus";
+    b.appendChild(text);
+
+    if (n) {
+      const badge = document.createElement("span");
+      badge.className = "lib-ctl-badge";
+      badge.textContent = String(n);
+      b.appendChild(badge);
+    }
+    b.setAttribute("aria-label", n
+      ? "Focus — " + n + (n === 1 ? " filter active" : " filters active")
+      : "Focus");
+    // Wrapped, not passed by reference: the listener hands its callback an
+    // event, which would arrive as editTarget and be treated as a playlist to
+    // save over.
+    b.addEventListener("click", () => openLibFocusSheet(null));
+    return b;
+  }
+
   // `Album name ↑ ⌄`. The arrow is a LABEL here, not a control — it says which
   // way the current sort runs, and tapping anywhere on the button opens the
   // sheet where it can be changed.
@@ -4452,16 +4501,16 @@
       // comes from somewhere other than Roon — the browse API publishes none of
       // it — so the number is stated rather than left to be noticed.
       const COVERAGE_NOTE = {
-        decade: "Roon doesn't publish release years, so these come from your file tags " +
-                "and from Qobuz/TIDAL. Undated albums aren't in any decade.",
-        genre:  "Genres are read from Roon's own genre lists during a library sync. " +
+        decade: "Roon doesn't publish release years, so these come from MusicBrainz, " +
+                "looked up when an album is opened or played. Undated albums aren't in any decade.",
+        genre:  "These are Roon's own genres and its album counts. " +
                 "Anything Roon files under no genre won't appear here.",
         label:  "Labels are collected during the label scan, which runs in the background " +
                 "and fills in over time.",
         format: "Read from your own files, and — for albums you have no file for — from " +
                 "the Qobuz or TIDAL account you've connected. Anything from neither has none.",
         added:  "Roon publishes no date-added, so this is what Rouen Lite could work " +
-                "out for itself — file timestamps, and albums appearing between scans."
+                "out for itself — albums appearing between library checks since it was installed."
       };
       // Format, Sample rate, Bit depth and Channels all come from the same file
       // scan and all carry the same caveat; saying it four times is noise.
@@ -4606,7 +4655,12 @@
       show.type = "button"; show.className = "action-btn primary";
       show.textContent = "Show albums";
       show.addEventListener("click", () => { committed = true; close(); applyLibView(); });
-      foot.appendChild(clear); foot.appendChild(save); foot.appendChild(show);
+      // Save as… makes a Dynamic Playlist, which this build doesn't have yet:
+      // offered only in that editor, never from the Library's Focus, where it
+      // could only end in an error.
+      foot.appendChild(clear);
+      if (editTarget) foot.appendChild(save);
+      foot.appendChild(show);
     }, () => {
       // Abandoned (X or backdrop) while editing a saved playlist — put the
       // user's own Library view back. Never persisted in the first place, so
