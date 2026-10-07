@@ -46,6 +46,13 @@ class MemoryStore : Store {
         settings[key] = value
     }
 
+    override fun settingKeys(): Set<String> = HashSet(settings.keys)
+
+    override fun replaceSettings(puts: Map<String, String>, removes: Set<String>) = synchronized(settings) {
+        for (k in removes) if (k !in puts) settings.remove(k)
+        settings.putAll(puts)
+    }
+
     override fun recordPlay(
         albumKey: String,
         album: String,

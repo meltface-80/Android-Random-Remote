@@ -39,6 +39,56 @@ class UserPlaylists(private val store: Store) {
          */
         fun text(v: String?, max: Int = MAX_TEXT): String =
             (v ?: "").replace(Regex("\\s+"), " ").trim().take(max).trim()
+
+        /**
+         * The stored document, read field by field from a known list — the
+         * same reading whether it was written here or arrived in a restored
+         * backup, which is someone's file.
+         */
+        fun parseDoc(raw: String?): MutableList<Playlist> {
+            val out = ArrayList<Playlist>()
+            if (raw == null) return out
+            runCatching {
+                val arr = JSONObject(raw).optJSONArray("playlists") ?: return@runCatching
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val id = text(o.str("id"), 64)
+                    val name = text(o.str("name"), MAX_NAME)
+                    if (id.isEmpty() || name.isEmpty()) continue
+                    val tracks = ArrayList<Track>()
+                    val ta = o.optJSONArray("tracks")
+                    if (ta != null) {
+                        for (j in 0 until ta.length()) {
+                            Track.parse(ta.optJSONObject(j))?.let { tracks += it }
+                            if (tracks.size >= MAX_TRACKS) break
+                        }
+                    }
+                    out += Playlist(
+                        id, name, tracks,
+                        o.optLong("created_at", 0L), o.optLong("updated_at", 0L)
+                    )
+                }
+            }
+            return out
+        }
+
+        fun docOf(list: List<Playlist>): JSONObject {
+            val arr = JSONArray()
+            for (p in list.take(MAX_PLAYLISTS)) {
+                arr.put(
+                    JSONObject()
+                        .put("id", p.id)
+                        .put("name", p.name)
+                        .put("tracks", JSONArray(p.tracks.map { it.toJson() }))
+                        .put("created_at", p.createdAt)
+                        .put("updated_at", p.updatedAt)
+                )
+            }
+            return JSONObject().put("playlists", arr)
+        }
+
+        /** A document from elsewhere (a restored backup), as this build writes it. */
+        fun normalize(doc: JSONObject?): JSONObject = docOf(parseDoc(doc?.toString()))
     }
 
     /** One track, stored as the way back to it rather than as a file. */
@@ -134,46 +184,10 @@ class UserPlaylists(private val store: Store) {
 
     // ------------------------------------------------------------- storage
 
-    private fun load(): MutableList<Playlist> {
-        val raw = store.setting(KEY) ?: return ArrayList()
-        val out = ArrayList<Playlist>()
-        runCatching {
-            val arr = JSONObject(raw).optJSONArray("playlists") ?: return@runCatching
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
-                val id = text(o.str("id"), 64)
-                val name = text(o.str("name"), MAX_NAME)
-                if (id.isEmpty() || name.isEmpty()) continue
-                val tracks = ArrayList<Track>()
-                val ta = o.optJSONArray("tracks")
-                if (ta != null) {
-                    for (j in 0 until ta.length()) {
-                        Track.parse(ta.optJSONObject(j))?.let { tracks += it }
-                        if (tracks.size >= MAX_TRACKS) break
-                    }
-                }
-                out += Playlist(
-                    id, name, tracks,
-                    o.optLong("created_at", 0L), o.optLong("updated_at", 0L)
-                )
-            }
-        }
-        return out
-    }
+    private fun load(): MutableList<Playlist> = parseDoc(store.setting(KEY))
 
     private fun persist(list: List<Playlist>) {
-        val arr = JSONArray()
-        for (p in list.take(MAX_PLAYLISTS)) {
-            arr.put(
-                JSONObject()
-                    .put("id", p.id)
-                    .put("name", p.name)
-                    .put("tracks", JSONArray(p.tracks.map { it.toJson() }))
-                    .put("created_at", p.createdAt)
-                    .put("updated_at", p.updatedAt)
-            )
-        }
-        store.putSetting(KEY, JSONObject().put("playlists", arr).toString())
+        store.putSetting(KEY, docOf(list).toString())
     }
 
     private fun newId(now: Long): String =

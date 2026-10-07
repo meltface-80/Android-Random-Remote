@@ -12,6 +12,8 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -42,12 +44,18 @@ class MainActivity : Activity() {
 
         /** How long to wait for the local server before saying something. */
         const val SERVER_WAIT_MS = 10_000L
+
+        /** The system document picker, answering the page's file input. */
+        const val PICK_FILE = 2
     }
 
     private lateinit var root: FrameLayout
     private lateinit var web: WebView
     private lateinit var message: TextView
     private val main = Handler(Looper.getMainLooper())
+
+    /** The page's file input, waiting on the document picker — see PickerClient. */
+    private var pendingPick: ValueCallback<Array<Uri>>? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,6 +96,7 @@ class MainActivity : Activity() {
                 displayZoomControls = false
             }
             webViewClient = LocalClient()
+            webChromeClient = PickerClient()
             // The page implements its own long-press — that is how multi-select
             // on the album wall is armed — and the WebView's native long-press
             // fights it: it starts text selection or a context menu and cancels
@@ -146,6 +155,18 @@ class MainActivity : Activity() {
         requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION)
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == PICK_FILE) {
+            val callback = pendingPick
+            pendingPick = null
+            // Always answered, a cancel included (null): an input left
+            // unanswered never fires again.
+            callback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
     override fun onBackPressed() {
         // The front-end is a single-page app with its own history, so Back is
         // in-app navigation until there is nothing left to go back to.
@@ -158,6 +179,46 @@ class MainActivity : Activity() {
         root.removeView(web)
         web.destroy()
         super.onDestroy()
+    }
+
+    /**
+     * `<input type="file">` — Settings → Backup's "Restore from a file…".
+     *
+     * A WebView has no file picker of its own: with no chrome client a tap on
+     * the input did nothing at all. This hands it to the system's document
+     * picker, and the file comes back to the page as if chosen in a browser.
+     *
+     * Having a chrome client also changes the page's window.prompt and
+     * window.confirm. With none, both answered "cancel" without showing
+     * anything — naming a new playlist did nothing in the app. With one,
+     * Android shows its own dialog for each.
+     */
+    private inner class PickerClient : WebChromeClient() {
+        override fun onShowFileChooser(
+            view: WebView?,
+            callback: ValueCallback<Array<Uri>>?,
+            params: FileChooserParams?
+        ): Boolean {
+            if (callback == null) return false
+            // One at a time: a picker still open answers "nothing" first.
+            pendingPick?.onReceiveValue(null)
+            pendingPick = callback
+            val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                // Any file, not just JSON: a backup saved through Drive or a
+                // mail app often comes back as application/octet-stream, and
+                // the server says plainly when a file is not a backup.
+                type = "*/*"
+            }
+            try {
+                startActivityForResult(pick, PICK_FILE)
+            } catch (e: Exception) {
+                Log.w(TAG, "no document picker on this phone", e)
+                pendingPick = null
+                callback.onReceiveValue(null)
+            }
+            return true
+        }
     }
 
     private inner class LocalClient : WebViewClient() {

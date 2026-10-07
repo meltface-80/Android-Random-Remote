@@ -33,6 +33,16 @@ interface Store {
     fun setting(key: String): String?
     fun putSetting(key: String, value: String)
 
+    /** Every settings key there is — what a backup reads them by. */
+    fun settingKeys(): Set<String>
+
+    /**
+     * Writes [puts] and deletes [removes] as ONE change: all of it or none.
+     * A restore replaces several documents at once, and a phone killed half
+     * way through must not come back running on a mix of then and now.
+     */
+    fun replaceSettings(puts: Map<String, String>, removes: Set<String>)
+
     // ---------------------------------------------------------- play history
 
     /**

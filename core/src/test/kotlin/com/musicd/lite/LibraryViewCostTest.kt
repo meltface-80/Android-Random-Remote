@@ -74,6 +74,9 @@ class LibraryViewCostTest {
         override fun forgetLastCore() = real.forgetLastCore()
         override fun setting(key: String) = real.setting(key)
         override fun putSetting(key: String, value: String) = real.putSetting(key, value)
+        override fun settingKeys() = real.settingKeys()
+        override fun replaceSettings(puts: Map<String, String>, removes: Set<String>) =
+            real.replaceSettings(puts, removes)
         override fun recordPlay(
             albumKey: String, album: String, artist: String, track: String, at: Long
         ) = real.recordPlay(albumKey, album, artist, track, at)

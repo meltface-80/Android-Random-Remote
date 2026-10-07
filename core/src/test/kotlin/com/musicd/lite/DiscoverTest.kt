@@ -39,7 +39,8 @@ class DiscoverTest {
     private fun deezer(
         searches: Map<String, String> = emptyMap(),
         related: Map<String, String> = emptyMap(),
-        albums: Map<String, String> = emptyMap()
+        albums: Map<String, String> = emptyMap(),
+        top: Map<String, String> = emptyMap()
     ) {
         f().outbound = { req ->
             val path = req.url.encodedPath
@@ -48,11 +49,18 @@ class DiscoverTest {
                 path == "/search/artist" -> searches[req.url.queryParameter("q")]
                 path.endsWith("/related") -> related[req.url.pathSegments[1]]
                 path.endsWith("/albums") -> albums[req.url.pathSegments[1]]
+                path.endsWith("/top") -> top[req.url.pathSegments[1]]
                 else -> null
             }
             body?.let { respond(req, it) }
         }
     }
+
+    /** An act's top tracks, as Deezer lists them: one row per track, each naming its album. */
+    private fun topTracks(vararg albums: String) =
+        """{"data":[${albums.joinToString(",") { t ->
+            """{"title":"a track","album":{"id":${t.hashCode() and 0xffff},"title":${JSONObject.quote(t)}}}"""
+        }}]}"""
 
     private fun artists(vararg rows: Pair<Int, String>) =
         """{"data":[${rows.joinToString(",") { (id, name) -> """{"id":$id,"name":${JSONObject.quote(name)},"nb_fan":10}""" }}]}"""
@@ -84,54 +92,139 @@ class DiscoverTest {
 
     // ---------------------------------------------------------- if you like this
 
-    private fun similarDeezer() = deezer(
-        searches = mapOf("Massive Attack" to artists(10 to "Massive Attack")),
-        related = mapOf("10" to artists(20 to "Portishead", 21 to "Tricky", 22 to "Morcheeba")),
+    private fun similarDeezer(related: String = artists(20 to "Portishead", 21 to "Tricky", 22 to "Morcheeba")) = deezer(
+        searches = mapOf(
+            "Massive Attack" to artists(10 to "Massive Attack"),
+            "Portishead" to artists(20 to "Portishead")
+        ),
+        related = mapOf(
+            "10" to related,
+            "20" to artists(21 to "Tricky", 23 to "Beth Gibbons")
+        ),
         albums = mapOf(
-            "20" to albums("Third" to "2008-04-28", "Dummy" to "1994-08-22"),
-            "21" to albums("Maxinquaye" to "1995-02-20")
-            // 22: refused — an act whose records could not be named
+            // Portishead: both studio records in the fixture's library, and one
+            // more that is not.
+            "20" to albums("Third" to "2008-04-28", "Portishead" to "1997-09-29", "Dummy" to "1994-08-22"),
+            "21" to albums("Pre-Millennium Tension" to "1996-11-18", "Maxinquaye" to "1995-02-20"),
+            "22" to albums("Big Calm" to "1998-03-16")
+        ),
+        top = mapOf(
+            "21" to topTracks("Maxinquaye", "Maxinquaye", "Pre-Millennium Tension"),
+            "22" to topTracks("Big Calm")
         )
     )
 
+    private fun actsFor(artist: String): Map<String, JSONObject> {
+        val acts = f().json("/api/similar?artist=" + java.net.URLEncoder.encode(artist, "UTF-8").replace("+", "%20"))
+            .getJSONArray("acts")
+        return (0 until acts.length()).associate { acts.getJSONObject(it).let { a -> a.getString("name") to a } }
+    }
+
+    private fun awaitTaste() {
+        val until = System.currentTimeMillis() + 15_000
+        while (f().app.similar.building) {
+            check(System.currentTimeMillis() < until) { "the taste build never finished" }
+            Thread.sleep(10)
+        }
+    }
+
     @Test
-    fun threeActsEachWithTheirFirstAlbumAndSomewhereToGo() {
+    fun threeActsEachWithARecordAReasonAndSomewhereToGo() {
         similarDeezer()
-        val acts = f().json("/api/similar?artist=Massive%20Attack").getJSONArray("acts")
-        assertEquals(3, acts.length())
+        val acts = actsFor("Massive Attack")
+        assertEquals(setOf("Portishead", "Tricky", "Morcheeba"), acts.keys)
 
-        val portishead = acts.getJSONObject(0)
-        assertEquals("Portishead", portishead.getString("name"))
-        assertEquals("their earliest album, not their newest", "Dummy", portishead.getString("album"))
-        assertEquals(1994, portishead.getInt("year"))
-        // In the library: a queue, with the library's own identity to send.
-        assertTrue(portishead.getBoolean("in_library"))
-        assertEquals(offsetOf("Dummy"), portishead.getInt("offset"))
-        assertEquals("Dummy", portishead.getString("library_title"))
-        assertEquals("Portishead", portishead.getString("library_subtitle"))
-        assertEquals(0, portishead.getJSONArray("services").length())
-
-        val tricky = acts.getJSONObject(1)
+        // An act you don't know: its best-known record — the one most of its
+        // top tracks are from, not its debut — with the year from its listing.
+        val tricky = acts.getValue("Tricky")
+        assertEquals("Maxinquaye", tricky.getString("album"))
+        assertEquals(1995, tricky.getInt("year"))
+        assertTrue(tricky.isNull("known"))
+        // No listening yet, so nothing is near: Deezer's word for it.
+        assertEquals("Near Massive Attack", tricky.getString("reason"))
         assertFalse(tricky.getBoolean("in_library"))
         assertTrue(tricky.isNull("offset"))
         val services = tricky.getJSONArray("services")
         assertEquals("qobuz", services.getJSONObject(0).getString("id"))
         assertTrue(services.getJSONObject(0).getString("url").contains("Tricky%20Maxinquaye"))
 
-        // Still shown with no record named: the row degrades to a name.
-        val morcheeba = acts.getJSONObject(2)
-        assertEquals("Morcheeba", morcheeba.getString("name"))
-        assertTrue(morcheeba.isNull("album"))
+        // An act you know: the newest full album you DON'T own — both of the
+        // library's Portishead records are passed over.
+        val portishead = acts.getValue("Portishead")
+        assertEquals("library", portishead.getString("known"))
+        assertEquals("Portishead", portishead.getString("album"))
+        assertEquals(1997, portishead.getInt("year"))
+        assertEquals("In your library — a record you don't have", portishead.getString("reason"))
+        assertFalse(portishead.getBoolean("in_library"))
     }
 
     @Test
-    fun anArtistsSuggestionsAreAskedForOnceADay() {
+    fun aRecordInTheLibraryIsAQueueWithTheLibrarysOwnIdentity() {
+        deezer(
+            searches = mapOf("Massive Attack" to artists(10 to "Massive Attack")),
+            related = mapOf("10" to artists(30 to "Radiohead Tribute")),
+            // An act not in the library by that name, whose best-known record is.
+            top = mapOf("30" to topTracks("Kid A"))
+        )
+        val act = actsFor("Massive Attack").getValue("Radiohead Tribute")
+        assertTrue(act.getBoolean("in_library"))
+        assertEquals(offsetOf("Kid A"), act.getInt("offset"))
+        assertEquals("Kid A", act.getString("library_title"))
+        assertEquals(0, act.getJSONArray("services").length())
+    }
+
+    @Test
+    fun anActIsKnownByItsExactNameNeverByALongerOne() {
+        // Owning Portishead must not make "Portishead Sound System" an act you know.
+        deezer(
+            searches = mapOf("Massive Attack" to artists(10 to "Massive Attack")),
+            related = mapOf("10" to artists(40 to "Portishead Sound System")),
+            top = mapOf("40" to topTracks("Dub Plates"))
+        )
+        val act = actsFor("Massive Attack").getValue("Portishead Sound System")
+        assertTrue(act.isNull("known"))
+        assertEquals("Dub Plates", act.getString("album"))
+    }
+
+    @Test
+    fun theActsYouPlayMakeTheTasteGraphAndSayWhy() {
         similarDeezer()
-        f().json("/api/similar?artist=Massive%20Attack")
+        played("Portishead", 1, 2, 3)
+        actsFor("Massive Attack")     // the first share starts today's taste build
+        awaitTaste()
+        val tricky = actsFor("Massive Attack").getValue("Tricky")
+        // Tricky is on Portishead's related list, and Portishead is played.
+        assertEquals("Near Portishead, which you play", tricky.getString("reason"))
+    }
+
+    @Test
+    fun anActYouPlayMostIsNeverSuggested() {
+        similarDeezer()
+        played("Tricky", 1, 2, 3, 4, 5, 6)
+        actsFor("Massive Attack")
+        awaitTaste()
+        assertFalse(actsFor("Massive Attack").containsKey("Tricky"))
+    }
+
+    @Test
+    fun anArtistsSuggestionsAreAskedForOnceADayAndEachActsRecordsOnceAWeek() {
+        similarDeezer()
+        actsFor("Massive Attack")
+        awaitTaste()   // no plays: asks nobody
         val calls = f().outboundCalls.size
-        assertEquals("search, related, three listings", 5, calls)
-        f().json("/api/similar?artist=Massive%20Attack")
+        assertEquals("search, related, then top tracks and albums for each of three", 8, calls)
+        actsFor("Massive Attack")
         assertEquals("a second card for the same act asked Deezer again", calls, f().outboundCalls.size)
+    }
+
+    @Test
+    fun aFailedDeezerCallIsNotRememberedAsNoRelatedActs() {
+        // The related call fails (refused, as a timeout or Deezer's quota
+        // error would): no row — and it must not be kept as "nobody".
+        deezer(searches = mapOf("Massive Attack" to artists(10 to "Massive Attack")))
+        assertTrue(actsFor("Massive Attack").isEmpty())
+        similarDeezer()
+        assertEquals(3, actsFor("Massive Attack").size)
     }
 
     @Test

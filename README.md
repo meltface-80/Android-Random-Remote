@@ -4,7 +4,7 @@
 
 </div>
 
-# Rouen Lite (for Android) - v0.5.0
+# Rouen Lite (for Android) - v0.6.0
 
 **📱 Download & install guide: [meltface-80.github.io/Rouen-Lite](https://meltface-80.github.io/Rouen-Lite/)**
 
@@ -12,7 +12,7 @@ Rouen Lite is [Rouen](https://github.com/meltface-80/Rouen) as a native Android 
 
 *Why Lite?* It leaves out the parts of Rouen that need your music files, a streaming account or an always-on screen — see [What's not in Lite](#whats-not-in-lite). Until v0.5.0 it was called MusicD Remote Lite.
 
-**Download: [musicd-remote-lite-0.5.0.apk](https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.5.0.apk)** — Android 8.0 or newer.
+**Download: [musicd-remote-lite-0.6.0.apk](https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.6.0.apk)** — Android 8.0 or newer.
 
 ---
 
@@ -26,7 +26,7 @@ A greeting, the Random Album button and Album of the day, then rows you choose: 
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Home is the first screen. Tap the title of Listen later, Smart Picks, Random albums, Artists or Library for its full screen. Choose which rows show, and their order, under **☰ → Settings → Home Screen** — hold a row's handle to drag it. Random albums and Artists show ten each, the same ten all day.
+Home is the first screen. Tap the title of Listen later, Smart Picks, Random albums, Artists or Library for its full screen. Choose which rows show, and their order, under **☰ → Settings → Setup → Home Screen** — hold a row's handle to drag it. Random albums and Artists show ten each, the same ten all day.
 
 </details>
 
@@ -50,7 +50,7 @@ A screen of albums in random order, drawn again whenever you like and filtered b
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Open **☰ → Random albums**. The shuffle button draws a new set; the filter button narrows it by **Genre**, **Tag** or **Decade**. Tip: tag albums in Roon (for example from a Focus on hi-res), then filter by that tag here.
+Tap **Random albums** on Home (with its row switched off, it is in the side menu instead). The shuffle button draws a new set; the filter button narrows it by **Genre**, **Tag** or **Decade**. Tip: tag albums in Roon (for example from a Focus on hi-res), then filter by that tag here.
 
 </details>
 
@@ -62,7 +62,7 @@ Every album in a grid or a list, sorted by album, artist, release date, recently
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Tap **Library** on Home. **Sort** is at the top, with an arrow to reverse it; **Random** adds a reshuffle button. The grid/list button is in the top bar. Recently added, Most played and Last played use what this app has seen since it was installed — Roon publishes no import date or play counts.
+Tap **Library** on Home. **Sort** is at the top, with an arrow to reverse it; **Random** adds a reshuffle button. Grid or list is chosen under **☰ → Settings → Setup → UI Settings → Grid layout**. Recently added, Most played and Last played use what this app has seen since it was installed — Roon publishes no import date or play counts.
 
 </details>
 
@@ -82,11 +82,11 @@ Tap the magnifier at the top of Home and type. Tap an album to open it or an art
 
 💿 Album pages
 
-Artwork, release date (to the day where MusicBrainz knows it), a Wikipedia description, linked artist credits, Play now and Queue, and a ⋯ menu with Next, Radio and Listen later.
+Artwork, release date (to the day where MusicBrainz knows it), a Wikipedia description, linked artist credits, Play now and Queue, and a ⋯ menu with Play Next, Radio and Listen later.
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Tap any album. Tap a track for **Play now** or **Queue**; long-press tracks to select several. Tap an artist's name for their page.
+Tap any album. Tap a track for **Play now**, **Play next** or **Queue**; long-press a track to select it and others. Tap an artist's name for their page. On a tablet the album fills the screen, the description under the cover.
 
 </details>
 
@@ -118,7 +118,7 @@ Tap an artist's name in an album, on Now playing or in search, or tap **Artists*
 
 ▶️ Playback
 
-Play or queue albums and tracks, or play an album next. Now playing has seek, shuffle, repeat and volume; group zones, power devices, and pause or mute every zone.
+Play or queue albums and tracks, or play them next. Now playing has seek, shuffle, repeat and volume; group zones, power devices, and pause or mute every zone.
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
@@ -142,11 +142,11 @@ In Now playing, tap **Queue**. Tap a coming track to play from there. Tap **▸ 
 
 ☑️ Multi-select
 
-Select albums on any wall, then play them, add them to the end of the queue, add them to a playlist, or put them on Listen later.
+Select albums or tracks, then play them now or next, add them to the end of the queue or a playlist, or put them on Listen later.
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Long-press an album to start selecting, tap more albums to add them, then use the **⋯** button in the bar. **Clear selection** ends it.
+Long-press an album or a track: it is selected. Tap more to add them, then use the **⋯** button in the bar. **Play next** keeps them in the order picked, straight after what's playing. **Clear selection** ends it.
 
 </details>
 
@@ -170,7 +170,7 @@ A daily set of albums from your own library. Open one, put it on Listen later, o
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-On unless you switch it off under **☰ → Settings → Smart Picks**. See the picks on their Home row or under **☰ → Smart Picks**; **Go to Album** opens one. **Send each day's picks to → Listen later** puts the day's first five on Listen later.
+On unless you switch it off under **☰ → Settings → Setup → Smart Picks**. See the picks on their Home row — tap its title for the full screen; **Go to Album** opens one. **Send each day's picks to → Listen later** puts the day's first five on Listen later.
 
 </details>
 
@@ -194,7 +194,7 @@ New albums from the last 60 days by the 40 artists you played on the most differ
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Off by default — it is the one feature that sends artist names to an outside service. Switch on **☰ → Settings → Discover** and pick the hour. The day's list is built once, at or after that hour, when the app next checks its library or you open **☰ → Discover**; **Refresh** builds it now. It needs play history to work from. A row you own queues; any other opens your default streaming service (**Settings → Share Card**).
+Off by default — it is the one feature that sends artist names to an outside service. Switch on **☰ → Settings → Setup → Discover** and pick the hour. The day's list is built once, at or after that hour, when the app next checks its library or you open **☰ → Discover**; **Refresh** builds it now. It needs play history to work from. A row you own queues; any other opens your default streaming service (**Settings → Setup → Share Card**).
 
 </details>
 
@@ -202,11 +202,11 @@ Off by default — it is the one feature that sends artist names to an outside s
 
 📤 Share card
 
-A card of what's playing — artwork, title, artist, release date, a description and any Pitchfork score — sent through Android's share sheet, with listening and review links underneath.
+A card of what's playing — artwork, title, artist, release date, a description, any Pitchfork score and the Rouen tile — sent through Android's share sheet, with listening and review links underneath.
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Tap the share button on Now playing or on an album, then **Share…**. Under the card are links to Qobuz, TIDAL, Spotify, Apple Music, Amazon Music, Deezer and Bandcamp, and to Wikipedia, Pitchfork and AllMusic. Choose which appear, and your default service, under **☰ → Settings → Share Card**; holding a service button also makes it the default.
+Tap the share button on Now playing or on an album, then **Share…**. Under the card are links to Qobuz, TIDAL, Spotify, Apple Music, Amazon Music, Deezer and Bandcamp, and to Wikipedia, Pitchfork and AllMusic. Choose which appear, and your default service, under **☰ → Settings → Setup → Share Card**; holding a service button also makes it the default.
 
 </details>
 
@@ -214,11 +214,11 @@ Tap the share button on Now playing or on an album, then **Share…**. Under the
 
 👂 If you like this
 
-Under the share card, three artists like the one playing, each with their first album. One you own queues; any other opens in your default service.
+Under the share card, three artists to hear next, weighted by what you play: two you haven't heard, one you know with a record you don't own, each saying why.
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Open the share card; the row appears underneath once Deezer answers. Set the default service under **☰ → Settings → Share Card**.
+Open the share card; the row appears underneath once Deezer answers. Each names a record — a new act's best-known. One you own queues; any other opens your default service (**☰ → Settings → Setup → Share Card**). The artists you play are read once a day, and sharing the same album again gives a different three.
 
 </details>
 
@@ -262,11 +262,11 @@ Nothing to switch on.
 
 🎛️ UI Settings and themes
 
-Text size, grid layout and tile size for each device, and two themes: Graphite and Brass, or Brass light.
+Text sizes, grid layout and tile size for each device, and two themes: Graphite and Brass, or Brass light.
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-**☰ → Settings → UI Settings**: album and artist text, grid screen title (Normal to +50%), grid layout (Auto, 3 columns, 2 columns or List) and tile size (−50% to +50%). **☰ → Settings → Appearance**: pick a theme and tap **Apply**. Both are saved on that device only.
+**☰ → Settings → Setup → UI Settings**: the theme (pick one, then **Apply**), album and artist text, grid screen title and menu and Home text (Normal to +50%), grid layout (Auto, 3 columns, 2 columns or List) and tile size (−50% to +50%). Saved on that device only.
 
 </details>
 
@@ -290,7 +290,19 @@ Serve the app to other phones, tablets and computers on your Wi-Fi, behind an ei
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Off by default. Switch on **☰ → Settings → Network → Open on other devices**. It shows an address such as `http://192.168.0.42:3450` and a code; open the address on the other device and enter the code once. The dial is at the same address plus `/dial`. Turning the switch off and on issues a new code and signs every device out. Traffic is not encrypted, so use a network you trust.
+Off by default. Switch on **☰ → Settings → Setup → Network → Open on other devices**. It shows an address such as `http://192.168.0.42:3450` and a code; open the address on the other device and enter the code once. The dial is at the same address plus `/dial`. Turning the switch off and on issues a new code and signs every device out. Traffic is not encrypted, so use a network you trust.
+
+</details>
+
+⸻
+
+💾 Backup & restore
+
+Back up your settings, playlists, Listen later and API keys on the phone — the last ten are kept — share one to keep it elsewhere, and restore from either.
+
+<details><summary><b>ⓘ</b> How to set it up and use it</summary>
+
+Open **☰ → Settings → Backup & restore**, choose what to include, then **Back up now**. **Share** sends a backup to Files, Drive or any app; **Restore from a file…** brings one back. A restore replaces the parts switched on, keeps a **Before restore** copy first, then reloads. Never included: LAN access and its code, play history, the library, the Roon pairing, and each device's theme and text sizes. Backups live in the app's own storage, so uninstalling removes them — keep one elsewhere.
 
 </details>
 
@@ -302,7 +314,7 @@ Checks for a newer APK when you ask, downloads it, verifies its SHA-256 and hand
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-**☰ → Settings → System → Check for updates**, then **Update**. Android asks you to confirm the install.
+**☰ → Settings → Updates → Check for updates**, then **Update**. Android asks you to confirm the install.
 
 </details>
 
@@ -393,7 +405,7 @@ The app also answers `android.media.action.MEDIA_PLAY_FROM_SEARCH`.
 * **Import a playlist** — paste a playlist someone shared from Rouen and match it to your library
 * **Roon's own playlists** — listed and playable beside your own
 
-Their menu items are already in the app; until they arrive, their screens are empty.
+Dynamic Playlists is already in the side menu and **Import** is on the Playlists screen; until they arrive, the first is empty and the second says it isn't in this build yet.
 
 ---
 
@@ -407,7 +419,7 @@ Approval happens once per Core; until then, the app's notification says what it 
 
 ### Updating, and signing
 
-Use **Settings → System → Check for updates**, or download the newest APK and install it over the old one. Every release is signed with one key, and CI refuses to publish an APK signed with any other (pinned in `tools/release-key.sha256`). Builds 0.1.7 and earlier used throwaway keys: uninstall one of those once, then updates work.
+Use **☰ → Settings → Updates → Check for updates**, or download the newest APK and install it over the old one. Every release is signed with one key, and CI refuses to publish an APK signed with any other (pinned in `tools/release-key.sha256`). Builds 0.1.7 and earlier used throwaway keys: uninstall one of those once, then updates work.
 
 ```
 python3 tools/apk-cert.py dist/musicd-remote-lite-*.apk --expect-file tools/release-key.sha256
@@ -420,9 +432,10 @@ python3 tools/apk-cert.py dist/musicd-remote-lite-*.apk --expect-file tools/rele
 | Not in this build | Why |
 |---|---|
 | **Record labels** — Label of the week, the label explorer, logos, merges | Built from tags in your music files. The phone cannot see the files, and Roon's extension API exposes no paths. |
-| **Waveform** seek bar | Rouen decodes the audio itself. The plain seek bar is used instead. |
+| **Waveform** seek bar | Rouen decodes the audio itself. The level-meter seek bar is used instead. |
 | **Qobuz and TIDAL accounts** — browsing, favourites, catalogue search | Unofficial APIs those services' terms forbid. Roon still streams both through its own account. |
 | **Wall display** and screensaver | A phone serving a TV around the clock is a poor fit. Use Rouen for that. |
+| **HQPlayer control** | Left out of this build. Use Rouen for that. |
 | **Sample-rate and source badges** | Read from file tags, like labels. |
 | **Queue editing** — remove, reorder, clear | Not a Lite limit: Roon's extension API has no such command. Play from here works. |
 

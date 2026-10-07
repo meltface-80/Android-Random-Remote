@@ -49,6 +49,39 @@ class ListenLater(
 
         /** The identity every other part of the app keys an album on. */
         fun keyOf(title: String, artist: String): String = AlbumRecord(0, title, artist, null).key
+
+        /**
+         * A list from elsewhere — a restored backup — as this build would have
+         * written it. The key is worked out again from title and artist rather
+         * than taken from the file, so a list saved by a build that keyed albums
+         * differently still lands where today's lookups look; one row per
+         * album, the newest kept; known sources only; at most [MAX_ENTRIES].
+         */
+        fun normalize(doc: JSONObject?): JSONObject {
+            val arr = doc?.optJSONArray("albums")
+            val rows = ArrayList<Entry>()
+            val seen = HashSet<String>()
+            if (arr != null) {
+                val read = ArrayList<Entry>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val title = o.str("title").trim().take(300)
+                    if (title.isEmpty()) continue
+                    val artist = o.str("artist").trim().take(300)
+                    read += Entry(
+                        key = keyOf(title, artist),
+                        title = title,
+                        artist = artist,
+                        source = o.str("source").takeIf { it in SOURCES } ?: "album",
+                        addedAt = o.optLong("ts", 0L).coerceAtLeast(0L)
+                    )
+                }
+                for (e in read.sortedByDescending { it.addedAt }) if (seen.add(e.key)) rows += e
+            }
+            val out = JSONArray()
+            for (e in rows.take(MAX_ENTRIES)) out.put(e.toJson())
+            return JSONObject().put("albums", out)
+        }
     }
 
     data class Entry(

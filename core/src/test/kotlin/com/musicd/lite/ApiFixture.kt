@@ -25,7 +25,9 @@ import org.junit.Assert.assertEquals
  */
 class ApiFixture(
     /** Answers outbound requests a test wants answered; null refuses them. */
-    var outbound: ((okhttp3.Request) -> okhttp3.Response?)? = null
+    var outbound: ((okhttp3.Request) -> okhttp3.Response?)? = null,
+    /** Where backups are kept; null is a host with nowhere to keep them. */
+    private val backupDir: java.io.File? = null
 ) {
     val core = FakeCore()
     val store = MemoryStore()
@@ -57,7 +59,7 @@ class ApiFixture(
 
         app = MusicdLite(
             store = store, assets = assets, artDir = null, version = "test",
-            httpPort = 0, importSettleMs = 0, httpClient = client
+            httpPort = 0, importSettleMs = 0, httpClient = client, backupDir = backupDir
         ) { _, _, _ -> core }
         app.start()
         app.index.build(core.tree)
@@ -88,17 +90,24 @@ class ApiFixture(
     fun get(path: String): Pair<Int, String> = request("GET", path, null)
     fun post(path: String, body: String): Pair<Int, String> = request("POST", path, body)
 
-    fun request(method: String, path: String, body: String?): Pair<Int, String> {
+    fun request(
+        method: String,
+        path: String,
+        body: String?,
+        contentType: String = "application/json",
+        headers: MutableMap<String, String>? = null
+    ): Pair<Int, String> {
         val conn = URL(app.rootUrl + path).openConnection() as HttpURLConnection
         conn.requestMethod = method
         conn.connectTimeout = 5000
         conn.readTimeout = 40000
         if (body != null) {
             conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Content-Type", contentType)
             OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body) }
         }
         val code = conn.responseCode
+        headers?.let { h -> conn.headerFields.forEach { (k, v) -> if (k != null) h[k.lowercase()] = v.joinToString(",") } }
         val stream = if (code < 400) conn.inputStream else conn.errorStream
         val text = stream?.let { BufferedReader(InputStreamReader(it, Charsets.UTF_8)).readText() } ?: ""
         conn.disconnect()

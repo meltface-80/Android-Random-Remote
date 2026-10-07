@@ -74,7 +74,7 @@
 <body>
   <!-- Phone landscape blocker: hidden on portrait / tablet / desktop via CSS -->
   <div class="app">
-  <header class="topbar">
+      <header class="topbar">
     <div class="topbar-row">
       <button id="menu-toggle" class="icon-btn menu-toggle" aria-label="Menu" title="Menu">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -176,13 +176,14 @@
         <div id="select-menu" class="sel-menu hidden" role="menu">
           <div class="sel-menu-title" id="select-menu-title"></div>
           <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="play_now">Play now</button>
+          <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="play_next">Play next</button>
           <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="queue">Add to end of queue</button>
           <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="add">Add to playlist…</button>
           <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="later">Listen later</button>
           <button class="sel-menu-item" type="button" role="menuitem" data-sel-act="clear">Clear selection</button>
         </div>
       </div>
-      <!--  The right-hand end of the bar: reshuffle, grid/list, the wall's
+      <!--  The right-hand end of the bar: reshuffle, the wall's
            Sort, the search glass, in that order out from the edge. They used to be
            two independent `margin-left: auto` controls that were never
            shown together; the Sort control moving up out of its own row
@@ -200,26 +201,8 @@
             <path d="M3 21v-5h5"/>
           </svg>
         </button>
-        <!-- Grid ⇄ list for the album walls (Rouen v1.8.66). One control, one
-             stored choice: the walls are the same shelf seen from different
-             screens, and a per-screen setting would mean finding it again on
-             each of them. -->
-        <button id="topbar-view" class="icon-btn hidden" type="button"
-                aria-label="Show as list" title="Show as list" aria-pressed="false">
-          <svg id="topbar-view-grid" width="20" height="20" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-               aria-hidden="true">
-            <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
-            <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
-            <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-          </svg>
-          <svg id="topbar-view-list" width="20" height="20" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-               aria-hidden="true" class="hidden">
-            <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
-            <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
-          </svg>
-        </button>
+        <!-- Rouen's grid/list button went in v1.8.78: Settings → UI Settings →
+             Grid layout → List does the job for every grid screen. -->
         <!-- The library and artists walls render their Sort control here.
              It is one slot, not one per wall: only ever one wall is on
              screen, and two slots would leave a gap the width of the
@@ -414,7 +397,7 @@
        v1.8.59 and the whole shell sat under the transport pill (70) — so did
        the menu, whatever number it carried. At the root its 95 is compared
        with the pill directly. -->
-  <div id="menu-overlay" class="menu-overlay hidden" role="dialog" aria-modal="true" aria-label="Menu">
+    <div id="menu-overlay" class="menu-overlay hidden" role="dialog" aria-modal="true" aria-label="Menu">
     <div class="menu-backdrop" data-menu-close></div>
     <nav class="menu-drawer">
       <div class="menu-head">
@@ -427,36 +410,39 @@
         </button>
       </div>
       <div class="menu-list">
-        <button class="menu-item" type="button" data-action="home">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
-          <span>Home</span>
+        <!-- The side menu (v1.8.83, Mandarin v0.7.0): the screens Home does not
+             already lead to. Home, Random albums and Smart Picks went — Home's
+             rows are where they live, and every screen's ‹ goes Home. Import a
+             playlist is the Import button on the Playlists screen. Discover,
+             Wall display are Rouen's own. -->
+        <button class="menu-item" type="button" data-target="pitchfork-toggle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5h7a3 3 0 0 1 3 3v11a2.5 2.5 0 0 0-2.5-2.5H2z"/><path d="M22 5h-7a3 3 0 0 0-3 3v11a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>
+          <span>Pitchfork</span>
         </button>
-        <button class="menu-item" type="button" data-action="listen-later" id="menu-item-later">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-          <span>Listen later</span>
-        </button>
-        <button class="menu-item" type="button" data-action="shuffle">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
-          <span>Random albums</span>
-        </button>
-        <div class="menu-sep"></div>
         <!-- Labels need tags read off a mounted music folder, which a phone does
              not have: hidden rather than deleted, so lookups by id still work. -->
         <button class="menu-item hidden" type="button" data-target="labels-toggle" id="menu-item-labels">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
           <span>Labels</span>
         </button>
-        <button class="menu-item" type="button" data-target="pitchfork-toggle">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5h7a3 3 0 0 1 3 3v11a2.5 2.5 0 0 0-2.5-2.5H2z"/><path d="M22 5h-7a3 3 0 0 0-3 3v11a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>
-          <span>Pitchfork</span>
+        <button class="menu-item" type="button" data-action="listen-later" id="menu-item-later">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <span>Listen later</span>
+        </button>
+        <!-- Random albums and Smart Picks: their Home rows' headings open them,
+             so these show only while that row is switched off (app.js,
+             applyHomeLayout) — never a screen with no way in. -->
+        <button class="menu-item hidden" type="button" data-action="shuffle" id="menu-item-random">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
+          <span>Random albums</span>
+        </button>
+        <button class="menu-item hidden" type="button" data-action="smart-picks" id="menu-item-picks">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.5-4.5"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+          <span>Smart Picks</span>
         </button>
         <button class="menu-item hidden" type="button" data-action="discover" id="menu-item-discover">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>
           <span>Discover</span>
-        </button>
-        <button class="menu-item" type="button" data-action="smart-picks" id="menu-item-picks">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.5-4.5"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
-          <span>Smart Picks</span>
         </button>
         <button class="menu-item" type="button" data-action="smart-playlists">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.1 4.6 5 .6-3.7 3.4 1 4.9L12 14.1 7.6 16.5l1-4.9L4.9 8.2l5-.6z"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
@@ -466,9 +452,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="14" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="10" y2="18"/><circle cx="17.5" cy="16.5" r="2.5"/><path d="M20 16.5V8l-3 1"/></svg>
           <span>Playlists</span>
         </button>
-        <button class="menu-item" type="button" data-action="import-playlist">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-          <span>Import a playlist</span>
+        <!-- Rouen Lite: the wall display is not in this build. Its entry
+             stays, hidden, because the page looks it up by id; the server
+             answers the feature as off, so nothing ever shows it.
+             The wall display, in this tab (v1.8.66). Hidden unless it is
+             switched on in Settings: with it off, /display says only that. -->
+        <button class="menu-item hidden" type="button" data-action="wall-display" id="menu-item-display">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          <span>Wall display</span>
         </button>
         <div class="menu-sep"></div>
         <button class="menu-item" type="button" data-action="rescan-library">
@@ -628,6 +619,26 @@
             </svg>
           </button>
         </div>
+        <!-- About this album (v1.8.81, Mandarin v0.7.8): a sibling of the cover,
+             so from 720px up (a tablet, a laptop) it sits UNDER the cover in the
+             left-hand column while the title, the buttons and the tracks run
+             down the right. On a phone it follows the tracks, as before
+             (style.css puts it there with `order`). Not on Now playing. -->
+        <div class="modal-aside" id="modal-aside">
+          <div class="bio-section hidden" id="album-bio-section">
+            <h3 class="section-label">About this album</h3>
+            <div class="bio-meta" id="album-meta"></div>
+            <div class="bio-text" id="album-bio-text" data-clipped="true"></div>
+            <!-- Whose words those are, shown only when it is NOT the same place
+                 the link below goes — which is the Pitchfork case, where the
+                 text is Wikipedia's and the link is the review. -->
+            <div class="bio-text-source hidden" id="album-bio-text-source"></div>
+            <div class="bio-footer">
+              <button class="bio-toggle hidden" type="button" id="album-bio-toggle">Show more</button>
+              <a class="bio-source hidden" id="album-bio-source" target="_blank" rel="noopener noreferrer"></a>
+            </div>
+          </div>
+        </div>
         <div class="modal-info">
           <h2 id="modal-title">—</h2>
           <div id="modal-subtitle" class="modal-subtitle"></div>
@@ -766,20 +777,6 @@
             <ol id="modal-tracks" class="track-list"></ol>
           </div>
 
-          <div class="bio-section hidden" id="album-bio-section">
-            <h3 class="section-label">About this album</h3>
-            <div class="bio-meta" id="album-meta"></div>
-            <div class="bio-text" id="album-bio-text" data-clipped="true"></div>
-            <!-- Whose words those are, shown only when it is NOT the same place
-                 the link below goes — which is the Pitchfork case, where the
-                 text is Wikipedia's and the link is the review. -->
-            <div class="bio-text-source hidden" id="album-bio-text-source"></div>
-            <div class="bio-footer">
-              <button class="bio-toggle hidden" type="button" id="album-bio-toggle">Show more</button>
-              <a class="bio-source hidden" id="album-bio-source" target="_blank" rel="noopener noreferrer"></a>
-            </div>
-          </div>
-
           </div><!-- /#tab-album -->
 
           <div class="modal-tab-pane hidden" id="tab-queue">
@@ -814,7 +811,7 @@
     <div class="mt-info">
       <!-- Inside .mt-info, which is the region that opens Now playing: tapping
            the cover of the thing you are listening to should get you to it. -->
-      <img id="mt-art" class="mt-art" alt="" aria-hidden="true">
+      <img id="mt-art" class="mt-art" alt="" aria-hidden="true" draggable="false">
       <div class="mt-text">
         <!-- The zone it is playing in, in small brass capitals above the track. -->
         <div id="mt-kicker" class="mt-kicker"></div>
@@ -952,7 +949,13 @@
           </button>
         </div>
 
+        <!-- Settings, grouped like Mandarin's (v1.8.83, Mandarin v0.6.21): the
+             things you connect and play through at the top level, and the
+             app's own preferences under Setup, whose pages go Back to Setup. -->
         <nav class="settings-nav" aria-label="Settings categories">
+          <!-- Services (Qobuz and TIDAL sign-ins) and the Wall Display are not
+               in the lite build: no accounts, and no always-on screen. -->
+
           <button class="settings-nav-item" type="button" data-pane="playback">
             <span class="settings-nav-ico" aria-hidden="true">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -962,93 +965,22 @@
             </span>
           </button>
 
-          <!-- Not in the lite build. Record labels are read from file tags on a
-               mounted music directory and then resolved against five external
-               services; neither half is here, so every control in this pane
-               would be inert. -->
-          <button class="settings-nav-item hidden" type="button" data-pane="labels">
+
+          <button class="settings-nav-item" type="button" data-pane="setup">
             <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.59a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></svg>
             </span>
             <span class="settings-nav-txt">
-              <span class="settings-nav-title">Labels</span>
+              <span class="settings-nav-title">Setup</span>
             </span>
           </button>
 
-          <button class="settings-nav-item" type="button" data-pane="metadata">
+          <button class="settings-nav-item" type="button" data-pane="backup">
             <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><line x1="10" y1="13" x2="14" y2="13"/></svg>
             </span>
             <span class="settings-nav-txt">
-              <span class="settings-nav-title">Artwork &amp; metadata</span>
-            </span>
-          </button>
-
-          <button class="settings-nav-item" type="button" data-pane="homescreen">
-            <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="12" width="18" height="5" rx="1"/><path d="M3 20h11"/></svg>
-            </span>
-            <span class="settings-nav-txt">
-              <span class="settings-nav-title">Home Screen</span>
-            </span>
-          </button>
-
-          <button class="settings-nav-item" type="button" data-pane="discover">
-            <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>
-            </span>
-            <span class="settings-nav-txt">
-              <span class="settings-nav-title">Discover</span>
-            </span>
-          </button>
-
-          <button class="settings-nav-item" type="button" data-pane="smartpicks">
-            <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.5-4.5"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
-            </span>
-            <span class="settings-nav-txt">
-              <span class="settings-nav-title">Smart Picks</span>
-            </span>
-          </button>
-
-          <button class="settings-nav-item" type="button" data-pane="sharecard">
-            <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-            </span>
-            <span class="settings-nav-txt">
-              <span class="settings-nav-title">Share Card</span>
-            </span>
-          </button>
-
-          <!-- The wall display is still not in this build. Serving the page
-               to other devices IS now possible — see the Network pane below —
-               but a always-on wall display is a different feature: it keeps
-               the phone awake rendering for a TV. -->
-
-          <button class="settings-nav-item" type="button" data-pane="network">
-            <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14 0"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M8.5 16.43a6 6 0 0 1 7 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-            </span>
-            <span class="settings-nav-txt">
-              <span class="settings-nav-title">Network</span>
-            </span>
-          </button>
-
-          <button class="settings-nav-item" type="button" data-pane="appearance">
-            <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
-            </span>
-            <span class="settings-nav-txt">
-              <span class="settings-nav-title">Appearance</span>
-            </span>
-          </button>
-
-          <button class="settings-nav-item" type="button" data-pane="ui">
-            <span class="settings-nav-ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 15h7M14 19h5"/></svg>
-            </span>
-            <span class="settings-nav-txt">
-              <span class="settings-nav-title">UI Settings</span>
+              <span class="settings-nav-title">Backup &amp; restore</span>
             </span>
           </button>
 
@@ -1057,7 +989,7 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20v-6M6 20V10M18 20V4"/></svg>
             </span>
             <span class="settings-nav-txt">
-              <span class="settings-nav-title">System</span>
+              <span class="settings-nav-title">Updates</span>
             </span>
           </button>
         </nav>
@@ -1076,6 +1008,96 @@
       </div>
 
       <!-- Playback -->
+      <!-- Setup (v1.8.83): the app's own preferences, one page each. Every page
+           listed here names it as its parent (data-parent), so its Back
+           returns here rather than to the Settings list. -->
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="setup">
+        <div class="settings-pane-head">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <h2>Setup</h2>
+        </div>
+        <p class="settings-pane-desc">Smart Picks, the Home screen, the look, sharing, Discover, network access, API keys</p>
+        <nav class="settings-nav" aria-label="Setup pages">
+          <button class="settings-nav-item" type="button" data-pane="smartpicks">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.5-4.5"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">Smart Picks</span>
+            </span>
+          </button>
+
+          <!-- Not in the lite build. Record labels are read from file tags on a
+               mounted music directory and then resolved against five external
+               services; neither half is here, so every control in this pane
+               would be inert. -->
+          <button class="settings-nav-item hidden" type="button" data-pane="labels">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.59a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">Record labels</span>
+            </span>
+          </button>
+
+          <button class="settings-nav-item" type="button" data-pane="homescreen">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="12" width="18" height="5" rx="1"/><path d="M3 20h11"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">Home Screen</span>
+            </span>
+          </button>
+
+          <button class="settings-nav-item" type="button" data-pane="ui">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 15h7M14 19h5"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">UI Settings</span>
+            </span>
+          </button>
+
+          <button class="settings-nav-item" type="button" data-pane="sharecard">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">Share Card</span>
+            </span>
+          </button>
+
+          <button class="settings-nav-item" type="button" data-pane="discover">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">Discover</span>
+            </span>
+          </button>
+
+          <!-- Network: Lite's own, where Mandarin keeps "Away from home". -->
+          <button class="settings-nav-item" type="button" data-pane="network">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14 0"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M8.5 16.43a6 6 0 0 1 7 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">Network</span>
+            </span>
+          </button>
+          <button class="settings-nav-item" type="button" data-pane="metadata">
+            <span class="settings-nav-ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            </span>
+            <span class="settings-nav-txt">
+              <span class="settings-nav-title">API Keys</span>
+            </span>
+          </button>
+        </nav>
+      </div>
+
       <div class="settings-view settings-pane hidden" data-view="pane" data-pane="playback">
         <div class="settings-pane-head">
           <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
@@ -1121,12 +1143,12 @@
       </div>
 
       <!-- Labels -->
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="labels">
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="labels" data-parent="setup">
         <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to Setup">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
-          <h2>Labels</h2>
+          <h2>Record labels</h2>
         </div>
         <p class="settings-pane-desc">Label scan, ordering &amp; folders</p>
 
@@ -1200,12 +1222,12 @@
       </div>
 
       <!-- Artwork & metadata -->
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="metadata">
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="metadata" data-parent="setup">
         <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to Setup">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
-          <h2>Artwork &amp; metadata</h2>
+          <h2>API Keys</h2>
         </div>
         <p class="settings-pane-desc">Discogs &amp; FanArt.tv keys</p>
 
@@ -1240,11 +1262,10 @@
         </div>
       </div>
 
-      <!-- Streaming accounts -->
       <!-- Share Card — the links under the card, grouped in one place -->
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="sharecard">
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="sharecard" data-parent="setup">
         <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to Setup">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <h2>Share Card</h2>
@@ -1274,17 +1295,30 @@
           <div id="share-reviews-list" class="share-toggle-list"></div>
         </div>
       </div>
-      <!-- Appearance -->
+
       <!-- UI Settings (v1.8.77): text size, grid layout and tile size, per
-           device — a phone and a wall-mounted tablet want different answers. -->
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="ui">
+           device — a phone and a wall-mounted tablet want different answers.
+           The theme and the sample-rate switch moved here from Appearance in
+           v1.8.79 (where Mandarin keeps its look), and Appearance went. -->
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="ui" data-parent="setup">
         <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to Setup">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <h2>UI Settings</h2>
         </div>
-        <p class="settings-pane-desc">Text size, layout &amp; tile size</p>
+        <p class="settings-pane-desc">Theme, text size, layout &amp; tile size</p>
+
+        <div class="settings-block">
+          <span class="settings-label">Theme</span>
+          <!-- Rows are built by app.js from its THEMES table, so the list and
+               the palettes can never drift apart. -->
+          <div id="theme-list" class="theme-list" role="radiogroup" aria-label="Theme"></div>
+          <div class="theme-apply-row">
+            <span id="theme-apply-hint" class="theme-apply-hint"></span>
+            <button id="theme-apply" class="action-btn primary" type="button" disabled>Apply</button>
+          </div>
+        </div>
 
         <div class="settings-block">
           <div class="settings-row">
@@ -1322,7 +1356,24 @@
         </div>
         <div class="settings-block">
           <div class="settings-row">
-            <span class="settings-label">Grid layout <button class="settings-info-btn" data-info="How album, playlist and label grid screens are laid out. Auto fits as many columns as the screen suits (and follows Tile size). 3 or 2 columns fixes the count on every screen. List shows one row per album. The grid/list button at the top of a grid screen changes the same setting." aria-label="About Grid layout">ⓘ</button></span>
+            <span class="settings-label">Menu &amp; Home Screen text <button class="settings-info-btn" data-info="The size of every other piece of text in the app: the side menu, Home's row titles and greeting, Settings, sheets, buttons and lists. Album and artist names under tiles, and a grid screen's title, have their own settings above." aria-label="About Menu &amp; Home Screen text">ⓘ</button></span>
+            <div class="settings-select-wrap">
+              <select id="ui-chrome-select" class="settings-select" aria-label="Menu &amp; Home Screen text">
+                <option value="1">Normal</option>
+                <option value="1.1">+10%</option>
+                <option value="1.25">+25%</option>
+                <option value="1.5">+50%</option>
+              </select>
+              <svg class="settings-caret" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="settings-block">
+          <div class="settings-row">
+            <span class="settings-label">Grid layout <button class="settings-info-btn" data-info="How album, playlist and label grid screens are laid out. Auto fits as many columns as the screen suits (and follows Tile size). 3 or 2 columns fixes the count on every screen. List shows one row per album." aria-label="About Grid layout">ⓘ</button></span>
             <div class="settings-select-wrap">
               <select id="ui-layout-select" class="settings-select" aria-label="Grid layout">
                 <option value="auto">Auto</option>
@@ -1357,29 +1408,6 @@
             </div>
           </div>
         </div>
-        <p class="settings-note">Saved on this device only.</p>
-      </div>
-
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="appearance">
-        <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
-          </button>
-          <h2>Appearance</h2>
-        </div>
-        <p class="settings-pane-desc">Theme &amp; colours</p>
-
-        <div class="settings-block">
-          <span class="settings-label">Theme</span>
-          <!-- Rows are built by app.js from its THEMES table, so the list and
-               the palettes can never drift apart. -->
-          <div id="theme-list" class="theme-list" role="radiogroup" aria-label="Theme"></div>
-          <div class="theme-apply-row">
-            <span id="theme-apply-hint" class="theme-apply-hint"></span>
-            <button id="theme-apply" class="action-btn primary" type="button" disabled>Apply</button>
-          </div>
-        </div>
-
         <!-- Not in the lite build. The badge is bit depth and sample rate read
              from the files themselves during the library scan, falling back to
              a connected Qobuz or TIDAL account. There is no mounted music
@@ -1394,14 +1422,15 @@
             </label>
           </div>
         </div>
+        <p class="settings-note">Saved on this device only.</p>
       </div>
 
       <!-- Home Screen: which carousels appear, and in what order. The list is
            built by app.js from its HOME_ROWS table, so the rows you can
            reorder here and the rows that actually render cannot drift apart. -->
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="homescreen">
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="homescreen" data-parent="setup">
         <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to Setup">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <h2>Home Screen</h2>
@@ -1415,9 +1444,9 @@
       </div>
 
       <!-- Discover -->
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="discover">
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="discover" data-parent="setup">
         <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to Setup">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <h2>Discover</h2>
@@ -1452,8 +1481,8 @@
         </div>
       </div>
 
-      <!-- Smart Picks -->
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="network">
+      <!-- Network (Lite): serve the page to other devices, behind a code. -->
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="network" data-parent="setup">
         <div class="settings-pane-head">
           <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
@@ -1491,9 +1520,10 @@
         </div>
       </div>
 
-      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="smartpicks">
+      <!-- Smart Picks -->
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="smartpicks" data-parent="setup">
         <div class="settings-pane-head">
-          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to Setup">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <h2>Smart Picks</h2>
@@ -1539,13 +1569,42 @@
         </div>
       </div>
 
+      <!-- Backup & restore (v1.8.84, after Mandarin v0.6.14). The parts, the
+           list and the restore all come from /api/backups; lib/backup.js says
+           what each part holds and what is never in one. -->
+      <div class="settings-view settings-pane hidden" data-view="pane" data-pane="backup">
+        <div class="settings-pane-head">
+          <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <h2>Backup &amp; restore</h2>
+        </div>
+        <p class="settings-pane-desc">Kept on this phone — the last 10, each one can be shared</p>
+
+        <div class="settings-block">
+          <h3 class="settings-block-title">What to include <button class="settings-info-btn" data-info="Settings: every preference you have set in the app, including Home Screen, Smart Picks, Discover and Share Card. Playlists: your playlists. Listen later: the list. API keys: the Discogs token and the FanArt.tv key — keep a backup that holds them somewhere private. Never included: LAN access and its code, which zones have Random album radio on, play history, the library, the Roon pairing, and each device's own look (theme and UI Settings)." aria-label="About what a backup includes">ⓘ</button></h3>
+          <div id="backup-parts" class="share-toggle-list"></div>
+          <div class="settings-row backup-actions">
+            <button id="backup-now" class="settings-update-btn is-update-ready" type="button">Back up now</button>
+            <button id="backup-upload" class="settings-update-btn" type="button">Restore from a file…</button>
+            <input id="backup-file" type="file" accept=".json,application/json" class="hidden" aria-label="Backup file">
+          </div>
+          <p id="backup-status" class="settings-note backup-status" role="status" aria-live="polite"></p>
+        </div>
+
+        <div class="settings-block">
+          <h3 class="settings-block-title">Backups <button class="settings-info-btn" data-info="Restoring replaces what you chose above with what the backup holds, and the page reloads. A copy of how things were is kept first, as a “Before restore” backup (the last 5 of those are kept, apart from your own 10). Backups live in the app's own storage, so they go if the app is uninstalled: Share sends one to Files, Drive or anywhere else, and Restore from a file brings it back." aria-label="About restoring">ⓘ</button></h3>
+          <div id="backup-list" class="backup-list"></div>
+        </div>
+      </div>
+
       <!-- System -->
       <div class="settings-view settings-pane hidden" data-view="pane" data-pane="system">
         <div class="settings-pane-head">
           <button class="settings-back" type="button" data-settings-back aria-label="Back to settings">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
-          <h2>System</h2>
+          <h2>Updates</h2>
         </div>
         <p class="settings-pane-desc">Updates &amp; version</p>
 
@@ -1556,7 +1615,6 @@
           </div>
           <div id="settings-release-notes" class="settings-release-notes hidden"></div>
         </div>
-
         <div class="settings-block">
           <div class="settings-row">
             <span class="settings-label">Quick Settings tile</span>

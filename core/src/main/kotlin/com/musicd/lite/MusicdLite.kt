@@ -18,6 +18,8 @@ import com.musicd.lite.library.ListenLater
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
 import com.musicd.lite.library.UserPlaylists
+import com.musicd.lite.backup.BackupStore
+import com.musicd.lite.backup.Backups
 import com.musicd.lite.meta.Deezer
 import com.musicd.lite.meta.ImageCache
 import com.musicd.lite.meta.Metadata
@@ -85,6 +87,11 @@ class MusicdLite(
      * offering a button that leads nowhere.
      */
     private val updateInstaller: UpdateInstaller? = null,
+    /**
+     * Where Settings → Backup keeps its files. Null on a host with nowhere to
+     * keep them, and the backup routes then say so.
+     */
+    backupDir: File? = null,
     /**
      * Everything that leaves the device that is not Roon: MusicBrainz,
      * Wikipedia, Pitchfork, the art service and the update manifest.
@@ -184,6 +191,9 @@ class MusicdLite(
     /** New records by the acts you play — off until switched on. See Discover. */
     val discover = Discover(store, index, settings, deezer, { live.bump("discover") })
 
+    /** "If you like this" under the share card — see Similar. */
+    val similar = Similar(store, index, deezer)
+
     /**
      * The published manifest CI writes beside the APK. Read from the default
      * branch, which is where the download link in the README points too.
@@ -208,6 +218,17 @@ class MusicdLite(
 
     /** Playlists you make yourself. Kept here; Roon cannot store them. */
     val userPlaylists = UserPlaylists(store)
+
+    /** Settings → Backup: see backup/Backup.kt. */
+    val backups: Backups? = backupDir?.let { dir ->
+        Backups(store, BackupStore(dir), version, { parts ->
+            if ("settings" in parts || "keys" in parts) live.bump("settings")
+            if ("later" in parts) live.bump("later")
+            // Discover switched on by the restore builds today's list now,
+            // as the switch in Settings does, rather than at the next check.
+            if ("settings" in parts) discover.kick("restored")
+        })
+    }
 
     private val jobs: ScheduledExecutorService =
         Executors.newScheduledThreadPool(2) { r ->
@@ -395,6 +416,7 @@ class MusicdLite(
         if (!started.compareAndSet(true, false)) return
         jobs.shutdownNow()
         discover.close()
+        similar.close()
         server.stop()
         roon.stop()
     }
