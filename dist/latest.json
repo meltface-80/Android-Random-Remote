@@ -1,6 +1,6 @@
 {
-  "version": "0.6.0",
-  "url": "https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.6.0.apk",
-  "sha256": "e5f58803fdb3153451f0f3653ec6cf816382c4403ffe10700e11f26457247537",
-  "notes": "Built from 9fd80de48ceb2a2659b083dfd817c93002f927f4."
+  "version": "0.6.1",
+  "url": "https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.6.1.apk",
+  "sha256": "dc226752d9a7ef7d7864e40a29f6320c003c6ee08a8e0155640b5301e4326a5f",
+  "notes": "Built from 1ce98dc99a9a9e16af975d3177e826b8358c52c1."
 }

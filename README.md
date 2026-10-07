@@ -4,7 +4,7 @@
 
 </div>
 
-# Rouen Lite (for Android) - v0.6.0
+# Rouen Lite (for Android) - v0.6.1
 
 **📱 Download & install guide: [meltface-80.github.io/Rouen-Lite](https://meltface-80.github.io/Rouen-Lite/)**
 
@@ -12,7 +12,7 @@ Rouen Lite is [Rouen](https://github.com/meltface-80/Rouen) as a native Android 
 
 *Why Lite?* It leaves out the parts of Rouen that need your music files, a streaming account or an always-on screen — see [What's not in Lite](#whats-not-in-lite). Until v0.5.0 it was called MusicD Remote Lite.
 
-**Download: [musicd-remote-lite-0.6.0.apk](https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.6.0.apk)** — Android 8.0 or newer.
+**Download: [musicd-remote-lite-0.6.1.apk](https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.6.1.apk)** — Android 8.0 or newer.
 
 ---
 
