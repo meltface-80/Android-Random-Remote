@@ -18,6 +18,7 @@ import com.musicd.lite.library.ListenLater
 import com.musicd.lite.library.Normalize
 import com.musicd.lite.library.Search
 import com.musicd.lite.library.UserPlaylists
+import com.musicd.lite.library.RoonGenres
 import com.musicd.lite.backup.BackupStore
 import com.musicd.lite.backup.Backups
 import com.musicd.lite.meta.Deezer
@@ -178,7 +179,8 @@ class MusicdLite(
 
     /** Albums put aside to play another time — see ListenLater. */
     val listenLater = ListenLater(store, index) { live.bump("later") }
-    val view = LibraryView(index, store)
+    // Focus's genres are Roon's own lists: this build harvests none (Genres.kt).
+    val view = LibraryView(index, store, RoonGenres({ roon }, index))
     val albums = Albums(roon.tree, index, store)
     val metadata = Metadata(http, "MusicDRemoteLite/$version ( ${extension.website} )")
     val art = ImageCache(http, artDir)

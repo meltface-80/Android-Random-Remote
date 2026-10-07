@@ -219,7 +219,7 @@ class RemoteApi(
 
             "/api/random-albums" -> randomAlbums(request)
             "/api/library/albums" -> libraryAlbums(request)
-            "/api/library/facets" -> libraryFacets(request)
+            "/api/library/facets" -> libraryFacets()
             "/api/library/rescan", "/api/reindex" -> requirePost(post) { rescan() }
             "/api/library-stats" -> Json.obj(
                 JSONObject().put("albums", index.count).put("building", index.isBuilding)
@@ -1023,9 +1023,11 @@ class RemoteApi(
 
     private fun libraryAlbums(request: Request): Response {
         if (!index.isBuilt) return Json.error(503, "The library index is still building")
+        // Focus sends a facet once per value; every value counts.
         val q = view.sanitize(
             request.str("sort"), request.str("dir"), request.str("prefix"),
-            request.str("played"), request.str("genre"), request.str("decade"), request.str("seed")
+            request.str("played"), null, null, request.str("seed"),
+            LibraryView.FACET_IDS.associateWith { request.queryAll[it] ?: emptyList() }
         )
         val all = view.select(q)
         val offset = (request.int("offset") ?: 0).coerceIn(0, all.size)
@@ -1046,45 +1048,9 @@ class RemoteApi(
      * worse than either being wrong alone, because the number promises something
      * the list then fails to deliver.
      */
-    private fun libraryFacets(request: Request): Response {
+    private fun libraryFacets(): Response {
         if (!index.isBuilt) return Json.error(503, "The library index is still building")
-
-        val decadeChips = view.decades().map { (decade, n) ->
-            JSONObject().put("id", "${decade}s").put("label", "${decade}s").put("count", n)
-        }
-
-        val genreCounts = HashMap<String, Int>()
-        for ((_, genres) in store.albumGenresAll()) {
-            for (g in genres) genreCounts[g] = (genreCounts[g] ?: 0) + 1
-        }
-        val genreChips = genreCounts.entries.sortedByDescending { it.value }.take(40)
-            .map { JSONObject().put("id", it.key).put("label", it.key).put("count", it.value) }
-
-        val everPlayed = view.playedTitlesSince(0)
-        // view.playKey's rule rather than a second copy of it. The two folds
-        // agree today; keeping them as one is what stops the count and the
-        // list from drifting apart later, which is what the note above is
-        // about.
-        val played = index.albums.count { view.playKey(it) in everPlayed }
-
-        val playedChips = listOf(
-            JSONObject().put("id", "never").put("label", "Never played").put("count", index.count - played),
-            JSONObject().put("id", "played").put("label", "Played").put("count", played)
-        )
-
-        val facets = JSONArray()
-            .put(JSONObject().put("id", "decade").put("label", "Decade").put("values", Json.arrayOf(decadeChips)))
-            .put(JSONObject().put("id", "played").put("label", "Listening").put("values", Json.arrayOf(playedChips)))
-        if (genreChips.isNotEmpty()) {
-            facets.put(JSONObject().put("id", "genre").put("label", "Genre").put("values", Json.arrayOf(genreChips)))
-        }
-
-        return Json.obj(
-            JSONObject()
-                .put("facets", facets)
-                .put("total", index.count)
-                .put("sorts", Json.strings(LibraryView.SORTS))
-        )
+        return Json.obj(view.facets())
     }
 
     // ---------------------------------------------------------------- album

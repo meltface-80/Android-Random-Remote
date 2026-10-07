@@ -4167,6 +4167,30 @@ body.show-quality .album-quality { display: block; }
 .lib-ctl-text {
   min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* The Library wall's own row, Focus and Sort, back in 0.6.1 as Rouen has it:
+   a row under the top bar's (the .sub-bar rules near the end of the file make
+   it Rouen's brass pills). The Artists wall still puts its Sort in
+   #topbar-sort. */
+.library-controls {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 0 12px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--panel-hairline);
+}
+.library-controls .lib-ctl-sort { margin-left: auto; }
+.library-controls.hidden { display: none; }
+/* The chevron reads as "there is a screen behind this", matching
+   .home-section-link's treatment. */
+.lib-ctl-chevron { font-size: calc(19px * var(--ui-chrome, 1)); line-height: 1; color: var(--text-faint); }
+.lib-ctl-focus.is-active,
+.lib-ctl-focus.is-active .lib-ctl-chevron { color: var(--accent-text); }
+/* How many filters are on. A count, not the filter names: the sheet is where
+   the detail lives. */
+.lib-ctl-badge {
+  flex: 0 0 auto;
+  min-width: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: var(--on-accent);
+  font-size: calc(11px * var(--ui-chrome, 1)); font-weight: 700; line-height: 18px; text-align: center;
+}
 /* A label, not a button: it says which way the current sort runs. The control
    that CHANGES it is the sort sheet, which the whole row opens. */
 .lib-ctl-arrow { flex: 0 0 auto; font-size: calc(15px * var(--ui-chrome, 1)); line-height: 1; color: var(--accent-text); }

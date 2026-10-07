@@ -4,7 +4,7 @@
 
 </div>
 
-# Rouen Lite (for Android) - v0.6.0
+# Rouen Lite (for Android) - v0.6.1
 
 **📱 Download & install guide: [meltface-80.github.io/Rouen-Lite](https://meltface-80.github.io/Rouen-Lite/)**
 
@@ -12,7 +12,7 @@ Rouen Lite is [Rouen](https://github.com/meltface-80/Rouen) as a native Android 
 
 *Why Lite?* It leaves out the parts of Rouen that need your music files, a streaming account or an always-on screen — see [What's not in Lite](#whats-not-in-lite). Until v0.5.0 it was called MusicD Remote Lite.
 
-**Download: [musicd-remote-lite-0.6.0.apk](https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.6.0.apk)** — Android 8.0 or newer.
+**Download: [musicd-remote-lite-0.6.1.apk](https://github.com/meltface-80/Rouen-Lite/raw/main/dist/musicd-remote-lite-0.6.1.apk)** — Android 8.0 or newer.
 
 ---
 
@@ -58,11 +58,11 @@ Tap **Random albums** on Home (with its row switched off, it is in the side menu
 
 📚 Library
 
-Every album in a grid or a list, sorted by album, artist, release date, recently added, most played, last played or random, in either direction.
+Every album, sorted seven ways in either direction, and narrowed with Focus: genre, decade, first letter, when added, played or never played.
 
 <details><summary><b>ⓘ</b> How to set it up and use it</summary>
 
-Tap **Library** on Home. **Sort** is at the top, with an arrow to reverse it; **Random** adds a reshuffle button. Grid or list is chosen under **☰ → Settings → Setup → UI Settings → Grid layout**. Recently added, Most played and Last played use what this app has seen since it was installed — Roon publishes no import date or play counts.
+Tap **Library** on Home. **Focus** and **Sort** sit in a row under the top bar. In **Focus**, tap a filter once to include it, again to exclude it, once more to clear it, then **Show albums**; the badge counts the filters on. **Sort** has an arrow to reverse it; with **Random**, the top bar's shuffle button reshuffles. Grid or list: **☰ → Settings → Setup → UI Settings → Grid layout**. Genres and their counts are Roon's own. Decades come from MusicBrainz as albums are opened or played; when added, most played and last played use what this app has seen since it was installed — Roon publishes none of them.
 
 </details>
 

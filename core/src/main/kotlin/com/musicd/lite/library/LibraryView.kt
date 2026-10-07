@@ -3,6 +3,8 @@ package com.musicd.lite.library
 import com.musicd.lite.str
 import com.musicd.lite.store.Store
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.ThreadLocalRandom
 
 /**
@@ -14,7 +16,12 @@ import java.util.concurrent.ThreadLocalRandom
  * first-seen dates), which means no Roon round-trips on a user action and
  * composable facets the browse tree cannot express.
  */
-class LibraryView(private val index: AlbumIndex, private val store: Store) {
+class LibraryView(
+    private val index: AlbumIndex,
+    private val store: Store,
+    /** Where Focus's genres come from — Roon's own lists in the app, see Genres.kt. */
+    private val genres: GenreSource = StoredGenres(store)
+) {
 
     companion object {
         /** Where the day's album is kept — see albumOfTheDay. */
@@ -25,6 +32,74 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
         // only holds what this app watched happen, and it starts empty, so a
         // recency window was answering a question the app cannot know.
         val PLAYED_FILTERS = listOf("any", "never", "played")
+
+        /**
+         * The Focus facets this build can serve, in Rouen's ids. Rouen's
+         * Source, Record label, Format, Sample rate, Bit depth and Channels
+         * come from music files and streaming accounts a phone does not have,
+         * so they are not offered — and a saved selection naming one narrows
+         * nothing rather than emptying the wall for a reason nobody can see.
+         */
+        val FACET_IDS = listOf("genre", "decade", "letter", "added")
+        private val FACET_LABELS = mapOf(
+            "genre" to "Genre", "decade" to "Decade", "letter" to "Starts with", "added" to "Added in the last"
+        )
+
+        /** "Added in the last" windows, shortest first: value, label, days. */
+        val ADDED_WINDOWS = listOf(
+            Triple("7", "7 days", 7), Triple("30", "30 days", 30),
+            Triple("90", "3 months", 90), Triple("365", "A year", 365)
+        )
+
+        /** Chips offered per facet; the commonest, as Rouen's sheet shows them. */
+        const val FACET_CHIP_MAX = 40
+        private const val FACET_VALUES_MAX = 50
+
+        /**
+         * One selected value, kept only in a form this facet could match. The
+         * "!" of an exclusion survives; "1990s", the old page's decade, becomes
+         * "1990".
+         */
+        fun facetValue(id: String, raw: String): String? {
+            val t = raw.trim()
+            val not = t.startsWith("!")
+            val v = (if (not) t.substring(1) else t).trim()
+            if (v.isEmpty()) return null
+            val ok = when (id) {
+                "genre" -> v.take(100)
+                "decade" -> v.removeSuffix("s").toIntOrNull()?.takeIf { it in 1000..2990 && it % 10 == 0 }?.toString()
+                "letter" -> v.uppercase(Locale.ROOT).takeIf { it.length == 1 && (it[0] in 'A'..'Z' || it == "#") }
+                "added" -> v.takeIf { w -> ADDED_WINDOWS.any { it.first == w } }
+                else -> null
+            } ?: return null
+            return if (not) "!$ok" else ok
+        }
+
+        /**
+         * Does an album with [values] pass one facet's [selected]? Rouen's rule:
+         * any included value will do, an excluded one always wins, and
+         * excludes alone ("everything except Pop") need no include.
+         */
+        fun facetMatch(selected: List<String>, values: Collection<String>): Boolean {
+            if (selected.isEmpty()) return true
+            var wanted = false
+            var sawInclude = false
+            for (sel in selected) {
+                if (sel.startsWith("!")) {
+                    if (sel.substring(1) in values) return false
+                } else {
+                    sawInclude = true
+                    if (sel in values) wanted = true
+                }
+            }
+            return if (sawInclude) wanted else true
+        }
+
+        /** "The Wall" under W, as the A-Z wall files it; anything not a letter under #. */
+        fun letterOf(al: AlbumRecord): String? {
+            val c = al.sortTitle.firstOrNull()?.uppercaseChar() ?: return null
+            return if (c in 'A'..'Z') c.toString() else "#"
+        }
 
         const val PREFIX_MAX = 40
         private const val DAY_MS = 24L * 60 * 60 * 1000
@@ -125,8 +200,13 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
         val desc: Boolean = false,
         val prefix: String = "",
         val played: String = "any",
-        val genre: String? = null,
-        val decade: Int? = null,
+        /**
+         * The Focus selection, by facet id: each a list of values, a value
+         * starting "!" EXCLUDED rather than included (Rouen's tap-again-to-
+         * invert). Only facets this build serves ([FACET_IDS]), only values it
+         * could ever match — anything else narrows nothing.
+         */
+        val facets: Map<String, List<String>> = emptyMap(),
         val seed: Int = 0
     )
 
@@ -137,16 +217,139 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
         played: String?,
         genre: String?,
         decade: String?,
-        seed: String?
-    ) = Query(
-        sort = if (sort in SORTS) sort!! else "album",
-        desc = dir == "desc",
-        prefix = prefix(prefixRaw),
-        played = if (played in PLAYED_FILTERS) played!! else "any",
-        genre = genre?.trim()?.takeIf { it.isNotEmpty() },
-        decade = decade?.trim()?.removeSuffix("s")?.toIntOrNull(),
-        seed = seed?.toIntOrNull() ?: 0
-    )
+        seed: String?,
+        facets: Map<String, List<String>> = emptyMap()
+    ): Query {
+        val f = LinkedHashMap<String, List<String>>()
+        for (id in FACET_IDS) {
+            val raw = ArrayList<String>()
+            facets[id]?.let { raw += it }
+            // The single-value parameters the page sent before Focus came back.
+            if (id == "genre" && genre != null) raw += genre
+            if (id == "decade" && decade != null) raw += decade
+            val clean = raw.mapNotNull { facetValue(id, it) }.distinct().take(FACET_VALUES_MAX)
+            if (clean.isNotEmpty()) f[id] = clean
+        }
+        return Query(
+            sort = if (sort in SORTS) sort!! else "album",
+            desc = dir == "desc",
+            prefix = prefix(prefixRaw),
+            played = if (played in PLAYED_FILTERS) played!! else "any",
+            facets = f,
+            seed = seed?.toIntOrNull() ?: 0
+        )
+    }
+
+    /**
+     * How one facet reads an album, with its side table read once up front.
+     * Genres are compared folded, as everywhere else in this app.
+     */
+    private fun facetValuesFn(id: String, now: Long = System.currentTimeMillis()): ((AlbumRecord) -> Collection<String>)? =
+        when (id) {
+            "decade" -> {
+                val years = store.albumYears()
+                val fn: (AlbumRecord) -> Collection<String> = { al ->
+                    years[al.key]?.let { listOf(((it / 10) * 10).toString()) } ?: emptyList()
+                }
+                fn
+            }
+            "letter" -> { al -> letterOf(al)?.let { listOf(it) } ?: emptyList() }
+            "added" -> {
+                val dates = firstSeenDates()
+                val fn: (AlbumRecord) -> Collection<String> = { al ->
+                    val ts = dates[al.key]
+                    if (ts == null) emptyList()
+                    else ADDED_WINDOWS.filter { now - ts <= it.third * DAY_MS }.map { it.first }
+                }
+                fn
+            }
+            else -> null
+        }
+
+    /**
+     * Genre, read through the selection: each genre named (included or
+     * excluded) once, as the set of albums filed under it. An album's "values"
+     * are the named genres it is in — exactly what facetMatch compares. A genre
+     * whose albums can't be read right now holds nothing: an include of it
+     * matches nothing, an exclude of it removes nothing.
+     */
+    private fun genreValuesFn(selected: List<String>): (AlbumRecord) -> Collection<String> {
+        val names = selected.map { it.removePrefix("!") }.distinct()
+        val sets = names.associateWith { genres.members(it) ?: emptySet() }
+        return { al -> names.filter { sets.getValue(it).contains(al.key) } }
+    }
+
+    /**
+     * The Focus sheet's vocabulary: which values each facet actually has, with
+     * counts, so the sheet never offers one that would return nothing — in the
+     * shape Rouen's page reads ({value, label, count}, total_values), and with
+     * how many albums each facet KNOWS about, because none of it comes from
+     * Roon and the sheet says so rather than leaving the numbers not to add up.
+     */
+    fun facets(now: Long = System.currentTimeMillis()): JSONObject {
+        val albums = index.albums
+        val out = JSONArray()
+        val coverage = JSONObject()
+        for (id in FACET_IDS) {
+            if (id == "genre") {
+                // Roon's own count for each, commonest first.
+                val gs = (genres.genres() ?: emptyList()).filter { it.second > 0 }
+                    .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
+                genres.known()?.let { coverage.put("genre", it) }
+                if (gs.isEmpty()) continue
+                val values = JSONArray()
+                for ((name, n) in gs.take(FACET_CHIP_MAX)) {
+                    values.put(JSONObject().put("value", name).put("label", name).put("count", n))
+                }
+                out.put(
+                    JSONObject().put("id", id).put("label", FACET_LABELS.getValue(id))
+                        .put("total_values", gs.size).put("values", values)
+                )
+                continue
+            }
+            val counts = LinkedHashMap<String, Int>()
+            var known = 0
+            val valuesOf = facetValuesFn(id, now) ?: continue
+            for (al in albums) {
+                val vs = valuesOf(al)
+                if (vs.isNotEmpty()) known++
+                for (v in vs) counts[v] = (counts[v] ?: 0) + 1
+            }
+            val ordered: List<String> = when (id) {
+                "decade" -> counts.keys.sortedByDescending { it.toInt() }
+                "added" -> ADDED_WINDOWS.map { it.first }.filter { it in counts }
+                else -> counts.keys.sortedWith(compareByDescending<String> { counts[it] ?: 0 }.thenBy { it })
+            }
+            // Added: every album with a date this app worked out, whether or not
+            // it falls in a window — the sheet's "N of M albums" is about that.
+            if (id == "added") {
+                val dates = firstSeenDates()
+                known = albums.count { it.key in dates }
+            }
+            if (id != "letter") coverage.put(id, known)
+            if (ordered.isEmpty()) continue
+            val values = JSONArray()
+            for (v in ordered.take(FACET_CHIP_MAX)) {
+                val label = when (id) {
+                    "decade" -> "${v}s"
+                    "added" -> ADDED_WINDOWS.first { it.first == v }.second
+                    else -> v
+                }
+                values.put(JSONObject().put("value", v).put("label", label).put("count", counts[v]))
+            }
+            out.put(
+                JSONObject().put("id", id).put("label", FACET_LABELS.getValue(id))
+                    .put("total_values", ordered.size).put("values", values)
+            )
+        }
+        return JSONObject()
+            .put("total", albums.size)
+            .put("facets", out)
+            .put("coverage", coverage)
+            .put("hasPlays", playedTitlesSince(0).isNotEmpty())
+            .put("played", JSONArray(PLAYED_FILTERS))
+            .put("sorts", JSONArray(SORTS))
+    }
 
     fun select(q: Query): List<AlbumRecord> {
         var list: List<AlbumRecord> = index.albums
@@ -159,18 +362,11 @@ class LibraryView(private val index: AlbumIndex, private val store: Store) {
         // store.albumYear(key) and store.albumGenres(key) inside the filter,
         // which is a SQLite round trip per album — fifty thousand of them to
         // draw one page of a large library.
-        if (q.decade != null) {
-            val from = q.decade
-            val years = store.albumYears()
-            list = list.filter { val y = years[it.key]; y != null && y >= from && y < from + 10 }
-        }
-
-        if (q.genre != null) {
-            val want = Normalize.text(q.genre)
-            val genres = store.albumGenresAll()
-            list = list.filter { al ->
-                genres[al.key]?.any { Normalize.text(it) == want } == true
-            }
+        // Each facet reads its side table ONCE, then matches every album
+        // against the selection with Rouen's rule (facetMatch).
+        for ((id, selected) in q.facets) {
+            val valuesOf = (if (id == "genre") genreValuesFn(selected) else facetValuesFn(id)) ?: continue
+            list = list.filter { facetMatch(selected, valuesOf(it)) }
         }
 
         if (q.played != "any") {
