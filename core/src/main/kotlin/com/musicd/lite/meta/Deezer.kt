@@ -311,31 +311,7 @@ class Deezer(
     fun albums(artistId: String): JSONObject? =
         get("/artist/" + ShareLinks.encodeUriComponent(artistId) + "/albums?limit=50")
 
-    data class Act(val name: String, val id: String, val album: String?, val year: Int?, val cover: String?)
-
-    private val similarCache = TtlCache<String, List<Act>>(24L * 60 * 60 * 1000, 300)
-
-    /**
-     * Three acts like [artist], each with their earliest full album — "If you
-     * like this". Cached a day per artist: it is a suggestion, and the share
-     * card should not cost five calls every time it opens.
-     */
-    fun similarActs(artist: String): List<Act> {
-        val key = normalize(artist)
-        if (key.isEmpty()) return emptyList()
-        similarCache.peek(key)?.let { return it }
-        var acts: List<Act> = emptyList()
-        val candidates = readArtists(searchArtist(artist), artist)
-        for (cand in candidates.take(CANDIDATES)) {
-            val rel = readRelated(related(cand.id))
-            if (rel.isEmpty()) continue
-            acts = rel.map { r ->
-                val first = readFirstAlbum(albums(r.id))
-                Act(r.name, r.id, first?.title, first?.year, first?.cover ?: r.picture)
-            }
-            break
-        }
-        similarCache.put(key, acts)
-        return acts
-    }
+    /** An act's top tracks — which album most of them are from is its best-known record. */
+    fun top(artistId: String): JSONObject? =
+        get("/artist/" + ShareLinks.encodeUriComponent(artistId) + "/top?limit=10")
 }

@@ -142,6 +142,29 @@ class AndroidStore(context: Context) : Store {
         )
     }
 
+    override fun settingKeys(): Set<String> =
+        db.rawQuery("SELECT key FROM settings", null).use {
+            val out = HashSet<String>()
+            while (it.moveToNext()) out += it.getString(0)
+            out
+        }
+
+    override fun replaceSettings(puts: Map<String, String>, removes: Set<String>) {
+        val d = db
+        d.beginTransaction()
+        try {
+            for (k in removes) if (k !in puts) d.delete("settings", "key = ?", arrayOf(k))
+            for ((k, v) in puts) {
+                // insertOrThrow-style: a failed row must fail the transaction,
+                // where insertWithOnConflict would return -1 and carry on.
+                d.execSQL("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", arrayOf(k, v))
+            }
+            d.setTransactionSuccessful()
+        } finally {
+            d.endTransaction()
+        }
+    }
+
     // ---------------------------------------------------------------- plays
 
     override fun recordPlay(

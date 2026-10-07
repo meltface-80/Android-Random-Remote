@@ -563,6 +563,51 @@ class RemoteApiTest {
     }
 
     @Test
+    fun playNextOnSeveralAlbumsPutsEveryOneNextInTheOrderPicked() {
+        // Rouen v1.8.80. The first album took Play next and the rest were
+        // QUEUED — at the far end of the queue, after everything already
+        // waiting. Every one is Add Next now, and since each lands in front of
+        // the one sent before it, they go last first (sendOrderFor) so the
+        // queue reads in the order picked.
+        val (code, text) = post(
+            "/api/play-multi",
+            """{"zone_or_output_id":"z1","kind":"play_next","items":[
+                 {"offset":0,"title":"Blue Lines","subtitle":"Massive Attack"},
+                 {"offset":1,"title":"Dummy","subtitle":"Portishead"},
+                 {"offset":3,"title":"Third","subtitle":"Portishead"}]}"""
+        )
+        assertEquals(text, 200, code)
+        assertEquals(3, JSONObject(text).getInt("queued"))
+        assertEquals(
+            listOf("play_next:playmenu:3@z1", "play_next:playmenu:1@z1", "play_next:playmenu:0@z1"),
+            core.invoked
+        )
+    }
+
+    @Test
+    fun playNextGoesOnPastOneAlbumThatCannotBeFound() {
+        val (code, text) = post(
+            "/api/play-multi",
+            """{"zone_or_output_id":"z1","kind":"play_next","items":[
+                 {"offset":1,"title":"An Album That Left","subtitle":"Nobody"},
+                 {"offset":0,"title":"Blue Lines","subtitle":"Massive Attack"}]}"""
+        )
+        assertEquals(text, 200, code)
+        val body = JSONObject(text)
+        assertEquals(1, body.getInt("queued"))
+        assertEquals(1, body.getInt("failed"))
+        assertEquals(listOf("play_next:playmenu:0@z1"), core.invoked)
+
+        // Every one refused is an error, not a 200 with nothing done — the
+        // first one's: an album that left is a stale offset, 409 as everywhere.
+        assertEquals(409, post(
+            "/api/play-multi",
+            """{"zone_or_output_id":"z1","kind":"play_next","items":[
+                 {"offset":1,"title":"An Album That Left","subtitle":"Nobody"}]}"""
+        ).first)
+    }
+
+    @Test
     fun multiSelectStillAcceptsBareOffsets() {
         val (code, text) = post(
             "/api/play-multi",

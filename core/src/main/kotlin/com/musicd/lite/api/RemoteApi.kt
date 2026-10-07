@@ -12,6 +12,9 @@ import com.musicd.lite.http.LanAccess
 import com.musicd.lite.http.Network
 import com.musicd.lite.http.Request
 import com.musicd.lite.http.Response
+import com.musicd.lite.backup.BackupException
+import com.musicd.lite.backup.BackupFormat
+import com.musicd.lite.backup.BackupStore
 import com.musicd.lite.library.AlbumRecord
 import com.musicd.lite.library.Artists
 import com.musicd.lite.library.Albums
@@ -54,6 +57,10 @@ class RemoteApi(
 
     private companion object {
         const val TAG = "Api"
+
+        /** What Settings → Backup's writes are sent as — see backupsRoute. */
+        val JSON_TYPES = setOf("application/json")
+        val UPLOAD_TYPES = setOf("application/octet-stream", "application/json")
         const val RANDOM_DEFAULT = 30
         const val HISTORY_DAYS = 30
         const val HISTORY_MAX_TILES = 60
@@ -184,6 +191,9 @@ class RemoteApi(
 
         // Image is the highest-volume route; keep it first.
         if (path.startsWith("/api/image/")) return image(request, path.removePrefix("/api/image/"))
+
+        // Settings → Backup: ids in the path, so not one of the fixed routes.
+        if (path == "/api/backups" || path.startsWith("/api/backups/")) return backupsRoute(request, path)
 
         return when (path) {
             "/api/status" -> status()
@@ -332,6 +342,116 @@ class RemoteApi(
 
     private inline fun requirePost(isPost: Boolean, body: () -> Response): Response =
         if (isPost) body() else Json.error(405, "POST required")
+
+    // ------------------------------------------------------------- backups
+
+    /**
+     * Settings → Backup (Rouen v1.8.84): make, list, download, bring in from a
+     * file, restore and delete. The work is backup/Backup.kt's.
+     *
+     * Every write demands the page's own content type. Any website the phone's
+     * browser opens can POST to 127.0.0.1, but only as a "simple" request —
+     * text/plain or a form — because anything else makes the browser ask this
+     * server's leave first, and it never gives it. So requiring JSON (or the
+     * upload's octet-stream) stops a stranger's page from replacing what is
+     * here before a byte of it is read. DELETE is never a simple request.
+     * This narrows what the gate lets through; it is not a way round it.
+     */
+    private fun backupsRoute(request: Request, path: String): Response {
+        val backups = app.backups
+            ?: return Json.error(501, "Backups aren't available on this host — it has nowhere to keep them.")
+        val method = request.method
+        val rest = path.removePrefix("/api/backups").trim('/')
+        fun listed(): JSONObject = JSONObject()
+            .put("boot", backups.boot)
+            .put("parts", JSONArray(BackupFormat.PARTS))
+            .put("keep", JSONObject().put("manual", BackupStore.KEEP_MANUAL).put("before", BackupStore.KEEP_BEFORE))
+            .put("backups", JSONArray(backups.files.list().map { it.toJson() }))
+        return when {
+            rest.isEmpty() && method == "GET" -> Json.obj(listed())
+
+            rest.isEmpty() && method == "POST" -> requireType(request, JSON_TYPES) {
+                val parts = BackupFormat.partsFrom(Json.body(request).optJSONArray("parts"))
+                if (parts.isEmpty()) return Json.error(400, "Choose at least one thing to back up.")
+                val id = try {
+                    backups.make(parts)
+                } catch (e: Exception) {
+                    Log.w(TAG, "could not make a backup: ${e.message}", e)
+                    return Json.error(500, "Couldn't make the backup: ${e.message}")
+                }
+                Log.i(TAG, "backup made: $id (${parts.joinToString()})")
+                Json.obj(listed().put("ok", true).put("id", id))
+            }
+
+            // A backup file from elsewhere, kept beside the others so it can be
+            // restored (and downloaded again) like one made here.
+            rest == "upload" && method == "POST" -> requireType(request, UPLOAD_TYPES) {
+                val id = try {
+                    backups.upload(request.bodyText)
+                } catch (e: BackupException) {
+                    return Json.error(400, e.message ?: "That file is not a Rouen Lite backup.")
+                } catch (e: Exception) {
+                    return Json.error(500, "Couldn't keep that backup: ${e.message}")
+                }
+                Log.i(TAG, "stored an uploaded backup as $id")
+                Json.obj(listed().put("ok", true).put("id", id))
+            }
+
+            rest.endsWith("/download") && method == "GET" -> {
+                val id = rest.removeSuffix("/download")
+                val text = try {
+                    backups.files.read(id).first
+                } catch (e: BackupException) {
+                    return Json.error(404, e.message ?: "No such backup.")
+                }
+                Response(
+                    200, "application/json; charset=utf-8", text.toByteArray(Charsets.UTF_8),
+                    mapOf(
+                        "Content-Disposition" to "attachment; filename=\"$id.json\"",
+                        "Cache-Control" to "no-store"
+                    )
+                )
+            }
+
+            rest.endsWith("/restore") && method == "POST" -> requireType(request, JSON_TYPES) {
+                val id = rest.removeSuffix("/restore")
+                val parts = BackupFormat.partsFrom(Json.body(request).optJSONArray("parts"))
+                val done = try {
+                    backups.restore(id, parts)
+                } catch (e: BackupException) {
+                    return Json.error(404, e.message ?: "No such backup.")
+                } catch (e: IllegalArgumentException) {
+                    return Json.error(400, e.message ?: "Nothing chosen that this backup holds.")
+                } catch (e: IllegalStateException) {
+                    Log.w(TAG, "restore of $id failed: ${e.message}", e)
+                    return Json.error(500, e.message ?: "Restore failed.")
+                }
+                Log.i(TAG, "restored ${done.parts.joinToString()} from $id (kept ${done.before})")
+                // Nothing restarts: every reader goes to the store, so the page
+                // reloads and finds what was restored.
+                Json.obj(
+                    JSONObject().put("ok", true).put("restored", JSONArray(done.parts))
+                        .put("before", done.before).put("restarting", false).put("reload", true)
+                )
+            }
+
+            rest.isNotEmpty() && !rest.contains('/') && method == "DELETE" ->
+                if (backups.files.remove(rest)) Json.obj(listed().put("ok", true))
+                else Json.error(404, "No such backup.")
+
+            else -> Json.error(404, "No such endpoint: ${request.method} $path")
+        }
+    }
+
+    /**
+     * The request's content type, without parameters, must be one of [types] —
+     * see backupsRoute for why. 415 otherwise, before the body is looked at.
+     */
+    private inline fun requireType(request: Request, types: Set<String>, body: () -> Response): Response {
+        val type = request.headers["content-type"]?.substringBefore(';')?.trim()?.lowercase() ?: ""
+        return if (type in types) body()
+        else Json.error(415, "This needs the page's own request — sent as ${types.joinToString(" or ")}.")
+    }
 
     // -------------------------------------------------------------- status
 
@@ -1264,6 +1384,33 @@ class RemoteApi(
         )
 
         try {
+            // Play next (Rouen v1.8.80): EVERY album is Add Next. Queueing the
+            // rest behind the first put them at the far END of the queue, after
+            // everything already waiting. Each Add Next lands in front of the
+            // one before it, so they go last album first — sendOrderFor, the one
+            // place that order is decided — and one at a time, for the reasons
+            // below. One refusal does not abandon the rest.
+            if (kind == "play_next") {
+                var failed = 0
+                var firstError: Throwable? = null
+                for ((offset, expect) in QueueHistory.sendOrderFor(kind, list)) {
+                    runCatching { app.albums.open(offset, zone, "play_next", filter, expect) }
+                        .exceptionOrNull()?.let { e ->
+                            failed++
+                            if (firstError == null) firstError = e
+                        }
+                }
+                // Nothing went in: that is an error, the first one's.
+                firstError?.let { if (failed == list.size) throw it }
+                return Json.ok(
+                    JSONObject()
+                        .put("queued", list.size - failed)
+                        .put("failed", failed)
+                        .put("total", list.size)
+                        .put("first_error", firstError?.let { it.message ?: it.toString() } ?: JSONObject.NULL)
+                )
+            }
+
             app.albums.open(list[0].first, zone, kind, filter, list[0].second)
 
             // Strictly one at a time, and NOT because it is simpler.
@@ -1980,18 +2127,19 @@ class RemoteApi(
     }
 
     /**
-     * "If you like this" — three acts like the one on the card, each with
-     * their earliest album (Rouen v1.8.34). Up to five Deezer calls, cached a
-     * day per artist. Never an error: a suggestion row is not worth one.
+     * "If you like this" — three acts worth hearing next, weighted by what you
+     * play (Rouen v1.8.82): see Similar. Each row is a place to go — a queue
+     * for a record in the library, a link per enabled service otherwise.
+     * Never an error: a suggestion row is not worth one.
      */
     private fun similar(request: Request): Response {
         val artist = request.str("artist")?.trim().orEmpty()
         if (artist.isEmpty()) return Json.error(400, "artist query parameter required")
         val acts = try {
             // The FIRST credited act: a four-act credit searched whole finds nobody.
-            app.deezer.similarActs(ShareLinks.primaryArtist(artist))
+            app.similar.suggest(ShareLinks.primaryArtist(artist))
         } catch (e: Exception) {
-            Log.d(TAG, "similar: ${e.message}")
+            Log.w(TAG, "similar: ${e.message}", e)
             emptyList()
         }
         return Json.obj(
@@ -2004,6 +2152,8 @@ class RemoteApi(
                             .put("album", a.album ?: JSONObject.NULL)
                             .put("year", a.year ?: JSONObject.NULL)
                             .put("cover", a.cover ?: JSONObject.NULL)
+                            .put("reason", a.reason)
+                            .put("known", a.known ?: JSONObject.NULL)
                             .also { placeOf(it, a.album, a.name, request) }
                     }
                 )
