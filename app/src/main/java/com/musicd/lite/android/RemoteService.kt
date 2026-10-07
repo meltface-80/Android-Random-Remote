@@ -115,6 +115,10 @@ class RemoteService : Service() {
                 store = backing,
                 assets = AndroidAssets(this),
                 artDir = File(cacheDir, "art"),
+                // Settings → Backup. Files, not cache: Android may clear a
+                // cache on its own, and a backup that quietly vanished is worse
+                // than none. Removed with the app, as the pane says.
+                backupDir = File(filesDir, "backups"),
                 version = BuildConfig.VERSION_NAME,
                 multicastLock = WifiMulticastLock(),
                 // The Android half of an update. :core notices the new version

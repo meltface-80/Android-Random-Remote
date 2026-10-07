@@ -100,11 +100,15 @@ class ShareBridge(private val activity: Activity) {
             }
           }
 
+          // Any one file: the share card's PNG, or a backup's JSON from
+          // Settings → Backup, whose Download comes here because a WebView has
+          // no downloads. The title heads the share sheet.
           function shareFiles(data) {
             var file = data && data.files && data.files[0];
             if (!file) return Promise.reject(new Error("Nothing to share"));
             return toBase64(file).then(function (b64) {
-              bridge.shareImage(b64, file.name || "card.png", file.type || "image/png");
+              bridge.shareFile(b64, file.name || "card.png", file.type || "image/png",
+                               String((data && data.title) || ""));
             });
           }
           if (typeof navigator.share !== "function") {
@@ -161,8 +165,13 @@ class ShareBridge(private val activity: Activity) {
         false
     }
 
+    /**
+     * One file to the share sheet. The page names it and says what it is; the
+     * name is made safe ([safeName]) and the file lives in the share cache,
+     * which holds only the file being shared right now.
+     */
     @JavascriptInterface
-    fun shareImage(base64: String, fileName: String, mime: String) {
+    fun shareFile(base64: String, fileName: String, mime: String, title: String) {
         val bytes = decode(base64) ?: return
         activity.runOnUiThread {
             try {
@@ -174,7 +183,7 @@ class ShareBridge(private val activity: Activity) {
                     putExtra(Intent.EXTRA_STREAM, uri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                activity.startActivity(Intent.createChooser(send, "Share card"))
+                activity.startActivity(Intent.createChooser(send, title.take(80).ifBlank { "Share card" }))
             } catch (e: Exception) {
                 Log.w(TAG, "share failed", e)
             }
