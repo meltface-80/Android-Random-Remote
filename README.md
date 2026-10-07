@@ -405,7 +405,7 @@ The app also answers `android.media.action.MEDIA_PLAY_FROM_SEARCH`.
 * **Import a playlist** — paste a playlist someone shared from Rouen and match it to your library
 * **Roon's own playlists** — listed and playable beside your own
 
-Their menu items are already in the app; until they arrive, their screens are empty.
+Dynamic Playlists is already in the side menu and **Import** is on the Playlists screen; until they arrive, the first is empty and the second says it isn't in this build yet.
 
 ---
 
